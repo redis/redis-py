@@ -28,6 +28,7 @@ from redis.keyspace_notifications import (
 )
 
 
+@pytest.mark.fixed_client
 class TestEventType:
     """Tests for EventType constants."""
 
@@ -40,6 +41,7 @@ class TestEventType:
         assert EventType.LPUSH == "lpush"
 
 
+@pytest.mark.fixed_client
 class TestPatternDetection:
     """Tests for pattern detection function."""
 
@@ -77,6 +79,7 @@ class TestPatternDetection:
         assert _is_pattern(b"user:123") is False
 
 
+@pytest.mark.fixed_client
 class TestKeyspaceChannelClass:
     """Tests for KeyspaceChannel class."""
 
@@ -114,6 +117,7 @@ class TestKeyspaceChannelClass:
         assert channel1 != channel3
 
 
+@pytest.mark.fixed_client
 class TestKeyeventChannelClass:
     """Tests for KeyeventChannel class."""
 
@@ -178,6 +182,7 @@ class TestKeyeventChannelClass:
         assert channel1 != channel3
 
 
+@pytest.mark.fixed_client
 class TestChannelDetection:
     """Tests for channel type detection using get_channel_type()."""
 
@@ -208,6 +213,7 @@ class TestChannelDetection:
         assert get_channel_type(b"regular_channel") is None
 
 
+@pytest.mark.fixed_client
 class TestKeyNotification:
     """Tests for KeyNotification class."""
 
@@ -360,6 +366,7 @@ class TestKeyNotification:
         assert isinstance(notification.event_type, str)
 
 
+@pytest.mark.fixed_client
 class TestClusterKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for ClusterKeyspaceNotifications.
@@ -829,7 +836,9 @@ class TestClusterKeyspaceNotifications:
         r.delete("test:key2")
 
         # Wait for handlers to be called
-        time.sleep(1.0)
+        deadline = time.monotonic() + 5.0
+        while len(received) < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         thread.stop()
         thread.join(timeout=1.0)  # Wait for thread to actually stop
@@ -859,7 +868,7 @@ class TestClusterKeyspaceNotifications:
         notifications.close()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestStandaloneClientKeyspaceNotificationsMocked:
     """
     Mock-based unit tests for KeyspaceNotifications (standalone Redis).
@@ -1117,6 +1126,7 @@ class TestStandaloneClientKeyspaceNotificationsMocked:
         notifications.close()
 
 
+@pytest.mark.fixed_client
 class TestParseLengthPrefixedSubkeys:
     """Tests for _parse_length_prefixed_subkeys helper."""
 
@@ -1157,6 +1167,7 @@ class TestParseLengthPrefixedSubkeys:
         ]
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceChannelClass:
     """Tests for SubkeyspaceChannel class."""
 
@@ -1206,6 +1217,7 @@ class TestSubkeyspaceChannelClass:
         assert str(channel) == "__subkeyspace@5__:myhash"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyeventChannelClass:
     """Tests for SubkeyeventChannel class."""
 
@@ -1253,6 +1265,7 @@ class TestSubkeyeventChannelClass:
         assert repr(channel) == "SubkeyeventChannel('hset', db=1)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceitemChannelClass:
     """Tests for SubkeyspaceitemChannel class."""
 
@@ -1295,6 +1308,7 @@ class TestSubkeyspaceitemChannelClass:
         assert repr(channel) == "SubkeyspaceitemChannel('myhash', 'myfield', db=2)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyspaceeventChannelClass:
     """Tests for SubkeyspaceeventChannel class."""
 
@@ -1337,6 +1351,7 @@ class TestSubkeyspaceeventChannelClass:
         assert repr(channel) == "SubkeyspaceeventChannel('hset', 'myhash', db=1)"
 
 
+@pytest.mark.fixed_client
 class TestSubkeyChannelDetection:
     """Tests for get_channel_type() with subkey channel types."""
 
@@ -1373,6 +1388,7 @@ class TestSubkeyChannelDetection:
         assert get_channel_type("__keyevent@0__:set") == ChannelType.KEYEVENT
 
 
+@pytest.mark.fixed_client
 class TestSubkeyNotificationParsing:
     """Tests for KeyNotification parsing of subkey channels."""
 
@@ -1627,12 +1643,13 @@ class TestSubkeyNotifications:
             else [notifications._pubsub]
         )
         for pubsub in pubsubs:
-            while True:
-                msg = pubsub.get_message(timeout=0.01)
-                if msg is None:
-                    break
-                if msg["type"] not in ("subscribe", "psubscribe"):
-                    break
+            # One ack per subscribed channel or pattern. Reading exactly that
+            # many, each with a generous timeout, cannot stop early on a slow
+            # runner and leave an ack for the test to read.
+            for _ in range(len(pubsub.channels) + len(pubsub.patterns)):
+                msg = pubsub.get_message(timeout=2.0)
+                assert msg is not None, "subscribe ack not received"
+                assert msg["type"] in ("subscribe", "psubscribe"), msg
 
     def test_create_hash_field_subkeyspace_notification(
         self, r_with_subkey_notifications
@@ -1828,12 +1845,9 @@ class TestSubkeyNotifications:
         notifications.subscribe_subkeyspaceitem("test:hash8", "watched_field")
         self._drain_subscribe_messages(notifications)
 
-        # Modify a different field — should NOT trigger a notification
+        # Modify a different field, then the watched one. Notifications arrive
+        # in order, so if the first write had notified, it would be read first.
         r.hset("test:hash8", "other_field", "value")
-        msg = notifications.get_message(timeout=1.0)
-        assert msg is None
-
-        # Modify the watched field — should trigger a notification
         r.hset("test:hash8", "watched_field", "updated")
         msg = notifications.get_message(timeout=2.0)
         assert msg is not None
@@ -1903,10 +1917,13 @@ class TestSubkeyNotifications:
             assert msg.key == "test:hash10"
             assert msg.event_type == "hset"
 
-        # A non-matching field should NOT produce a notification
+        # A non-matching field should NOT produce a notification. Write it
+        # before a matching one: if it notified, it would be read first.
         r.hset("test:hash10", "other", "value")
-        msg = notifications.get_message(timeout=1.0)
-        assert msg is None
+        r.hset("test:hash10", "field4", "value4")
+        msg = notifications.get_message(timeout=2.0)
+        assert msg is not None
+        assert msg.subkeys == ["field4"]
 
         notifications.close()
         r.delete("test:hash10")

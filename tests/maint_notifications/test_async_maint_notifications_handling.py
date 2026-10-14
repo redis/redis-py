@@ -142,6 +142,7 @@ def _assert_connection_in_default_state(connection, *, expected_host=DEFAULT_HOS
     assert connection.socket_connect_timeout == DEFAULT_SOCKET_CONNECT_TIMEOUT
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_applies_start_and_end_notifications():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -172,6 +173,7 @@ async def test_async_connection_handler_applies_start_and_end_notifications():
     assert relaxed_timeout_metric.await_args_list[1].kwargs["relaxed"] is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_skips_timeout_changes_when_moving():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -196,6 +198,7 @@ async def test_async_connection_handler_skips_timeout_changes_when_moving():
     relaxed_timeout_metric.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_handles_failover_start_and_end():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -220,6 +223,7 @@ async def test_async_connection_handler_handles_failover_start_and_end():
     assert relaxed_timeout_metric.await_count == 2
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "start_notification,end_notification",
@@ -257,6 +261,7 @@ async def test_async_connection_handler_ignores_relaxed_timeout_when_disabled(
     relaxed_timeout_metric.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_logs_non_moving_notifications():
     config = MaintNotificationsConfig(enabled=True)
@@ -276,6 +281,7 @@ async def test_async_pool_handler_logs_non_moving_notifications():
     log_error.assert_called_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_parser_routes_maintenance_push_notifications_to_connection_handler():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -313,6 +319,7 @@ async def test_async_parser_routes_maintenance_push_notifications_to_connection_
         assert connection.socket_timeout == DEFAULT_SOCKET_TIMEOUT
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_parser_routes_smigrated_to_cluster_handler_only():
     """
@@ -359,6 +366,7 @@ async def test_async_parser_routes_smigrated_to_cluster_handler_only():
     ]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_parser_routes_moving_push_notification_to_pool_handler():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -387,6 +395,7 @@ async def test_async_parser_routes_moving_push_notification_to_pool_handler():
     assert pool.connection_kwargs["host"] == MOVED_HOST
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_parser_routes_moving_push_without_target():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -424,6 +433,7 @@ async def test_async_parser_routes_moving_push_without_target():
     )
 
 
+@pytest.mark.fixed_client
 def test_async_connection_installs_maintenance_parser_handlers():
     config = MaintNotificationsConfig(enabled=True)
     pool = ConnectionPool(
@@ -456,6 +466,7 @@ def test_async_connection_installs_maintenance_parser_handlers():
     assert connection._maint_notifications_connection_handler.config is config
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_update_config_wires_existing_connections():
     disabled_config = MaintNotificationsConfig(enabled=False)
@@ -489,6 +500,7 @@ async def test_async_pool_update_config_wires_existing_connections():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_update_oss_handler_wires_existing_connections():
     """update_maint_notifications_config wires an OSS cluster handler onto every
@@ -559,6 +571,7 @@ async def test_async_pool_update_oss_handler_wires_existing_connections():
     assert new_connection._parser.oss_cluster_maint_push_handler_func is not None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_update_config_on_oss_pool_updates_oss_handler():
     """A config-only update on a pool already in OSS cluster mode must update
@@ -620,6 +633,7 @@ def _make_async_oss_handler():
     return AsyncOSSMaintNotificationsHandler(cluster_client, config), cluster_client
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handle_smigrated_parses_ipv4_addresses():
     handler, cluster_client = _make_async_oss_handler()
@@ -638,6 +652,7 @@ async def test_async_handle_smigrated_parses_ipv4_addresses():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handle_smigrated_parses_ipv6_addresses():
     handler, cluster_client = _make_async_oss_handler()
@@ -658,6 +673,7 @@ async def test_async_handle_smigrated_parses_ipv6_addresses():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handshake_sends_maint_notifications_command():
     config = MaintNotificationsConfig(
@@ -687,6 +703,7 @@ async def test_async_handshake_sends_maint_notifications_command():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handshake_auto_suppresses_response_error():
     config = MaintNotificationsConfig(enabled="auto")
@@ -704,6 +721,7 @@ async def test_async_handshake_auto_suppresses_response_error():
     connection.send_command.assert_awaited_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handshake_enabled_raises_response_error():
     config = MaintNotificationsConfig(enabled=True)
@@ -720,6 +738,7 @@ async def test_async_handshake_enabled_raises_response_error():
         await connection.activate_maint_notifications_handling_if_enabled()
 
 
+@pytest.mark.fixed_client
 def test_async_pool_auto_enables_maint_notifications_for_default_resp3():
     pool = ConnectionPool(host=DEFAULT_HOST, port=DEFAULT_PORT)
 
@@ -733,6 +752,7 @@ def test_async_pool_auto_enables_maint_notifications_for_default_resp3():
     )
 
 
+@pytest.mark.fixed_client
 def test_async_pool_does_not_auto_enable_maint_notifications_without_valid_host():
     pool = ConnectionPool(host=None, port=DEFAULT_PORT, protocol=3)
 
@@ -742,6 +762,7 @@ def test_async_pool_does_not_auto_enable_maint_notifications_without_valid_host(
     assert "maint_notifications_pool_handler" not in pool.connection_kwargs
 
 
+@pytest.mark.fixed_client
 def test_async_pool_rejects_enabled_maint_notifications_without_valid_host():
     config = MaintNotificationsConfig(enabled=True)
 
@@ -757,6 +778,7 @@ def test_async_pool_rejects_enabled_maint_notifications_without_valid_host():
         )
 
 
+@pytest.mark.fixed_client
 def test_async_custom_connection_does_not_auto_enable_maint_notifications():
     pool = ConnectionPool(
         connection_class=UnsupportedAsyncConnection,
@@ -770,6 +792,7 @@ def test_async_custom_connection_does_not_auto_enable_maint_notifications():
     assert "maint_notifications_pool_handler" not in pool.connection_kwargs
 
 
+@pytest.mark.fixed_client
 def test_async_custom_connection_rejects_enabled_maint_notifications_config():
     config = MaintNotificationsConfig(enabled=True)
 
@@ -788,6 +811,7 @@ def test_async_custom_connection_rejects_enabled_maint_notifications_config():
         )
 
 
+@pytest.mark.fixed_client
 def test_async_unix_socket_pool_does_not_auto_enable_maint_notifications():
     pool = ConnectionPool(
         connection_class=UnixDomainSocketConnection,
@@ -802,6 +826,7 @@ def test_async_unix_socket_pool_does_not_auto_enable_maint_notifications():
     assert "orig_host_address" not in pool.connection_kwargs
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_unix_socket_pool_auto_maint_notifications_noop():
     config = MaintNotificationsConfig(enabled="auto")
@@ -819,6 +844,7 @@ async def test_async_unix_socket_pool_auto_maint_notifications_noop():
     assert "maint_notifications_pool_handler" not in pool.connection_kwargs
 
 
+@pytest.mark.fixed_client
 def test_async_unix_socket_pool_rejects_enabled_maint_notifications():
     config = MaintNotificationsConfig(enabled=True)
 
@@ -834,6 +860,7 @@ def test_async_unix_socket_pool_rejects_enabled_maint_notifications():
         )
 
 
+@pytest.mark.fixed_client
 def test_async_redis_unix_socket_rejects_enabled_maint_notifications():
     config = MaintNotificationsConfig(enabled=True)
 
@@ -848,6 +875,7 @@ def test_async_redis_unix_socket_rejects_enabled_maint_notifications():
         )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
 async def test_async_pool_applies_and_cleans_up_moving_notification(pool_class):
@@ -920,6 +948,7 @@ async def test_async_pool_applies_and_cleans_up_moving_notification(pool_class):
     assert pool.connection_kwargs["maintenance_notification_hash"] is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
 async def test_async_pool_moving_with_disabled_relaxed_timeout_preserves_timeouts(
@@ -960,6 +989,7 @@ async def test_async_pool_moving_with_disabled_relaxed_timeout_preserves_timeout
     assert connection.timeout_updates == [-1]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
 async def test_async_new_connections_inherit_moving_settings_until_cleanup(pool_class):
@@ -1006,6 +1036,7 @@ async def test_async_new_connections_inherit_moving_settings_until_cleanup(pool_
     assert restored_connection.orig_host_address == DEFAULT_HOST
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_migrated_after_moving_does_not_clear_moving_state():
     config = MaintNotificationsConfig(
@@ -1056,6 +1087,7 @@ async def test_async_migrated_after_moving_does_not_clear_moving_state():
     relaxed_timeout_metric.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_overlapping_moving_cleanup_only_reverts_latest_notification():
     config = MaintNotificationsConfig(
@@ -1119,6 +1151,7 @@ async def test_async_overlapping_moving_cleanup_only_reverts_latest_notification
     _assert_connection_in_default_state(connection)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_moving_without_target_marks_for_reconnect_on_delayed_run():
     config = MaintNotificationsConfig(
@@ -1164,6 +1197,7 @@ async def test_async_moving_without_target_marks_for_reconnect_on_delayed_run():
     assert free.disconnect_calls == 1
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_moving_notifications_only_update_matching_address_connections():
     config = MaintNotificationsConfig(
@@ -1289,6 +1323,7 @@ async def test_async_moving_notifications_only_update_matching_address_connectio
         )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_moving_migrating_migrated_failed_over_state_transitions():
     config = MaintNotificationsConfig(
@@ -1382,6 +1417,7 @@ async def test_async_moving_migrating_migrated_failed_over_state_transitions():
     _assert_connection_in_default_state(connection)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_concurrent_moving_notification_handling_is_deduplicated():
     config = MaintNotificationsConfig(
@@ -1428,6 +1464,7 @@ async def test_async_concurrent_moving_notification_handling_is_deduplicated():
     handoff_metric.assert_awaited_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_deduplicates_moving_notifications():
     config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
@@ -1464,6 +1501,7 @@ async def test_async_pool_handler_deduplicates_moving_notifications():
     handoff_metric.assert_awaited_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_schedules_delayed_reconnect_for_unknown_target():
     config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
@@ -1503,6 +1541,7 @@ async def test_async_pool_handler_schedules_delayed_reconnect_for_unknown_target
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_blocking_pool_locks_get_only_during_maintenance():
     pool = BlockingConnectionPool(
@@ -1540,6 +1579,7 @@ async def test_blocking_pool_locks_get_only_during_maintenance():
     assert pool._lock.__aenter__.call_count == 3
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_apply_moving_notification_toggles_set_in_maintenance():
     pool = BlockingConnectionPool(
@@ -1572,6 +1612,7 @@ async def test_apply_moving_notification_toggles_set_in_maintenance():
     assert observed == [True, False]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_cancel_scheduled_tasks_cancels_pending_and_awaits():
     config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
@@ -1592,6 +1633,7 @@ async def test_cancel_scheduled_tasks_cancels_pending_and_awaits():
     assert handler._scheduled_tasks == set()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_cancel_scheduled_tasks_noop_when_empty():
     config = MaintNotificationsConfig(enabled=True, proactive_reconnect=True)
@@ -1600,6 +1642,7 @@ async def test_cancel_scheduled_tasks_noop_when_empty():
     assert handler._scheduled_tasks == set()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_pool_aclose_cancels_handler_scheduled_tasks():
     pool = ConnectionPool(
@@ -1626,6 +1669,7 @@ async def test_pool_aclose_cancels_handler_scheduled_tasks():
     callback.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_pool_aclose_completes_pending_handoff_event():
     """
@@ -1666,6 +1710,7 @@ async def test_pool_aclose_completes_pending_handoff_event():
     assert handler._pending_handoffs == set()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
     pool = ConnectionPool(
@@ -1690,6 +1735,7 @@ async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
         await handler.cancel_scheduled_tasks()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_ensure_connection_applies_pending_push_when_enabled():
     pool = ConnectionPool(
@@ -1710,6 +1756,7 @@ async def test_async_pool_ensure_connection_applies_pending_push_when_enabled():
     connection.disconnect.assert_not_awaited()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_ensure_connection_reconnects_when_pending_pushes_are_stale():
     """A drain that finds the socket closed makes the pool reconnect silently."""
@@ -1789,6 +1836,7 @@ def _scripted_connection(script):
     return connection, parser, moving_handler, maintenance_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pending_pushes_on_alive_connection_are_applied_in_order():
     migrating = NodeMigratingNotification(id=1, ttl=5)
@@ -1809,6 +1857,7 @@ async def test_async_pending_pushes_on_alive_connection_are_applied_in_order():
     assert parser.maintenance_push_handler_func is maintenance_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pending_pushes_on_closed_connection_are_discarded():
     """A closed socket means the maintenance is over: nothing is applied."""
@@ -1830,6 +1879,7 @@ async def test_async_pending_pushes_on_closed_connection_are_discarded():
     assert parser.maintenance_push_handler_func is maintenance_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stale_reply",
@@ -1850,6 +1900,7 @@ async def test_async_stale_reply_on_idle_connection_is_a_connection_error(stale_
     assert parser.node_moving_push_handler_func is moving_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_partial_push_frame_is_a_bounded_connection_error():
     """A frame only partly received must not block the checkout."""
@@ -1868,6 +1919,7 @@ async def test_async_partial_push_frame_is_a_bounded_connection_error():
     assert parser.node_moving_push_handler_func is moving_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_drain_deadline_spans_all_pending_pushes():
     """The deadline is for the whole drain, not renewed for every frame."""
@@ -1889,6 +1941,7 @@ async def test_async_drain_deadline_spans_all_pending_pushes():
     assert parser.node_moving_push_handler_func is moving_handler
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pending_pushes_without_handler_are_not_deferred():
     """An OSS cluster connection has no pool handler; its slot stays unset."""
@@ -1900,6 +1953,7 @@ async def test_async_pending_pushes_without_handler_are_not_deferred():
     assert parser.node_moving_push_handler_func is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enabled, raises", [(True, False), (False, True)])
 async def test_async_pool_ensure_connection_handles_pending_push_after_reconnect(
@@ -1926,6 +1980,7 @@ async def test_async_pool_ensure_connection_handles_pending_push_after_reconnect
     connection.disconnect.assert_awaited_once()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_read_response_reschedules_active_socket_timeout():
     connection = Connection(socket_timeout=0.01)
@@ -1942,6 +1997,7 @@ async def test_read_response_reschedules_active_socket_timeout():
     assert connection._active_read_timeout is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_read_response_reschedules_active_socket_timeout_to_blocking():
     connection = Connection(socket_timeout=0.01)
@@ -1958,6 +2014,7 @@ async def test_read_response_reschedules_active_socket_timeout_to_blocking():
     assert connection._active_read_timeout is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_read_response_does_not_reschedule_explicit_timeout():
     connection = Connection(socket_timeout=0.2)
@@ -1973,6 +2030,7 @@ async def test_read_response_does_not_reschedule_explicit_timeout():
     assert await connection.read_response(timeout=0.01) is None
 
 
+@pytest.mark.fixed_client
 def test_async_redis_maint_notifications_config_forwarded_to_internal_pool():
     config = MaintNotificationsConfig(enabled=True)
     client = redis.Redis(protocol=3, maint_notifications_config=config)
@@ -1983,6 +2041,7 @@ def test_async_redis_maint_notifications_config_forwarded_to_internal_pool():
     assert client.connection_pool._maint_notifications_pool_handler.config is config
 
 
+@pytest.mark.fixed_client
 def test_async_redis_maint_notifications_config_requires_resp3():
     config = MaintNotificationsConfig(enabled=True)
 
@@ -1993,6 +2052,7 @@ def test_async_redis_maint_notifications_config_requires_resp3():
         redis.Redis(protocol=2, maint_notifications_config=config)
 
 
+@pytest.mark.fixed_client
 def test_async_redis_maint_notifications_config_ignored_with_explicit_pool():
     pool = MagicMock()
     pool.connection_kwargs = {"protocol": 2, "legacy_responses": True}
@@ -2032,6 +2092,7 @@ def _mock_single_connection(should_reconnect):
     return connection
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_single_connection_client_reconnects_marked_connection():
     connection = _mock_single_connection(should_reconnect=True)
@@ -2051,6 +2112,7 @@ async def test_single_connection_client_reconnects_marked_connection():
     await client.aclose(close_connection_pool=False)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_single_connection_client_does_not_reconnect_unmarked_connection():
     connection = _mock_single_connection(should_reconnect=False)
@@ -2090,6 +2152,7 @@ def _config_with_listener(listener, **kwargs):
     return MaintNotificationsConfig(event_dispatcher=dispatcher, **kwargs)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_dispatches_maintenance_event_pair():
     listener = _RecordingListener()
@@ -2128,6 +2191,7 @@ async def test_async_connection_handler_dispatches_maintenance_event_pair():
     assert completed.notification is migrated
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_completion_without_start_dispatches_nothing():
     """The start may have been routed to another connection of the cluster."""
@@ -2151,6 +2215,7 @@ async def test_async_connection_handler_completion_without_start_dispatches_noth
     assert listener.events == []
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_connection_handler_dispatches_nothing_when_relaxation_disabled():
     listener = _RecordingListener()
@@ -2174,6 +2239,7 @@ async def test_async_connection_handler_dispatches_nothing_when_relaxation_disab
     assert listener.events == []
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_started_event_precedes_relaxing_the_pool():
     """
@@ -2212,6 +2278,7 @@ async def test_async_pool_handler_started_event_precedes_relaxing_the_pool():
     assert seen == [MaintenanceStartedEvent]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_failed_handoff_closes_its_pair():
     """A pool mutation that fails leaves no relaxation to end later."""
@@ -2242,6 +2309,7 @@ async def test_async_failed_handoff_closes_its_pair():
     assert notification not in handler._processed_notifications
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_dispatches_moving_event_pair():
     listener = _RecordingListener()
@@ -2289,6 +2357,7 @@ async def test_async_pool_handler_dispatches_moving_event_pair():
     assert completed.notification is notification
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_dispatches_nothing_when_handoff_relaxes_nothing():
     """A handoff handled only for the proactive reconnect relaxes no timeout."""
@@ -2323,6 +2392,7 @@ async def test_async_pool_handler_dispatches_nothing_when_handoff_relaxes_nothin
     assert listener.events == []
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_pool_handler_superseded_moving_completes_once():
     listener = _RecordingListener()
@@ -2367,6 +2437,7 @@ async def test_async_pool_handler_superseded_moving_completes_once():
     assert completed.notification is second
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_cleanup_moving_notification_reports_whether_it_reverted():
     config = MaintNotificationsConfig(enabled=True, relaxed_timeout=RELAXED_TIMEOUT)
@@ -2412,6 +2483,7 @@ def _connected_async_connection(config):
     return connection
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_disconnect_without_socket_still_completes_maintenance():
     """
@@ -2430,6 +2502,7 @@ async def test_async_disconnect_without_socket_still_completes_maintenance():
     assert [type(e) for e in listener.events] == [MaintenanceCompletedEvent]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_disconnect_in_maintenance_dispatches_completed_event():
     listener = _RecordingListener()
@@ -2450,6 +2523,7 @@ async def test_async_disconnect_in_maintenance_dispatches_completed_event():
     assert event.config is config
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", [MaintenanceState.NONE, MaintenanceState.MOVING])
 async def test_async_disconnect_outside_maintenance_dispatches_nothing(state):
@@ -2463,6 +2537,7 @@ async def test_async_disconnect_outside_maintenance_dispatches_nothing(state):
     assert listener.events == []
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_async_handoff_taking_over_maintenance_dispatches_completed_event():
     """
@@ -2494,6 +2569,7 @@ async def test_async_handoff_taking_over_maintenance_dispatches_completed_event(
     assert event.notification is None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "state, new_state",

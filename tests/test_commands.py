@@ -5,7 +5,9 @@ import threading
 import time
 import warnings
 from asyncio import CancelledError
+from collections import ChainMap, UserDict
 from string import ascii_letters
+from types import MappingProxyType
 from unittest import mock
 from unittest.mock import patch
 
@@ -74,6 +76,7 @@ def get_stream_message(client, stream, message_id):
     return response[0]
 
 
+@pytest.mark.fixed_client
 def test_server_deprecated_commands_do_not_emit_python_warnings():
     client = redis.Redis()
     with patch.object(client, "execute_command", return_value=True) as execute_command:
@@ -86,6 +89,7 @@ def test_server_deprecated_commands_do_not_emit_python_warnings():
     execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "call,expected",
     [
@@ -841,11 +845,12 @@ class TestRedisCommands:
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.2.0")
     # Exercises a default localhost client, which cannot target a remote managed
     # Redis Enterprise endpoint.
     @skip_if_redis_enterprise()
-    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+    def test_client_setinfo_with_driver_info(self):
         from redis import DriverInfo
         from redis.utils import get_lib_version
 
@@ -1002,10 +1007,10 @@ class TestRedisCommands:
         r2 = _get_client(redis.Redis, request, flushdb=False)
         name = "target-foobar"
         r2.client_setname(name)
-        time.sleep(4)
+        time.sleep(1.5)
         initial_clients = [c["name"] for c in r.client_list()]
         assert name in initial_clients
-        r.client_kill_filter(maxage=2)
+        r.client_kill_filter(maxage=1)
         final_clients = [c["name"] for c in r.client_list()]
         assert name not in final_clients
 
@@ -1578,11 +1583,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = r.pipeline(transaction=False)
         for i in range(20):
-            r.set("anyprefix:{3}:key", f"value{i}")
-            r.get(f"anyprefix:{3}:key")
-            r.set("anyprefix:{1}:key", f"value{i}")
-            r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         r.hotkeys_stop()
@@ -1630,11 +1638,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
-            decoded_r.set("anyprefix:{3}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{3}:key")
-            decoded_r.set("anyprefix:{1}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         decoded_r.hotkeys_stop()
@@ -2288,6 +2299,7 @@ class TestRedisCommands:
         assert len(res_local) == 16
         assert res_server == res_local
 
+    @pytest.mark.fixed_client
     @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
     def test_local_digest_encodes_with_the_client_encoding(self):
         """
@@ -2666,10 +2678,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert r.ttl("1:{test:1}") < 10
+        assert 0 < r.pttl("1:{test:1}") < 10000
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -2828,10 +2840,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1": 11}, keepttl=True) == 1
-        assert r.ttl("1") < 10
+        assert 0 < r.pttl("1") < 10000
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
@@ -3457,7 +3469,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
         )
-        assert r.blpop(["b", "a"], timeout=1) is None
+        assert r.blpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3477,7 +3489,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
         )
-        assert r.brpop(["b", "a"], timeout=1) is None
+        assert r.brpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3487,7 +3499,7 @@ class TestRedisCommands:
         r.rpush("b", "3", "4")
         assert r.brpoplpush("a", "b") == b"2"
         assert r.brpoplpush("a", "b") == b"1"
-        assert r.brpoplpush("a", "b", timeout=1) is None
+        assert r.brpoplpush("a", "b", timeout=0.1) is None
         assert r.lrange("a", 0, -1) == []
         assert r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -3506,7 +3518,7 @@ class TestRedisCommands:
             r.blmpop(1, "2", "b", "a", count=2)
         r.rpush("b", "6", "7", "8", "9")
         assert r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
-        assert r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+        assert r.blmpop(0.1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -4461,6 +4473,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = r.hscan("a", no_values=False)
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = r.hscan("a_notset")
         assert dic == {}
 
@@ -4482,6 +4496,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = dict(r.hscan_iter("a", match="a"))
         assert dic == {b"a": b"1"}
+        dic = dict(r.hscan_iter("a", no_values=False))
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = dict(r.hscan_iter("a_notset"))
         assert dic == {}
 
@@ -4510,6 +4526,7 @@ class TestRedisCommands:
         else:
             assert set(pairs) == {(b"a", 1)}
 
+    @pytest.mark.fixed_client
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = (b"0", [b"member1", b"1.7732526297292595e+18"])
@@ -4837,6 +4854,32 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    def test_zaggregate_mapping_weights(self, r, keys_factory, command, expected):
+        # Mapping wrappers must retain weights and the resulting rank order.
+        r.zadd("a", {"shared": 2, "left": 3})
+        r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert getattr(r, command)("destination", keys) == len(expected)
+            result = r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
     def test_zinter(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -5055,7 +5098,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmax(["b", "a"], timeout=1), (b"a", b"a1", 1), [b"a", b"a1", 1]
         )
-        assert r.bzpopmax(["b", "a"], timeout=1) is None
+        assert r.bzpopmax(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5078,7 +5121,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmin(["b", "a"], timeout=1), (b"a", b"a2", 2), [b"a", b"a2", 2]
         )
-        assert r.bzpopmin(["b", "a"], timeout=1) is None
+        assert r.bzpopmin(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5123,7 +5166,7 @@ class TestRedisCommands:
             [b"b", [[b"b1", b"10"]]],
             [b"b", [[b"b1", 10.0]]],
         )
-        assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
+        assert r.bzmpop(0.1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -5154,6 +5197,7 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrange_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         # Simulates RESP2 response with large score in scientific notation
@@ -5241,6 +5285,15 @@ class TestRedisCommands:
         assert r.zrangestore("b", "a", "[a2", "(a3", bylex=True, offset=0, num=1)
         assert r.zrange("b", 0, -1) == [b"a2"]
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
+    def test_zrangestore_empty_destination(self, r, dest):
+        r.zadd("source", {"a": 1, "b": 2, "c": 3})
+        assert r.zrangestore(dest, "source", 0, 1) == 2
+        assert r.zrange(dest, 0, -1) == [b"a", b"b"]
+        assert r.zrange("source", 0, -1) == [b"a", b"b", b"c"]
+
     @skip_if_server_version_lt("2.8.9")
     def test_zrangebylex(self, r):
         r.zadd("a", {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "g": 0})
@@ -5285,6 +5338,7 @@ class TestRedisCommands:
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrangebyscore_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
@@ -5430,6 +5484,7 @@ class TestRedisCommands:
             [2, "3.0"],
         )
 
+    @pytest.mark.fixed_client
     def test_zrevrank_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [2, b"1.7732526297292595e+18"]
@@ -6350,6 +6405,7 @@ class TestRedisCommands:
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="place3", radius=100, any=1)
 
+    @pytest.mark.fixed_client
     def test_geosearch_forwards_zero_numeric_arguments(self):
         # GEOSEARCH zero arguments must be forwarded for server validation.
         # Truthiness guards dropped those values, so the
@@ -8764,7 +8820,29 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert r.lrange(key, 0, -1) == value
 
-    def test_22_info(self, r):
+    @skip_if_redis_enterprise()
+    def test_large_responses(self, r):
+        "The PythonParser has some special cases for return values > 1MB"
+        # load up 5MB of data into a key
+        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
+        r["a"] = data
+        assert r["a"] == data.encode()
+
+    def test_floating_point_encoding(self, r):
+        """
+        High precision floating point values sent to the server should keep
+        precision.
+        """
+        timestamp = 1349673917.939762
+        r.zadd("a", {"a1": timestamp})
+        assert r.zscore("a", "a1") == timestamp
+
+
+@pytest.mark.fixed_client
+class TestInfoParsing:
+    """INFO reply parsing on canned replies; no server needed."""
+
+    def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
         was the cause of a number of bugs when parsing.
@@ -8799,20 +8877,3 @@ class TestBinarySave:
         assert "allocation_stats" in parsed
         assert "6" in parsed["allocation_stats"]
         assert ">=256" in parsed["allocation_stats"]
-
-    @skip_if_redis_enterprise()
-    def test_large_responses(self, r):
-        "The PythonParser has some special cases for return values > 1MB"
-        # load up 5MB of data into a key
-        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
-        r["a"] = data
-        assert r["a"] == data.encode()
-
-    def test_floating_point_encoding(self, r):
-        """
-        High precision floating point values sent to the server should keep
-        precision.
-        """
-        timestamp = 1349673917.939762
-        r.zadd("a", {"a1": timestamp})
-        assert r.zscore("a", "a1") == timestamp

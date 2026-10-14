@@ -91,16 +91,29 @@ class BooleanOptionalAction(argparse.Action):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def enable_tracemalloc():
+def enable_tracemalloc(request):
     """
-    Enable tracemalloc while tests are being executed.
+    Enable tracemalloc while tests are being executed, if ``--tracemalloc``
+    is given.
+
+    Tracing every allocation makes allocation-heavy code, such as parsing the
+    ``COMMAND`` reply during cluster client setup, several times slower, so it
+    is off by default. Turn it on to get allocation tracebacks in
+    ``ResourceWarning`` messages.
     """
+    if not request.config.getoption("--tracemalloc"):
+        yield
+        return
     try:
         import tracemalloc
 
-        tracemalloc.start()
+        # Leave tracing started by PYTHONTRACEMALLOC or -X tracemalloc running.
+        started = not tracemalloc.is_tracing()
+        if started:
+            tracemalloc.start()
         yield
-        tracemalloc.stop()
+        if started:
+            tracemalloc.stop()
     except ImportError:
         yield
 
@@ -154,6 +167,13 @@ def pytest_addoption(parser):
 
     parser.addoption(
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
+    )
+
+    parser.addoption(
+        "--tracemalloc",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Trace memory allocations with tracemalloc while tests run",
     )
 
     parser.addoption(
