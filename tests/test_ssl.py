@@ -1,6 +1,8 @@
 import datetime
+import os
 import socket
 import ssl
+import time
 from urllib.parse import urlparse
 
 import pytest
@@ -465,69 +467,78 @@ class TestSSL:
 
 @pytest.mark.fixed_client
 class TestOCSPCertificateBinding:
-    """An ocsp response is only about the certificate its CertID names."""
+    """An ocsp response is only about the certificate its CertID names, and
+    is only current between its this_update and next_update times."""
 
     @staticmethod
-    def _certificates_and_responses():
-        """Build a CA, the certificate under check, an unrelated certificate
-        from the same issuer, and a GOOD ocsp response for each of them.
-        """
+    def _make_certificate(common_name, serial, signing_key=None, ca=False):
         pytest.importorskip("cryptography")
 
         from cryptography import x509
-        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import ec
-        from cryptography.x509 import ocsp
         from cryptography.x509.oid import NameOID
 
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-
-        def certificate(common_name, serial, signing_key=None, ca=False):
-            key = ec.generate_private_key(ec.SECP256R1())
-            builder = (
-                x509.CertificateBuilder()
-                .subject_name(
-                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-                )
-                .issuer_name(
-                    x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
-                )
-                .public_key(key.public_key())
-                .serial_number(serial)
-                .not_valid_before(now - datetime.timedelta(days=1))
-                .not_valid_after(now + datetime.timedelta(days=365))
+        key = ec.generate_private_key(ec.SECP256R1())
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
             )
-            if ca:
-                builder = builder.add_extension(
-                    x509.BasicConstraints(ca=True, path_length=None), critical=True
-                )
-            return builder.sign(signing_key or key, hashes.SHA256()), key
-
-        ca, ca_key = certificate("Test CA", 1, ca=True)
-        cert, _ = certificate("node", 111, signing_key=ca_key)
-        other, _ = certificate("other", 999, signing_key=ca_key)
-
-        def good_response(target):
-            # this_update is a day back rather than an hour, so the naive local
-            # comparison in _check_certificate holds west of UTC too.
-            response = (
-                ocsp.OCSPResponseBuilder()
-                .add_response(
-                    cert=target,
-                    issuer=ca,
-                    algorithm=hashes.SHA256(),
-                    cert_status=ocsp.OCSPCertStatus.GOOD,
-                    this_update=now - datetime.timedelta(days=1),
-                    next_update=now + datetime.timedelta(days=1),
-                    revocation_time=None,
-                    revocation_reason=None,
-                )
-                .responder_id(ocsp.OCSPResponderEncoding.NAME, ca)
-                .sign(ca_key, hashes.SHA256())
+            .issuer_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test CA")])
             )
-            return response.public_bytes(serialization.Encoding.DER)
+            .public_key(key.public_key())
+            .serial_number(serial)
+            .not_valid_before(now - datetime.timedelta(days=1))
+            .not_valid_after(now + datetime.timedelta(days=365))
+        )
+        if ca:
+            builder = builder.add_extension(
+                x509.BasicConstraints(ca=True, path_length=None), critical=True
+            )
+        return builder.sign(signing_key or key, hashes.SHA256()), key
 
-        return ca, cert, good_response(cert), good_response(other)
+    @staticmethod
+    def _good_response(ca, ca_key, target, this_update, next_update):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.x509 import ocsp
+
+        response = (
+            ocsp.OCSPResponseBuilder()
+            .add_response(
+                cert=target,
+                issuer=ca,
+                algorithm=hashes.SHA256(),
+                cert_status=ocsp.OCSPCertStatus.GOOD,
+                this_update=this_update,
+                next_update=next_update,
+                revocation_time=None,
+                revocation_reason=None,
+            )
+            .responder_id(ocsp.OCSPResponderEncoding.NAME, ca)
+            .sign(ca_key, hashes.SHA256())
+        )
+        return response.public_bytes(serialization.Encoding.DER)
+
+    @classmethod
+    def _certificates_and_responses(cls):
+        """Build a CA, the certificate under check, an unrelated certificate
+        from the same issuer, and a GOOD ocsp response for each of them.
+        """
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = cls._make_certificate("Test CA", 1, ca=True)
+        cert, _ = cls._make_certificate("node", 111, signing_key=ca_key)
+        other, _ = cls._make_certificate("other", 999, signing_key=ca_key)
+
+        # this_update a day back rather than an hour so the pair stays current
+        # regardless of the host timezone.
+        this_update = now - datetime.timedelta(days=1)
+        next_update = now + datetime.timedelta(days=1)
+        good_cert = cls._good_response(ca, ca_key, cert, this_update, next_update)
+        good_other = cls._good_response(ca, ca_key, other, this_update, next_update)
+        return ca, cert, good_cert, good_other
 
     def test_check_certificate_accepts_matching_response(self):
         from redis.ocsp import _check_certificate
@@ -547,3 +558,41 @@ class TestOCSPCertificateBinding:
         with pytest.raises(ConnectionError) as e:
             _check_certificate(ca, cert, good_for_other)
         assert "serial number does not match" in str(e.value)
+
+    def test_check_certificate_rejects_stale_response_west_of_utc(self):
+        # next_update is already in the past: the response is stale and must be
+        # rejected. this_update sits well back so it clears the "issued in the
+        # future" check even in a far-west timezone. The freshness comparison
+        # must be done in UTC; comparing against local time accepted this stale
+        # response by the host's offset west of UTC.
+        if not hasattr(time, "tzset"):
+            pytest.skip("tzset is not available on this platform")
+
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key)
+        stale = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(hours=13),
+            now - datetime.timedelta(hours=1),
+        )
+
+        original_tz = os.environ.get("TZ")
+        try:
+            # Etc/GMT+12 is UTC-12; the stale next_update (an hour back in UTC)
+            # still looked an hour in the future to a local-time comparison.
+            os.environ["TZ"] = "Etc/GMT+12"
+            time.tzset()
+            with pytest.raises(ConnectionError) as e:
+                _check_certificate(ca, cert, stale)
+            assert "in the past" in str(e.value)
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
