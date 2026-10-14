@@ -8299,6 +8299,14 @@ class SortedSetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
 
+    def _zset_decode_responses(self) -> bool:
+        # Hosts such as the MultiDB clients don't define get_connection_kwargs();
+        # they keep the undecoded (bytes) legacy score text.
+        get_connection_kwargs = getattr(self, "get_connection_kwargs", None)
+        if get_connection_kwargs is None:
+            return False
+        return bool(get_connection_kwargs().get("decode_responses", False))
+
     @overload
     def zadd(
         self: SyncClientProtocol,
@@ -9396,9 +9404,7 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
         if withscore and score_cast_func is not float:
             # Lets the RESP3 -> legacy callback match RESP2's str scores.
-            options["decode_responses"] = self.get_connection_kwargs().get(
-                "decode_responses", False
-            )
+            options["decode_responses"] = self._zset_decode_responses()
 
         return self.execute_command(*pieces, **options)
 
@@ -9525,9 +9531,7 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
         if withscore and score_cast_func is not float:
             # Lets the RESP3 -> legacy callback match RESP2's str scores.
-            options["decode_responses"] = self.get_connection_kwargs().get(
-                "decode_responses", False
-            )
+            options["decode_responses"] = self._zset_decode_responses()
 
         return self.execute_command(*pieces, **options)
 
