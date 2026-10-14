@@ -3268,9 +3268,9 @@ class ConnectionPool(
 
             self._available_connections.append(connection)
 
-        await self._event_dispatcher.dispatch_async(
-            AsyncAfterConnectionReleasedEvent(connection)
-        )
+            await self._event_dispatcher.dispatch_async(
+                AsyncAfterConnectionReleasedEvent(connection)
+            )
 
         # Record state transition: USED -> IDLE
         pool_name = get_pool_name(self)

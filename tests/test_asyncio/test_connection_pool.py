@@ -208,6 +208,48 @@ class TestConnectionPool:
             assert c1 == c2
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("operation", ["acquire", "refresh"])
+    async def test_release_serializes_re_auth(self, operation):
+        async with self.get_pool(connection_class=DummyConnection) as pool:
+            connection = await pool.get_connection()
+            re_auth_started = asyncio.Event()
+            finish_re_auth = asyncio.Event()
+            operation_started = asyncio.Event()
+
+            async def re_auth():
+                re_auth_started.set()
+                await finish_re_auth.wait()
+
+            connection.re_auth = AsyncMock(side_effect=re_auth)
+            connection.retry = MagicMock()
+            connection.retry.call_with_retry = AsyncMock()
+
+            async def run_operation():
+                operation_started.set()
+                if operation == "acquire":
+                    return await pool.get_connection()
+                await pool.re_auth_callback(MagicMock(spec=TokenInterface))
+
+            release_task = asyncio.create_task(pool.release(connection))
+            operation_task = None
+            try:
+                await re_auth_started.wait()
+                operation_task = asyncio.create_task(run_operation())
+                await operation_started.wait()
+                assert not release_task.done()
+                assert not operation_task.done()
+            finally:
+                finish_re_auth.set()
+                await release_task
+                if operation_task is not None:
+                    result = await operation_task
+                    if operation == "acquire":
+                        assert result is connection
+                        await pool.release(result)
+                    else:
+                        assert connection.retry.call_with_retry.await_count == 2
+
+    @pytest.mark.fixed_client
     async def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
