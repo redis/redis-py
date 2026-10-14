@@ -40,6 +40,7 @@ INCR
 init
 IOError
 Instrumentations
+invalidations
 JSONCommands
 JSONPath
 Jaeger
@@ -50,6 +51,7 @@ MeterProvider
 MetricGroup
 millis
 MultiDbConfig
+MultiDB
 MultiDBClient
 McCurdy
 normalises
@@ -135,6 +137,7 @@ firsttimersonly
 fo
 formatter
 genindex
+geo
 gmail
 himport
 hiredis
@@ -187,6 +190,7 @@ pytest
 quickstart
 readonly
 readwrite
+rebalancing
 redis
 redismodules
 reinitialization

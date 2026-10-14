@@ -35,7 +35,12 @@ from redis.event import (
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
+from tests.conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_resp_version,
+    skip_if_server_version_lt,
+)
 
 # A record for a command a resolver must report as ineligible, used to prove that eligibility
 # comes from the resolver the config holds rather than from the config itself.
@@ -48,9 +53,13 @@ WRITE_KEYED = CommandMetadata(
 )
 
 
-def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05):
+def wait_for_invalidated_value(
+    client, key, expected, timeout=3.0, interval=0.05, read=None
+):
     """
     Reads ``key`` until the client stops serving the value it cached before invalidation.
+
+    ``read`` replaces the default ``client.get(key)`` for keys of other types.
 
     Server-assisted invalidation arrives on its own push message, so a read taken straight
     after another client's write is a race. A fixed sleep answers that race badly in both
@@ -59,11 +68,16 @@ def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05
     the deadline and returns the last value read, so the caller's own assertion is what
     reports the failure if the invalidation never lands.
     """
+    if read is None:
+
+        def read():
+            return client.get(key)
+
     deadline = time.monotonic() + timeout
-    value = client.get(key)
+    value = read()
     while value not in expected and time.monotonic() < deadline:
         time.sleep(interval)
-        value = client.get(key)
+        value = read()
 
     return value
 
@@ -183,11 +197,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -232,10 +246,14 @@ class TestCache:
         assert cache.get(cache_key) is not None
         # change the sorted set from a second client (causes invalidation)
         r2.zadd("myzset", {"c": 3})
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
         # a fresh value is fetched and re-cached
-        assert r.zrevrange("myzset", 0, -1) == [b"c", b"b", b"a"]
+        expected = [b"c", b"b", b"a"]
+        assert (
+            wait_for_invalidated_value(
+                r, "myzset", [expected], read=lambda: r.zrevrange("myzset", 0, -1)
+            )
+            == expected
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -294,11 +312,10 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.hset(hash_key, field_1, "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.hget(hash_key, field_1) in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(
+            r, hash_key, [b"barbar", "barbar"], read=lambda: r.hget(hash_key, field_1)
+        ) in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(
@@ -363,11 +380,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -1014,6 +1031,68 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
+    def test_a_user_sent_client_tracking_or_reset_is_refused(self, r, r2):
+        """
+        ``CLIENT TRACKING OFF`` and ``RESET`` both turn tracking off, while the cache keeps
+        storing replies through the connection - stale forever. This predates the tracking
+        modes, so it is checked in ``plain``. ``single_connection_client`` puts the stray
+        command and the read on one socket, which is where it bites.
+        """
+        cache = r.get_cache()
+        refused = [
+            lambda: r.client_tracking_off(),
+            lambda: r.client_tracking_on(),
+            lambda: r.reset(),
+            lambda: r.execute_command("CLIENT", b"TRACKING", b"OFF"),
+            lambda: r.execute_command(b"CLIENT", b"TRACKING", b"OFF"),
+            lambda: r.execute_command(b"RESET"),
+            lambda: r.pipeline(transaction=False).client_tracking_off().execute(),
+            lambda: r.pipeline().get("foo").execute_command("RESET").execute(),
+        ]
+        for call in refused:
+            with pytest.raises(RedisError, match="cannot be sent on a connection"):
+                call()
+
+        # Reading the tracking state is still allowed, and shows tracking is still on.
+        assert "on" in tracking_flags(r)
+
+        # Nothing reached the socket, so the next cached read is still tracked.
+        r2.set("foo", "bar")
+        assert r.get("foo") == b"bar"
+        assert cache.size == 1
+
+        r2.set("foo", "baz")
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
+
+    @pytest.mark.onlynoncluster
+    def test_client_tracking_and_reset_without_a_cache_are_not_refused(self, request):
+        # The guard lives on the cache's connections only. A dedicated client, because
+        # RESET also drops the connection back to RESP2.
+        client = _get_client(redis.Redis, request, flushdb=False)
+        try:
+            assert client.get_cache() is None
+            client.client_tracking_on()
+            client.client_tracking_off()
+            assert_resp_response(client, client.reset(), "RESET", b"RESET", "RESET")
+        finally:
+            client.close()
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
     def test_the_cache_is_flushed_when_tracking_is_re_enabled(self, r):
         """
         The server destroys a connection's tracking state on disconnect, so every entry cached
@@ -1312,6 +1391,25 @@ class TestClusterCache:
         assert (
             cache == r.nodes_manager.get_node_from_slot(1).redis_connection.get_cache()
         )
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": DefaultCache(CacheConfig(max_size=128))}],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_a_user_sent_client_tracking_or_reset_is_refused(self, r):
+        # Every node connection of a cached cluster is a cache proxy, so the guard covers
+        # the fan-out of ``client_tracking_off`` and the cluster pipeline as well.
+        with pytest.raises(RedisError, match="CLIENT TRACKING cannot be sent"):
+            r.client_tracking_off()
+        with pytest.raises(RedisError, match="CLIENT TRACKING cannot be sent"):
+            r.client_tracking_on(target_nodes=redis.RedisCluster.PRIMARIES)
+        with pytest.raises(RedisError, match="RESET cannot be sent"):
+            r.pipeline().get("foo").execute_command("RESET").execute()
+
+        node = r.get_node_from_key("foo")
+        assert "on" in tracking_flags(node.redis_connection)
 
     @pytest.mark.parametrize(
         "r",
@@ -2089,11 +2187,12 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         assert r2.set("foo", "barbar")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        # Retrieves a new value from server and cache_data it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        # Retrieves a new value from server and cache_data it, once the
+        # invalidation has arrived (over SSL it can trail the write)
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -2205,10 +2304,8 @@ class TestSSLCache:
         # Invalidate one of the keys and make sure
         # that all associated cached entries was removed
         assert r.set("foo", "baz")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        assert r.get("foo") == b"baz"
+        # the invalidation can trail the write (over SSL especially)
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
         assert (
             cache.get(
                 CacheKey(
@@ -2227,6 +2324,7 @@ class TestSSLCache:
         )
 
 
+@pytest.mark.fixed_client
 class TestUnitDefaultCache:
     def test_get_eviction_policy(self):
         cache = DefaultCache(CacheConfig(max_size=5))
@@ -2516,6 +2614,7 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 0
 
 
+@pytest.mark.fixed_client
 class TestCacheReverseIndex:
     """
     The reverse index from Redis key to the entries holding it.
@@ -2715,6 +2814,7 @@ class TestCacheReverseIndex:
         assert actual == expected
 
 
+@pytest.mark.fixed_client
 class TestUnitLRUPolicy:
     def test_type(self):
         policy = LRUPolicy()
@@ -2859,6 +2959,7 @@ class TestUnitLRUPolicy:
             policy.evict_next()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheConfiguration:
     MAX_SIZE = 100
     EVICTION_POLICY = EvictionPolicy.LRU
@@ -3079,6 +3180,7 @@ class TestUnitCacheConfiguration:
         assert config.is_trackable_read("GET") is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxy:
     """Unit tests for CacheProxy class with mocked event dispatcher."""
 
@@ -3308,6 +3410,7 @@ class TestUnitCacheProxy:
         assert proxy.is_cachable(cache_key) is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnectionInvalidations:
     """A framing violation while draining invalidations now disconnects the raw
     connection (see #4291). That disconnect skips CacheProxyConnection.disconnect(),

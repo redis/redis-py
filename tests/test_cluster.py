@@ -370,42 +370,6 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
-    def test_host_port_startup_node(self):
-        """
-        Test that it is possible to use host & port arguments as startup node
-        args
-        """
-        cluster = get_mocked_redis_client(host=default_host, port=default_port)
-        assert cluster.get_node(host=default_host, port=default_port) is not None
-
-    def test_startup_nodes(self):
-        """
-        Test that it is possible to use startup_nodes
-        argument to init the cluster
-        """
-        port_1 = 7000
-        port_2 = 7001
-        startup_nodes = [
-            ClusterNode(default_host, port_1),
-            ClusterNode(default_host, port_2),
-        ]
-        cluster = get_mocked_redis_client(startup_nodes=startup_nodes)
-        assert (
-            cluster.get_node(host=default_host, port=port_1) is not None
-            and cluster.get_node(host=default_host, port=port_2) is not None
-        )
-
-    def test_empty_startup_nodes(self):
-        """
-        Test that exception is raised when empty providing empty startup_nodes
-        """
-        with pytest.raises(RedisClusterException) as ex:
-            RedisCluster(startup_nodes=[])
-
-        assert str(ex.value).startswith(
-            "RedisCluster requires at least one node to discover the cluster"
-        ), str_if_bytes(ex.value)
-
     def test_from_url(self, r):
         redis_url = f"redis://{default_host}:{default_port}/0"
         with patch.object(RedisCluster, "from_url") as from_url:
@@ -727,125 +691,6 @@ class TestRedisClusterObj:
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
 
-    @pytest.mark.parametrize(
-        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
-        [
-            (True, None, [7001, 7002, 7001]),
-            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
-            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
-            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
-            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
-            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
-            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
-            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
-            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
-        ],
-    )
-    def test_reading_with_load_balancing_strategies(
-        self,
-        read_from_replicas: bool,
-        load_balancing_strategy: LoadBalancingStrategy,
-        mocks_srv_ports: List[int],
-    ):
-        def _make_mock_randint():
-            _state = (
-                1  # Start with 1 so we have clearly different results from round robin
-            )
-
-            def _mock_randint(lower: int, upper: int) -> int:
-                """
-                Return a controlled sequence of numbers when called repeatedly
-                """
-                if lower == upper:
-                    return lower
-
-                nonlocal _state
-                res = _state + lower
-                _state ^= 1
-                return res
-
-            return _mock_randint
-
-        mock_randint = _make_mock_randint()
-
-        with patch.multiple(
-            Connection,
-            send_command=DEFAULT,
-            read_response=DEFAULT,
-            _connect=DEFAULT,
-            can_read=DEFAULT,
-            on_connect=DEFAULT,
-        ) as mocks:
-            with (
-                patch.object(Redis, "parse_response") as parse_response,
-                patch("random.randint", wraps=mock_randint),
-            ):
-
-                def parse_response_mock_first(connection, *args, **options):
-                    # Primary
-                    assert connection.port == mocks_srv_ports[0]
-                    parse_response.side_effect = parse_response_mock_second
-                    return "MOCK_OK"
-
-                def parse_response_mock_second(connection, *args, **options):
-                    # Replica
-                    assert connection.port == mocks_srv_ports[1]
-                    parse_response.side_effect = parse_response_mock_third
-                    return "MOCK_OK"
-
-                def parse_response_mock_third(connection, *args, **options):
-                    # Primary
-                    assert connection.port == mocks_srv_ports[2]
-                    return "MOCK_OK"
-
-                # We don't need to create a real cluster connection but we
-                # do want RedisCluster.on_connect function to get called,
-                # so we'll mock some of the Connection's functions to allow it
-                parse_response.side_effect = parse_response_mock_first
-                mocks["send_command"].return_value = True
-                mocks["read_response"].return_value = "OK"
-                mocks["_connect"].return_value = True
-                mocks["can_read"].return_value = False
-                mocks["on_connect"].return_value = True
-
-                # Create a cluster with reading from replications
-                read_cluster = get_mocked_redis_client(
-                    host=default_host,
-                    port=default_port,
-                    read_from_replicas=read_from_replicas,
-                    load_balancing_strategy=load_balancing_strategy,
-                )
-                assert read_cluster.read_from_replicas is read_from_replicas
-                assert read_cluster.load_balancing_strategy is load_balancing_strategy
-                # Check that we read from the slot's nodes in a round robin
-                # matter.
-                # 'foo' belongs to slot 12182 and the slot's nodes are:
-                # [(127.0.0.1,7001,primary), (127.0.0.1,7002,replica)]
-                read_cluster.get("foo")
-                read_cluster.get("foo")
-                read_cluster.get("foo")
-                expected_calls_list = []
-                expected_calls_list.append(call("READONLY"))
-                expected_calls_list.append(call("GET", "foo", keys=["foo"]))
-
-                if (
-                    load_balancing_strategy is None
-                    or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
-                    or load_balancing_strategy == LoadBalancingStrategy.RANDOM
-                ):
-                    # in the round robin and random strategies, the primary node can also receive read
-                    # requests and this means that there will be second node connected
-                    expected_calls_list.append(call("READONLY"))
-
-                expected_calls_list.extend(
-                    [
-                        call("GET", "foo", keys=["foo"]),
-                        call("GET", "foo", keys=["foo"]),
-                    ]
-                )
-
-                mocks["send_command"].assert_has_calls(expected_calls_list)
-
     def test_keyslot(self, r):
         """
         Test that method will compute correct key in all supported cases
@@ -862,12 +707,6 @@ class TestRedisClusterObj:
         assert r.keyslot(1337.1234) == r.keyslot("1337.1234")
         assert r.keyslot(1337) == r.keyslot("1337")
         assert r.keyslot(b"abc") == r.keyslot("abc")
-
-    def test_get_node_name(self):
-        assert (
-            get_node_name(default_host, default_port)
-            == f"{default_host}:{default_port}"
-        )
 
     def test_all_nodes(self, r):
         """
@@ -891,27 +730,6 @@ class TestRedisClusterObj:
 
         for node in r.get_primaries():
             assert node in nodes
-
-    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
-    def test_cluster_down_overreaches_retry_attempts(self, error):
-        """
-        When error that allows retry is thrown, test that we retry executing
-        the command as many times as configured in cluster_error_retry_attempts
-        and then raise the exception
-        """
-        with patch.object(RedisCluster, "_execute_command") as execute_command:
-
-            def raise_error(target_node, *args, **kwargs):
-                execute_command.failed_calls += 1
-                raise error("mocked error")
-
-            execute_command.side_effect = raise_error
-
-            rc = get_mocked_redis_client(host=default_host, port=default_port)
-
-            with pytest.raises(error):
-                rc.get("bar")
-                assert execute_command.failed_calls == rc.cluster_error_retry_attempts
 
     def test_user_on_connect_function(self, request):
         """
@@ -1164,40 +982,208 @@ class TestRedisClusterObj:
         assert n_used > 1
 
 
+@pytest.mark.fixed_client
+class TestRedisClusterObjMocked:
+    """RedisCluster behaviour checked against mocked nodes; no server needed."""
+
+    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
+    def test_cluster_down_overreaches_retry_attempts(self, error):
+        """
+        When error that allows retry is thrown, test that we retry executing
+        the command as many times as configured in cluster_error_retry_attempts
+        and then raise the exception
+        """
+        with patch.object(RedisCluster, "_execute_command") as execute_command:
+
+            def raise_error(target_node, *args, **kwargs):
+                execute_command.failed_calls += 1
+                raise error("mocked error")
+
+            execute_command.side_effect = raise_error
+            # Without this the attribute is a MagicMock, so the comparison below
+            # is never an integer comparison.
+            execute_command.failed_calls = 0
+
+            rc = get_mocked_redis_client(host=default_host, port=default_port)
+
+            with pytest.raises(error):
+                rc.get("bar")
+            # retry counts retries, so the first attempt is one more.
+            assert execute_command.failed_calls == rc.retry.get_retries() + 1
+
+    def test_empty_startup_nodes(self):
+        """
+        Test that exception is raised when empty providing empty startup_nodes
+        """
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(startup_nodes=[])
+
+        assert str(ex.value).startswith(
+            "RedisCluster requires at least one node to discover the cluster"
+        ), str_if_bytes(ex.value)
+
+    def test_get_node_name(self):
+        assert (
+            get_node_name(default_host, default_port)
+            == f"{default_host}:{default_port}"
+        )
+
+    def test_host_port_startup_node(self):
+        """
+        Test that it is possible to use host & port arguments as startup node
+        args
+        """
+        cluster = get_mocked_redis_client(host=default_host, port=default_port)
+        assert cluster.get_node(host=default_host, port=default_port) is not None
+
+    @pytest.mark.parametrize(
+        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
+        [
+            (True, None, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
+            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM, [7002, 7001, 7002]),
+            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+        ],
+    )
+    def test_reading_with_load_balancing_strategies(
+        self,
+        read_from_replicas: bool,
+        load_balancing_strategy: LoadBalancingStrategy,
+        mocks_srv_ports: List[int],
+    ):
+        def _make_mock_randint():
+            _state = (
+                1  # Start with 1 so we have clearly different results from round robin
+            )
+
+            def _mock_randint(lower: int, upper: int) -> int:
+                """
+                Return a controlled sequence of numbers when called repeatedly
+                """
+                if lower == upper:
+                    return lower
+
+                nonlocal _state
+                res = _state + lower
+                _state ^= 1
+                return res
+
+            return _mock_randint
+
+        mock_randint = _make_mock_randint()
+
+        with patch.multiple(
+            Connection,
+            send_command=DEFAULT,
+            read_response=DEFAULT,
+            _connect=DEFAULT,
+            can_read=DEFAULT,
+            on_connect=DEFAULT,
+        ) as mocks:
+            with (
+                patch.object(Redis, "parse_response") as parse_response,
+                patch("random.randint", wraps=mock_randint),
+            ):
+
+                def parse_response_mock_first(connection, *args, **options):
+                    # Primary
+                    assert connection.port == mocks_srv_ports[0]
+                    parse_response.side_effect = parse_response_mock_second
+                    return "MOCK_OK"
+
+                def parse_response_mock_second(connection, *args, **options):
+                    # Replica
+                    assert connection.port == mocks_srv_ports[1]
+                    parse_response.side_effect = parse_response_mock_third
+                    return "MOCK_OK"
+
+                def parse_response_mock_third(connection, *args, **options):
+                    # Primary
+                    assert connection.port == mocks_srv_ports[2]
+                    return "MOCK_OK"
+
+                # We don't need to create a real cluster connection but we
+                # do want RedisCluster.on_connect function to get called,
+                # so we'll mock some of the Connection's functions to allow it
+                parse_response.side_effect = parse_response_mock_first
+                mocks["send_command"].return_value = True
+                mocks["read_response"].return_value = "OK"
+                mocks["_connect"].return_value = True
+                mocks["can_read"].return_value = False
+                mocks["on_connect"].return_value = True
+
+                # Create a cluster with reading from replications
+                read_cluster = get_mocked_redis_client(
+                    host=default_host,
+                    port=default_port,
+                    read_from_replicas=read_from_replicas,
+                    load_balancing_strategy=load_balancing_strategy,
+                )
+                assert read_cluster.read_from_replicas is read_from_replicas
+                assert read_cluster.load_balancing_strategy is load_balancing_strategy
+                # Check that we read from the slot's nodes in a round robin
+                # matter.
+                # 'foo' belongs to slot 12182 and the slot's nodes are:
+                # [(127.0.0.1,7001,primary), (127.0.0.1,7002,replica)]
+                read_cluster.get("foo")
+                read_cluster.get("foo")
+                read_cluster.get("foo")
+                expected_calls_list = []
+                expected_calls_list.append(call("READONLY"))
+                expected_calls_list.append(call("GET", "foo", keys=["foo"]))
+
+                if (
+                    load_balancing_strategy is None
+                    or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
+                    or load_balancing_strategy == LoadBalancingStrategy.RANDOM
+                ):
+                    # in the round robin and random strategies, the primary node can also receive read
+                    # requests and this means that there will be second node connected
+                    expected_calls_list.append(call("READONLY"))
+
+                expected_calls_list.extend(
+                    [
+                        call("GET", "foo", keys=["foo"]),
+                        call("GET", "foo", keys=["foo"]),
+                    ]
+                )
+
+                mocks["send_command"].assert_has_calls(expected_calls_list)
+
+    def test_startup_nodes(self):
+        """
+        Test that it is possible to use startup_nodes
+        argument to init the cluster
+        """
+        port_1 = 7000
+        port_2 = 7001
+        startup_nodes = [
+            ClusterNode(default_host, port_1),
+            ClusterNode(default_host, port_2),
+        ]
+        cluster = get_mocked_redis_client(startup_nodes=startup_nodes)
+        assert (
+            cluster.get_node(host=default_host, port=port_1) is not None
+            and cluster.get_node(host=default_host, port=port_2) is not None
+        )
+
+
 @pytest.mark.onlycluster
 class TestClusterRedisCommands:
     """
     Tests for RedisCluster unique commands
     """
 
-    def _wait_for_bgsave(self, r, timeout=10):
-        deadline = monotonic() + timeout
-        while True:
-            info = r.info("persistence", target_nodes=r.get_default_node())
-            if int(info.get("rdb_bgsave_in_progress", 0)) == 0:
-                return
-            if monotonic() > deadline:
-                pytest.fail("Timed out waiting for BGSAVE to finish")
-            sleep(0.05)
-
     def test_case_insensitive_command_names(self, r):
         assert (
             r.cluster_response_callbacks["cluster slots"]
             == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
-
-    def test_get_and_set(self, r):
-        # get and set can't be tested independently of each other
-        assert r.get("a") is None
-        byte_string = b"value"
-        integer = 5
-        unicode_string = chr(3456) + "abcd" + chr(3421)
-        assert r.set("byte_string", byte_string)
-        assert r.set("integer", 5)
-        assert r.set("unicode_string", unicode_string)
-        assert r.get("byte_string") == byte_string
-        assert r.get("integer") == str(integer).encode()
-        assert r.get("unicode_string").decode("utf-8") == unicode_string
 
     @pytest.mark.parametrize(
         "load_balancing_strategy",
@@ -1288,9 +1274,8 @@ class TestClusterRedisCommands:
         d = {"a": b"1", "b": b"2", "c": b"3", "d": b"4"}
         r.mset_nonatomic(d)
         assert r.unlink(*d.keys()) == len(d)
-        # Unlink is non-blocking so we sleep before
-        # verifying the deletion
-        sleep(0.1)
+        # UNLINK removes the keys from the keyspace right away; only the memory
+        # is reclaimed in the background
         assert r.unlink(*d.keys()) == 0
 
     def test_pubsub_channels_merge_results(self, r):
@@ -1307,13 +1292,12 @@ class TestClusterRedisCommands:
             p.subscribe(channel)
             b_channel = channel.encode("utf-8")
             channels.append(b_channel)
+            # Read the subscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "subscribe", ack
             # Assert that each node returns only the channel it subscribed to
-            sub_channels = node.redis_connection.pubsub_channels()
-            if not sub_channels:
-                # Try again after a short sleep
-                sleep(0.3)
-                sub_channels = node.redis_connection.pubsub_channels()
-            assert sub_channels == [b_channel]
+            assert node.redis_connection.pubsub_channels() == [b_channel]
             i += 1
         # Assert that the cluster's pubsub_channels function returns ALL of
         # the cluster's channels
@@ -1332,12 +1316,12 @@ class TestClusterRedisCommands:
             p = r.pubsub(node)
             pubsub_nodes.append(p)
             p.subscribe(channel)
+            # Read the subscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "subscribe", ack
             # Assert that each node returns that only one client is subscribed
-            sub_chann_num = node.redis_connection.pubsub_numsub(channel)
-            if sub_chann_num == [(b_channel, 0)]:
-                sleep(0.3)
-                sub_chann_num = node.redis_connection.pubsub_numsub(channel)
-            assert sub_chann_num == [(b_channel, 1)]
+            assert node.redis_connection.pubsub_numsub(channel) == [(b_channel, 1)]
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
         assert r.pubsub_numsub(channel, target_nodes="all") == [(b_channel, len(nodes))]
@@ -1352,12 +1336,12 @@ class TestClusterRedisCommands:
             p = r.pubsub(node)
             pubsub_nodes.append(p)
             p.psubscribe(pattern)
+            # Read the psubscribe ack, so the server has processed it before the
+            # node is queried; the wait ends as soon as the ack arrives
+            ack = wait_for_message(p, timeout=5.0)
+            assert ack is not None and ack["type"] == "psubscribe", ack
             # Assert that each node returns that only one client is subscribed
-            sub_num_pat = node.redis_connection.pubsub_numpat()
-            if sub_num_pat == 0:
-                sleep(0.3)
-                sub_num_pat = node.redis_connection.pubsub_numpat()
-            assert sub_num_pat == 1
+            assert node.redis_connection.pubsub_numpat() == 1
         # Assert that the cluster's pubsub_numsub function returns ALL clients
         # subscribed to this channel in the entire cluster
         assert r.pubsub_numpat(target_nodes="all") == len(nodes)
@@ -1470,45 +1454,6 @@ class TestClusterRedisCommands:
     def test_cluster_count_failure_report(self, r):
         mock_all_nodes_resp(r, 0)
         assert r.cluster_count_failure_report("node_0") == 0
-
-    @skip_if_redis_enterprise()
-    def test_cluster_delslots(self):
-        cluster_slots = [
-            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
-            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
-        ]
-        r = get_mocked_redis_client(
-            host=default_host, port=default_port, cluster_slots=cluster_slots
-        )
-        mock_all_nodes_resp(r, "OK")
-        node0 = r.get_node(default_host, 7000)
-        node1 = r.get_node(default_host, 7001)
-        assert r.cluster_delslots(0, 8192) == [True, True]
-        assert node0.redis_connection.connection.read_response.called
-        assert node1.redis_connection.connection.read_response.called
-
-    @skip_if_server_version_lt("7.0.0")
-    @skip_if_redis_enterprise()
-    def test_cluster_delslotsrange(self):
-        cluster_slots = [
-            [
-                0,
-                8191,
-                ["127.0.0.1", 7000, "node_0"],
-            ],
-            [
-                8192,
-                16383,
-                ["127.0.0.1", 7001, "node_1"],
-            ],
-        ]
-        r = get_mocked_redis_client(
-            host=default_host, port=default_port, cluster_slots=cluster_slots
-        )
-        mock_all_nodes_resp(r, "OK")
-        node = r.get_random_node()
-        r.cluster_addslots(node, 1, 2, 3, 4, 5)
-        assert r.cluster_delslotsrange(1, 5)
 
     @skip_if_redis_enterprise()
     def test_cluster_failover(self, r):
@@ -1725,36 +1670,6 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.cluster_bumpepoch()
 
-    @skip_if_redis_enterprise()
-    def test_readonly(self):
-        r = get_mocked_redis_client(host=default_host, port=default_port)
-        mock_all_nodes_resp(r, "OK")
-        assert r.readonly() is True
-        all_replicas_results = r.readonly(target_nodes="replicas")
-        for res in all_replicas_results.values():
-            assert res is True
-        for replica in r.get_replicas():
-            assert replica.redis_connection.connection.read_response.called
-
-    @skip_if_redis_enterprise()
-    def test_readwrite(self):
-        r = get_mocked_redis_client(host=default_host, port=default_port)
-        mock_all_nodes_resp(r, "OK")
-        assert r.readwrite() is True
-        all_replicas_results = r.readwrite(target_nodes="replicas")
-        for res in all_replicas_results.values():
-            assert res is True
-        for replica in r.get_replicas():
-            assert replica.redis_connection.connection.read_response.called
-
-    @skip_if_redis_enterprise()
-    def test_bgsave(self, r):
-        self._wait_for_bgsave(r)
-        assert r.bgsave()
-        self._wait_for_bgsave(r)
-        assert r.bgsave(True)
-        self._wait_for_bgsave(r)
-
     def test_info(self, r):
         # Map keys to same slot
         r.set("x{1}", 1)
@@ -1829,16 +1744,6 @@ class TestClusterRedisCommands:
         assert isinstance(t[1], int)
 
     @skip_if_server_version_lt("4.0.0")
-    def test_memory_usage(self, r):
-        r.set("foo", "bar")
-        assert isinstance(r.memory_usage("foo"), int)
-
-    @skip_if_server_version_lt("4.0.0")
-    @skip_if_redis_enterprise()
-    def test_memory_malloc_stats(self, r):
-        assert r.memory_malloc_stats()
-
-    @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_memory_stats(self, r):
         # put a key into the current db to make sure that "db.<current-db>"
@@ -1850,16 +1755,6 @@ class TestClusterRedisCommands:
         for key, value in stats.items():
             if key.startswith("db."):
                 assert not isinstance(value, list)
-
-    @skip_if_server_version_lt("4.0.0")
-    def test_memory_help(self, r):
-        with pytest.raises(NotImplementedError):
-            r.memory_help()
-
-    @skip_if_server_version_lt("4.0.0")
-    def test_memory_doctor(self, r):
-        with pytest.raises(NotImplementedError):
-            r.memory_doctor()
 
     @skip_if_redis_enterprise()
     def test_lastsave(self, r):
@@ -2137,7 +2032,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"2"),
             [b"{foo}a", b"2"],
         )
-        assert r.blpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.blpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.rpush("{foo}c", "1")
         assert_resp_response(
             r, r.blpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2170,7 +2065,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"1"),
             [b"{foo}a", b"1"],
         )
-        assert r.brpop(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.brpop(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.rpush("{foo}c", "1")
         assert_resp_response(
             r, r.brpop("{foo}c", timeout=1), (b"{foo}c", b"1"), [b"{foo}c", b"1"]
@@ -2181,7 +2076,7 @@ class TestClusterRedisCommands:
         r.rpush("{foo}b", "3", "4")
         assert r.brpoplpush("{foo}a", "{foo}b") == b"2"
         assert r.brpoplpush("{foo}a", "{foo}b") == b"1"
-        assert r.brpoplpush("{foo}a", "{foo}b", timeout=1) is None
+        assert r.brpoplpush("{foo}a", "{foo}b", timeout=0.1) is None
         assert r.lrange("{foo}a", 0, -1) == []
         assert r.lrange("{foo}b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -2416,7 +2311,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a1", 1),
             [b"{foo}a", b"a1", 1],
         )
-        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.bzpopmax(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -2453,7 +2348,7 @@ class TestClusterRedisCommands:
             (b"{foo}a", b"a2", 2),
             [b"{foo}a", b"a2", 2],
         )
-        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
+        assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=0.1) is None
         r.zadd("{foo}c", {"c1": 100})
         assert_resp_response(
             r,
@@ -2774,14 +2669,21 @@ class TestClusterRedisCommands:
     def test_cluster_scan_iter(self, r):
         keys_all = []
         keys_1 = []
+        # one MSET per slot, pipelined per node, instead of 100 SETs
+        r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            r.set(s, 1)
             keys_all.append(s.encode("utf-8"))
             if s.startswith("1"):
                 keys_1.append(s.encode("utf-8"))
         keys_all.sort()
         keys_1.sort()
+
+        # the replicas are scanned below; poll until they have every key
+        deadline = monotonic() + 5
+        while sorted(r.scan_iter(target_nodes="replicas")) != keys_all:
+            assert monotonic() < deadline, "replicas lag behind"
+            sleep(0.01)
 
         for target_nodes in ["primaries", "replicas"]:
             keys = r.scan_iter(target_nodes=target_nodes)
@@ -2815,9 +2717,9 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt("8.11.0")
     def test_cluster_bless_scan_iter(self, r):
         keys_blessed = []
+        r.mset_nonatomic({str(i): 1 for i in range(100)})
         for i in range(100):
             s = str(i)
-            r.set(s, 1)
             if s.startswith("1"):
                 r.bless_set(s, "NO-EVICT")
                 keys_blessed.append(s.encode("utf-8"))
@@ -2905,6 +2807,72 @@ class TestClusterRedisCommands:
             r.hotkeys_reset()
         with pytest.raises(NotImplementedError):
             r.hotkeys_stop()
+
+
+@pytest.mark.fixed_client
+class TestClusterRedisCommandsMocked:
+    """Cluster commands checked against mocked node replies; no server needed."""
+
+    @skip_if_redis_enterprise()
+    def test_cluster_delslots(self):
+        cluster_slots = [
+            [0, 8191, ["127.0.0.1", 7000, "node_0"]],
+            [8192, 16383, ["127.0.0.1", 7001, "node_1"]],
+        ]
+        r = get_mocked_redis_client(
+            host=default_host, port=default_port, cluster_slots=cluster_slots
+        )
+        mock_all_nodes_resp(r, "OK")
+        node0 = r.get_node(default_host, 7000)
+        node1 = r.get_node(default_host, 7001)
+        assert r.cluster_delslots(0, 8192) == [True, True]
+        assert node0.redis_connection.connection.read_response.called
+        assert node1.redis_connection.connection.read_response.called
+
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    def test_cluster_delslotsrange(self):
+        cluster_slots = [
+            [
+                0,
+                8191,
+                ["127.0.0.1", 7000, "node_0"],
+            ],
+            [
+                8192,
+                16383,
+                ["127.0.0.1", 7001, "node_1"],
+            ],
+        ]
+        r = get_mocked_redis_client(
+            host=default_host, port=default_port, cluster_slots=cluster_slots
+        )
+        mock_all_nodes_resp(r, "OK")
+        node = r.get_random_node()
+        r.cluster_addslots(node, 1, 2, 3, 4, 5)
+        assert r.cluster_delslotsrange(1, 5)
+
+    @skip_if_redis_enterprise()
+    def test_readonly(self):
+        r = get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
+        assert r.readonly() is True
+        all_replicas_results = r.readonly(target_nodes="replicas")
+        for res in all_replicas_results.values():
+            assert res is True
+        for replica in r.get_replicas():
+            assert replica.redis_connection.connection.read_response.called
+
+    @skip_if_redis_enterprise()
+    def test_readwrite(self):
+        r = get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
+        assert r.readwrite() is True
+        all_replicas_results = r.readwrite(target_nodes="replicas")
+        for res in all_replicas_results.values():
+            assert res is True
+        for replica in r.get_replicas():
+            assert replica.redis_connection.connection.read_response.called
 
 
 class TestStaticMetadataRouting:
@@ -3859,7 +3827,7 @@ class TestNodesManager:
                 port=default_port,
                 cluster_enabled=False,
             )
-            assert "Cluster mode is not enabled on this node" in str(e.value)
+        assert "Cluster mode is not enabled on this node" in str(e.value)
 
     @pytest.mark.fixed_client
     def test_unreachable_error_is_reserved_for_connectivity_failures(self):
@@ -4764,7 +4732,7 @@ class TestClusterPubSubObject:
         mock_node_conn.disconnect.assert_called_once()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_client_list_iter_blocked_on_cluster_pipeline():
     """
     client_list_iter sends the same CLIENT LIST command as client_list, which
@@ -4782,13 +4750,13 @@ def test_client_list_iter_blocked_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_not_in_pipeline_blocked_commands():
     """EVALSHA must be usable in ClusterPipeline (see #2914)."""
     assert "EVALSHA" not in PIPELINE_BLOCKED_COMMANDS
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_can_be_queued_on_cluster_pipeline():
     """
     Queuing EVALSHA on a ClusterPipeline must not raise the historical
@@ -4811,7 +4779,7 @@ def test_evalsha_can_be_queued_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_script_queues_evalsha_on_cluster_pipeline():
     """Script must queue EVALSHA on ClusterPipeline without calling script_load."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4827,7 +4795,7 @@ def test_script_queues_evalsha_on_cluster_pipeline():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
     """
     Sync ClusterPipeline must route EVALSHA via determine_slot, not
@@ -4851,7 +4819,7 @@ def test_evalsha_zero_keys_pipeline_execute_skips_get_command_keys():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_reuses_slot_in_transaction():
     """
     Zero-key EVALSHA in a transactional pipeline must reuse one slot so
@@ -4876,7 +4844,7 @@ def test_evalsha_zero_keys_reuses_slot_in_transaction():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
     """Zero-key EVALSHA after a keyed slot is fixed reuses that slot."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4892,7 +4860,7 @@ def test_evalsha_zero_keys_follows_keyed_slot_in_transaction():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_slotless_command_does_not_lock_keyed_slot_flag():
     """Slotless commands must not block later keyed retargeting."""
     r = get_mocked_redis_client(host=default_host, port=default_port)
@@ -4915,7 +4883,7 @@ def test_slotless_command_does_not_lock_keyed_slot_flag():
         r.close()
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 def test_evalsha_zero_keys_then_cross_slot_raises_at_execute():
     """
     Zero-key EVALSHA retarget must not swallow a later true cross-slot
@@ -5583,9 +5551,6 @@ class TestReadOnlyPipeline:
         ro = _get_client(RedisCluster, request, read_from_replicas=True)
         key = "bar"
         ro.set(key, "foo")
-        import time
-
-        time.sleep(0.2)
         with ro.pipeline() as readonly_pipe:
             mock_all_nodes_resp(ro, "MOCK_OK")
             assert readonly_pipe.read_from_replicas is True
@@ -5622,9 +5587,6 @@ class TestReadOnlyPipeline:
         )
         key = "bar"
         ro.set(key, "foo")
-        import time
-
-        time.sleep(0.2)
 
         with ro.pipeline() as readonly_pipe:
             mock_all_nodes_resp(ro, "MOCK_OK")

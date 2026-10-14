@@ -1126,6 +1126,9 @@ class ClusterManagementCommands(ManagementCommands):
         connection with this id should be provided.
         When clientid is not provided - target_nodes can be any node.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself.
+
         For more information see https://redis.io/commands/client-tracking
         """
         return self.client_tracking(
@@ -1160,6 +1163,9 @@ class ClusterManagementCommands(ManagementCommands):
         When clientid is provided - in target_nodes only the node that owns the
         connection with this id should be provided.
         When clientid is not provided - target_nodes can be any node.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        turning tracking off would stop invalidations for cached replies.
 
         For more information see https://redis.io/commands/client-tracking
         """

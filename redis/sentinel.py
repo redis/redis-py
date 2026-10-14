@@ -70,7 +70,7 @@ class SentinelManagedConnection(Connection):
         disable_decoding=False,
         *,
         timeout: Union[float, object] = SENTINEL,
-        disconnect_on_error: Optional[bool] = False,
+        disconnect_on_error: Optional[bool] = True,
         push_request: Optional[bool] = False,
     ):
         try:

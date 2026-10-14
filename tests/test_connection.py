@@ -12,12 +12,14 @@ import types
 import warnings
 import weakref
 from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
+from importlib import metadata
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
+from packaging.version import Version
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis._parsers.hiredis import NOT_ENOUGH_DATA, _socket_can_read, _socket_is_closed
@@ -39,6 +41,7 @@ from redis.cache import (
 from redis.connection import (
     CacheProxyConnection,
     Connection,
+    HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
@@ -63,6 +66,7 @@ from redis.observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
     ConnectionState,
+    get_pool_name,
 )
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE, SENTINEL
@@ -105,6 +109,29 @@ def make_hiredis_parser(
     return parser
 
 
+def _wait_for_peer_close(sock, timeout=5.0):
+    """Poll until the peer's FIN shows up in the socket's poll flags.
+
+    Readability alone is not enough: data sent before the close makes the socket
+    readable before the FIN arrives. macOS reports POLLHUP, Linux POLLRDHUP.
+    Without POLLRDHUP (PyPy) a Linux FIN shows only as POLLIN, which buffered data
+    hides, so there the wait ends once the socket is readable plus a short grace.
+    """
+    rdhup = getattr(select, "POLLRDHUP", None)
+    closed_flags = select.POLLHUP | (rdhup or 0)
+    poller = select.poll()
+    poller.register(sock, select.POLLIN | closed_flags)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        events = [ev for _, ev in poller.poll(50)]
+        if any(ev & closed_flags for ev in events):
+            return
+        if events and rdhup is None:
+            time.sleep(0.1)
+            return
+    raise AssertionError("the peer close did not reach the socket in time")
+
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 def test_invalid_response(r):
@@ -115,6 +142,7 @@ def test_invalid_response(r):
             parser.read_response()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_detects_reader_data():
     parser = make_hiredis_parser(response=b"OK", has_data=True)
 
@@ -122,6 +150,7 @@ def test_hiredis_can_read_detects_reader_data():
     assert parser.read_response() == b"OK"
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_returns_true_for_readable_open_socket():
     # socket readable, reader empty, and not closed -> pending data/push, so
     # can_read() reports readable without consuming anything.
@@ -137,6 +166,7 @@ def test_hiredis_can_read_returns_true_for_readable_open_socket():
     closed.assert_called_once_with(parser._sock)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_raises_on_peer_closed_socket():
     # regression for #4128: a peer-closed socket reads as ready but the reader
     # has no buffered data. can_read() must raise ConnectionError so the pool
@@ -151,6 +181,7 @@ def test_hiredis_can_read_raises_on_peer_closed_socket():
             parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
@@ -177,7 +208,7 @@ def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
     try:
         server.sendall(b">3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$5\r\nhello\r\n")
         server.close()  # graceful FIN with the push message still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert parser.can_read(timeout=0) is True
         assert parser.read_response(push_request=True) == [b"message", b"ch", b"hello"]
@@ -189,6 +220,7 @@ def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
         listener.close()
 
 
+@pytest.mark.fixed_client
 def test_socket_is_closed_reports_not_closed_with_pending_ssl_data():
     # SSL sockets buffer decrypted bytes above the OS socket layer; those must
     # be processed before the connection can be treated as closed, like
@@ -306,6 +338,7 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
         peer.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -327,6 +360,7 @@ def test_socket_is_closed_detects_peer_close():
         closed.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -343,13 +377,14 @@ def test_socket_is_closed_detects_tcp_peer_half_close():
     try:
         assert _socket_is_closed(client) is False
         server.close()  # graceful FIN
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
         assert _socket_is_closed(client) is True
     finally:
         client.close()
         listener.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -367,7 +402,7 @@ def test_socket_is_closed_defers_close_until_pending_data_is_read():
     try:
         server.sendall(b"pending invalidation")
         server.close()  # graceful FIN with data still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert _socket_is_closed(client) is False
         # the MSG_PEEK confirmation must not consume the pending data
@@ -378,6 +413,7 @@ def test_socket_is_closed_defers_close_until_pending_data_is_read():
         listener.close()
 
 
+@pytest.mark.fixed_client
 def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
     # without select.poll (e.g. Windows) closed and has-data states are
     # indistinguishable here, so we conservatively report not-closed.
@@ -390,6 +426,7 @@ def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
         closed.close()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_does_not_decide_disable_decoding():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(
@@ -402,6 +439,7 @@ def test_hiredis_can_read_does_not_decide_disable_decoding():
     assert parser.read_response(disable_decoding=True) == raw
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_leaves_decoding_to_read_response():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(
@@ -414,6 +452,7 @@ def test_hiredis_can_read_leaves_decoding_to_read_response():
     assert parser.read_response() == raw.decode()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_returns_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     handled_response = object()
@@ -426,6 +465,7 @@ def test_hiredis_read_response_returns_initial_push_notification():
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_skips_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     parser = make_hiredis_parser()
@@ -437,6 +477,7 @@ def test_hiredis_read_response_skips_initial_push_notification():
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_preserves_timeout_after_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     parser = make_hiredis_parser()
@@ -453,6 +494,7 @@ def test_hiredis_read_response_preserves_timeout_after_initial_push_notification
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
     parser = make_hiredis_parser()
     parser._sock.recv_into.side_effect = BlockingIOError(
@@ -463,6 +505,7 @@ def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
         parser.read_response(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
 def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
     cleared_attr,
@@ -479,6 +522,7 @@ def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
         parser.read_from_socket()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
 def test_hiredis_can_read_raises_connection_error_when_disconnected(cleared_attr):
     # a disconnect from another thread (e.g. the multi-database health check
@@ -494,6 +538,7 @@ def test_hiredis_can_read_raises_connection_error_when_disconnected(cleared_attr
         parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -510,6 +555,7 @@ def test_hiredis_can_read_raises_connection_error_when_socket_already_closed():
         parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     # regression for #4003: if _reader is cleared by a concurrent disconnect
     # after read_from_socket() returns, the in-flight read must still complete
@@ -526,6 +572,7 @@ def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     assert parser.read_response() == b"OK"
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_reports_concurrent_close_when_timeout_restore_fails():
     # a concurrent disconnect() closes the socket as well as clearing the parser
     # state, so restoring the per-call timeout in the finally raises EBADF. an
@@ -544,6 +591,7 @@ def test_hiredis_read_reports_concurrent_close_when_timeout_restore_fails():
         parser.read_from_socket(timeout=1)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
     sock = Mock()
     sock.recv.side_effect = BlockingIOError(
@@ -555,6 +603,7 @@ def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
         socket_buffer.readline(timeout=0)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_read_after_close_raises_connection_error():
     """
     A read on a closed buffer reports a gone connection.
@@ -581,6 +630,7 @@ def test_socket_buffer_read_after_close_raises_connection_error():
         socket_buffer.unread_bytes()
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_read_reports_concurrent_close_as_connection_error():
     """
     A close that lands while the read is blocked in recv reports a gone connection.
@@ -601,6 +651,7 @@ def test_socket_buffer_read_reports_concurrent_close_as_connection_error():
         socket_buffer.readline()
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_reports_concurrent_close_when_timeout_restore_fails():
     """
     A per-call timeout that can no longer be restored does not hide the close.
@@ -625,6 +676,7 @@ def test_socket_buffer_reports_concurrent_close_when_timeout_restore_fails():
         socket_buffer.readline(timeout=1)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_cleanup_after_close_does_not_raise():
     """
     ``purge`` and ``rewind`` stay best effort on a closed buffer.
@@ -640,6 +692,7 @@ def test_socket_buffer_cleanup_after_close_does_not_raise():
     socket_buffer.rewind(0)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_purge_survives_a_close_landing_mid_purge():
     """
     ``purge`` stays best effort when the close lands inside it.
@@ -1003,6 +1056,26 @@ def test_pack_command(Class):
 
 
 @pytest.mark.fixed_client
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_pack_command_respects_connection_encoding(protocol):
+    connection = Connection(encoding="latin-1", protocol=protocol)
+
+    assert connection.pack_command("SET", "key", "café") == [
+        b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$4\r\ncaf\xe9\r\n"
+    ]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+def test_hiredis_command_packer_no_arg_constructor():
+    connection = Connection(command_packer=HiredisRespSerializer())
+    expected = [b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n"]
+
+    assert connection.pack_command("SET", "key", "value") == expected
+    assert connection.pack_command("SET", "key", memoryview(b"value")) == expected
+
+
+@pytest.mark.fixed_client
 # Hardcodes a localhost URL, so it cannot target a remote managed Redis Enterprise endpoint.
 @skip_if_redis_enterprise()
 def test_create_single_connection_client_from_url():
@@ -1012,6 +1085,7 @@ def test_create_single_connection_client_from_url():
     assert client.connection is not None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_pool_auto_close(request, from_url):
     """Verify that basic Redis instances have auto_close_connection_pool set to True"""
@@ -1029,6 +1103,7 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -1062,6 +1137,7 @@ def test_redis_connection_pool(request, from_url):
     pool.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_from_pool(request, from_url):
     """Verify that basic Redis instances created using `from_pool()`
@@ -1108,6 +1184,7 @@ def test_create_secure_client_from_url_with_minimum_ssl_version():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "conn, error, expected_message",
     [
@@ -1146,7 +1223,8 @@ def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(port=9999)
+        # nothing listens on this port, so skip the default backoff retries
+        redis = Redis(port=9999, retry=Retry(NoBackoff(), 0))
         redis.set("a", "b")
 
 
@@ -1158,7 +1236,10 @@ def test_network_connection_failure():
 def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
-        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        # the socket file does not exist, so skip the default backoff retries
+        redis = Redis(
+            unix_socket_path="unix:///tmp/a.sock", retry=Retry(NoBackoff(), 0)
+        )
         redis.set("a", "b")
 
 
@@ -2574,48 +2655,95 @@ class TestTrackingModePairing:
         assert proxy._skip_next_caching is False
 
 
-_CLIENT_CACHING_SPELLINGS = [
-    ("CLIENT CACHING", "NO"),
-    ("client caching", "yes"),
-    (b"CLIENT CACHING", b"NO"),
-    ("CLIENT", "CACHING", "NO"),
-    (b"CLIENT", b"CACHING", b"YES"),
-    (b"client", "Caching", "no"),
+# Every spelling ``pack_command`` accepts: one argument or two, ``str``, ``bytes``,
+# ``bytearray`` or ``memoryview``, any case, padded with whitespace or not. Each row is ``(args, the command name the refusal reports)``.
+_CACHE_OWNED_SPELLINGS = [
+    (("CLIENT CACHING", "NO"), "CLIENT CACHING"),
+    (("client caching", "yes"), "CLIENT CACHING"),
+    ((b"CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    (("CLIENT", "CACHING", "NO"), "CLIENT CACHING"),
+    ((b"CLIENT", b"CACHING", b"YES"), "CLIENT CACHING"),
+    ((b"client", "Caching", "no"), "CLIENT CACHING"),
+    (("CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("CLIENT TRACKING", "ON", "REDIRECT", 5), "CLIENT TRACKING"),
+    (("client tracking", "on", "bcast"), "CLIENT TRACKING"),
+    (("CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT", b"TRACKING", b"OFF"), "CLIENT TRACKING"),
+    ((b"CLIENT TRACKING", b"ON", b"OPTIN"), "CLIENT TRACKING"),
+    (("RESET",), "RESET"),
+    (("reset",), "RESET"),
+    ((b"RESET",), "RESET"),
+    ((bytearray(b"CLIENT CACHING"), b"NO"), "CLIENT CACHING"),
+    (("CLIENT", memoryview(b"CACHING"), "YES"), "CLIENT CACHING"),
+    (
+        (bytearray(b"CLIENT"), bytearray(b"TRACKING"), bytearray(b"OFF")),
+        "CLIENT TRACKING",
+    ),
+    ((memoryview(b"RESET"),), "RESET"),
+    ((" CLIENT TRACKING", "OFF"), "CLIENT TRACKING"),
+    (("\tclient tracking", "off"), "CLIENT TRACKING"),
+    ((b" CLIENT CACHING", b"NO"), "CLIENT CACHING"),
+    ((" RESET",), "RESET"),
+    (("reset\t",), "RESET"),
 ]
-_CLIENT_CACHING_IDS = [
-    "str-one-arg",
-    "str-lowercase",
-    "bytes-one-arg",
-    "str-two-args",
-    "bytes-two-args",
-    "mixed-case-and-types",
+_CACHE_OWNED_IDS = [
+    "caching-str-one-arg",
+    "caching-str-lowercase",
+    "caching-bytes-one-arg",
+    "caching-str-two-args",
+    "caching-bytes-two-args",
+    "caching-mixed-case-and-types",
+    "tracking-off",
+    "tracking-on-redirect",
+    "tracking-lowercase-bcast",
+    "tracking-str-bytes-two-args",
+    "tracking-bytes-two-args",
+    "tracking-bytes-one-arg-optin",
+    "reset",
+    "reset-lowercase",
+    "reset-bytes",
+    "caching-bytearray-one-arg",
+    "caching-memoryview-subcommand",
+    "tracking-bytearray-two-args",
+    "reset-memoryview",
+    "tracking-leading-space",
+    "tracking-leading-tab",
+    "caching-bytes-leading-space",
+    "reset-leading-space",
+    "reset-trailing-whitespace",
 ]
 
 
 @pytest.mark.fixed_client
-class TestUserSentClientCaching:
+class TestUserSentCacheOwnedCommands:
     """
-    A user-sent ``CLIENT CACHING`` sets a flag that the next command on the socket
-    consumes, and a pooled connection promises nothing about which command that is - so
-    the cache refuses it on every connection it manages, in every mode.
+    ``CLIENT CACHING``, ``CLIENT TRACKING`` and ``RESET`` each change the tracking state
+    the cache relies on for invalidations: a stray ``CLIENT CACHING`` is consumed by
+    whatever the socket sends next, and the other two stop or redirect invalidations while
+    the cache keeps storing replies. So the cache refuses them on every connection it
+    manages, in every mode.
     """
 
     @pytest.mark.parametrize("mode", list(TrackingMode))
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_send_command_refuses_client_caching(
-        self, proxy_factory, mock_connection, mode, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_send_command_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, mode, args, command
     ):
         proxy, _ = proxy_factory(mode)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.send_command(*args)
 
         mock_connection.send_command.assert_not_called()
         mock_connection.send_packed_command.assert_not_called()
 
-    @pytest.mark.parametrize("args", _CLIENT_CACHING_SPELLINGS, ids=_CLIENT_CACHING_IDS)
-    def test_pack_commands_refuses_client_caching(
-        self, proxy_factory, mock_connection, args
+    @pytest.mark.parametrize(
+        "args,command", _CACHE_OWNED_SPELLINGS, ids=_CACHE_OWNED_IDS
+    )
+    def test_pack_commands_refuses_cache_owned_commands(
+        self, proxy_factory, mock_connection, args, command
     ):
         """
         Every pipeline and transaction packs through ``pack_commands``, so refusing there
@@ -2623,7 +2751,7 @@ class TestUserSentClientCaching:
         """
         proxy, _ = proxy_factory(TrackingMode.OPTOUT)
 
-        with pytest.raises(RedisError, match="CLIENT CACHING cannot be sent"):
+        with pytest.raises(RedisError, match=f"^{command} cannot be sent"):
             proxy.pack_commands([("SET", "a", "1"), args, ("GET", "a")])
 
         mock_connection.pack_commands.assert_not_called()
@@ -2632,13 +2760,38 @@ class TestUserSentClientCaching:
         "args",
         [
             ("CLIENT", "TRACKINGINFO"),
+            (b"CLIENT TRACKINGINFO",),
+            ("CLIENT GETREDIR",),
             ("CLIENT ID",),
             ("CLIENT",),
             ("CONFIG", "GET", "maxmemory"),
+            ("CONFIG RESETSTAT",),
+            ("ACL LOG", b"RESET"),
+            ("RENAME", "a", "b"),
+            (b"rpush", b"a", b"1"),
             ("GET", "foo"),
             (b"CACHING",),
+            (b"TRACKING", b"OFF"),
+            (" CLIENT TRACKINGINFO",),
+            (bytearray(b"RENAME"), "a", "b"),
         ],
-        ids=["trackinginfo", "client-id", "bare-client", "config", "get", "no-client"],
+        ids=[
+            "trackinginfo",
+            "trackinginfo-bytes",
+            "getredir",
+            "client-id",
+            "bare-client",
+            "config",
+            "config-resetstat",
+            "acl-log-reset",
+            "rename",
+            "five-char-r-command",
+            "get",
+            "no-client-caching",
+            "no-client-tracking",
+            "trackinginfo-leading-space",
+            "rename-bytearray",
+        ],
     )
     def test_other_commands_pass_through(self, proxy_factory, mock_connection, args):
         # ``plain``, so no command is paired and every one reaches ``send_command`` as is.
@@ -2649,6 +2802,27 @@ class TestUserSentClientCaching:
 
         mock_connection.send_command.assert_called_once_with(*args)
         mock_connection.pack_commands.assert_called_once_with([args])
+
+    def test_the_caches_own_tracking_handshake_is_not_refused(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        The connect callback is registered on the wrapped connection, which calls it with
+        itself, so the handshake's ``CLIENT TRACKING ON`` never passes the guarded
+        ``send_command``. ``test_the_mode_is_sent_in_the_tracking_handshake`` pins what it
+        sends.
+        """
+        proxy, _ = proxy_factory(TrackingMode.OPTOUT)
+        mock_connection._parser = Mock()
+
+        mock_connection.register_connect_callback.assert_called_once_with(
+            proxy._enable_tracking_callback
+        )
+        proxy._enable_tracking_callback(mock_connection)
+
+        mock_connection.send_command.assert_called_once_with(
+            "CLIENT", "TRACKING", "ON", "OPTOUT"
+        )
 
     def test_the_caches_own_pairing_is_not_refused(
         self, proxy_factory, mock_connection
@@ -3210,6 +3384,7 @@ def test_invalidation_pushes_interleave_with_a_caching_pair(r, parser_class):
     assert cache.size == 0
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolGetConnectionCount:
     """Tests for ConnectionPool.get_connection_count() method."""
 
@@ -3361,6 +3536,7 @@ class TestConnectionPoolGetConnectionCount:
         pool.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolGetConnectionCount:
     """Tests for BlockingConnectionPool.get_connection_count() method."""
 
@@ -3420,11 +3596,13 @@ class TestBlockingConnectionPoolGetConnectionCount:
         pool.disconnect()
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_resolves_exception_names():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
     assert kw["retry_on_error"] == [ConnectionError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_comma_separated():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
@@ -3432,6 +3610,7 @@ def test_parse_url_retry_on_error_comma_separated():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_bracket_list():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
@@ -3439,6 +3618,7 @@ def test_parse_url_retry_on_error_bracket_list():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_blank_entry():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=,")
@@ -3447,12 +3627,14 @@ def test_parse_url_retry_on_error_blank_entry():
     )
 
 
+@pytest.mark.fixed_client
 def test_parse_url_invalid_db_keeps_stable_message():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?db=not-an-int")
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("url", "expected_port"),
     (
@@ -3469,6 +3651,7 @@ def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
     assert pool.connection_kwargs.get("port") == expected_port
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
@@ -3477,6 +3660,7 @@ def test_parse_url_retry_on_error_unknown_name():
     )
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_usable_in_retry():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
     conn = Connection(**kw)
@@ -3498,6 +3682,7 @@ def test_parse_url_retry_on_error_usable_in_retry():
     assert calls == 2
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
 def test_connection_rejects_bool_port(port):
     """bool subclasses int; port=True must not become privileged port 1."""
@@ -3505,18 +3690,21 @@ def test_connection_rejects_bool_port(port):
         redis.Connection(port=port)
 
 
+@pytest.mark.fixed_client
 def test_connection_accepts_numeric_port_string():
     """Callers still pass a decimal string such as \"6379\"."""
     c = redis.Connection(port="6379")
     assert c.port == 6379
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [-1, 65536, 99999])
 def test_connection_rejects_out_of_range_port(port):
     with pytest.raises(ValueError, match="port must be in 0..65535"):
         redis.Connection(port=port)
 
 
+@pytest.mark.fixed_client
 def test_connection_allows_ephemeral_port_zero():
     c = redis.Connection(port=0)
     assert c.port == 0
@@ -3583,6 +3771,7 @@ def _reconnect_with(conn, monkeypatch, data):
 BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
 
 
+@pytest.mark.fixed_client
 class TestInvalidResponseInvalidatesConnection:
     """A framing violation must drop the connection even when the caller
     passed disconnect_on_error=False, otherwise the rewound bytes stay queued
@@ -3634,6 +3823,7 @@ class TestInvalidResponseInvalidatesConnection:
         assert conn.is_connected is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [_RESP2Parser, _HiredisParser],
@@ -3696,10 +3886,18 @@ def _deeply_nested_reply(depth):
     return b"*1\r\n" * depth + b"*0\r\n"
 
 
+# hiredis-py 3.4.1 is the first release whose bundled hiredis limits reply
+# nesting depth (to 1024); earlier releases parse a reply of any depth.
+HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and Version(
+    metadata.version("hiredis")
+) >= Version("3.4.1")
+
+
+@pytest.mark.fixed_client
 class TestDeeplyNestedReplyInvalidatesConnection:
     """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
-    exhaust the stack (RecursionError) and hiredis hits its own nesting limit
-    (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
+    exhaust the stack (RecursionError) and hiredis >= 3.4.1 hits its own nesting
+    limit (InvalidResponse). Both are unrecoverable by re-parsing, so both must drop
     the connection even under disconnect_on_error=False. #4144 converts the
     pure-Python case into a bounded-depth InvalidResponse; catching
     RecursionError here is what stops the loop until that lands.
@@ -3707,17 +3905,36 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 
     PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="PyPy bounds recursion by stack bytes; unwinding the overflow can "
+        "abort the interpreter (#4144 replaces the RecursionError)",
+    )
     def test_python_parser_recursion_error_disconnects(self):
-        # PyPy bounds recursion by stack bytes, not frames, and its JIT-compiled
-        # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
-        conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
+        # 3000 levels exceed CPython's recursion limit. PyPy, which would need far
+        # more, is skipped: unwinding the RecursionError from a native stack
+        # overflow through its JIT frames intermittently aborts the interpreter.
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _RESP2Parser)
 
-        with pytest.raises(RecursionError):
-            conn.read_response(**self.PUBSUB_KWARGS)
+        # A GC pass at the recursion limit would run finalizers of garbage left
+        # by earlier tests with no stack left to report their errors, so collect
+        # first and keep GC off during the deep parse.
+        gc.collect()
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with pytest.raises(RecursionError):
+                conn.read_response(**self.PUBSUB_KWARGS)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
         assert conn.is_connected is False
 
-    @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
+    @pytest.mark.skipif(
+        not HIREDIS_LIMITS_NESTING_DEPTH,
+        reason="requires hiredis >= 3.4.1, which limits reply nesting depth",
+    )
     def test_hiredis_nesting_limit_disconnects(self):
         conn = _connection_with_stream(_deeply_nested_reply(3000), _HiredisParser)
 
@@ -3733,6 +3950,7 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         assert conn.is_connected is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [
@@ -3805,6 +4023,7 @@ class TestMalformedNumericFrameInvalidatesConnection:
         assert conn.is_connected is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 class TestPushHandlerValueErrorKeepsConnection:
     """A ValueError raised by the *push handler* is not a framing error: hiredis
@@ -3829,3 +4048,223 @@ class TestPushHandlerValueErrorKeepsConnection:
 
         assert conn.is_connected is True
         assert conn.read_response(disconnect_on_error=False) == b"SECOND"
+
+
+class _DummyConnection:
+    """Minimal connection stub for pool metric tests (no real socket)."""
+
+    description_format = "DummyConnection<>"
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.pid = os.getpid()
+        self._sock = None
+
+    def connect(self):
+        self._sock = MagicMock()
+
+    def disconnect(self):
+        self._sock = None
+
+    def can_read(self):
+        return False
+
+    def should_reconnect(self):
+        return False
+
+    def re_auth(self):
+        pass
+
+
+def _pool_metric_calls(mock_fn, pool_name):
+    """Extract (state, delta) tuples from record_connection_count calls for a pool.
+
+    Filters by pool_name to avoid interference from GC of other pools.
+    """
+    result = []
+    for c in mock_fn.call_args_list:
+        p = c.kwargs.get("pool_name", c.args[0] if c.args else None)
+        if p != pool_name:
+            continue
+        state = c.kwargs.get("connection_state", c.args[1] if len(c.args) > 1 else None)
+        counter = c.kwargs.get("counter", c.args[2] if len(c.args) > 2 else 1)
+        result.append((state, counter))
+    return result
+
+
+def _net(calls):
+    """Return (idle_net, used_net) from a list of (state, delta) tuples."""
+    idle = sum(d for s, d in calls if s == ConnectionState.IDLE)
+    used = sum(d for s, d in calls if s == ConnectionState.USED)
+    return idle, used
+
+
+@pytest.mark.fixed_client
+class TestConnectionPoolMetricCount:
+    """Tests for db.client.connection.count UpDownCounter accuracy.
+
+    Verifies that get_connection / release produce balanced IDLE and USED
+    counter updates across ConnectionPool and BlockingConnectionPool.
+    """
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        """A new connection should record USED +1 only (never was idle)."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"New conn should not touch IDLE, got {idle_net}"
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_reused_connection_transitions_idle_to_used(self, mock_rec):
+        """A reused connection should record IDLE -1, USED +1."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        conn = pool.get_connection()
+        pool.release(conn)
+        mock_rec.reset_mock()
+
+        conn2 = pool.get_connection()
+        assert conn2 is conn
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == -1
+        assert used_net == 1
+        pool.release(conn2)
+
+    @patch("redis.connection.record_connection_count")
+    def test_full_lifecycle_nets_to_zero(self, mock_rec):
+        """create -> use -> release -> reuse -> release -> destroy = net 0."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        pool.release(conn)
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Simulate destruction (what __del__ / reset does)
+        idle_count = len(pool._available_connections)
+        if idle_count:
+            mock_rec(
+                pool_name=pn,
+                connection_state=ConnectionState.IDLE,
+                counter=-idle_count,
+            )
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
+        assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """release() of a connection the pool no longer owns (e.g. inherited by
+        a forked child) must not record connection.count. Fork-time accounting
+        is owned by reset()/__del__; recording here would double-count."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1  # simulate a connection inherited across a fork
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() (e.g. SentinelConnectionPool after a master failover)
+        must still decrement USED."""
+        pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+
+
+@pytest.mark.fixed_client
+class TestBlockingConnectionPoolMetricCount:
+    """Same metric-count tests for BlockingConnectionPool."""
+
+    def _pool(self):
+        return BlockingConnectionPool(
+            connection_class=_DummyConnection,
+            max_connections=10,
+            timeout=0.1,
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_new_connection_records_only_used(self, mock_rec):
+        pool = self._pool()
+        pn = get_pool_name(pool)
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert idle_net == 0
+        assert used_net == 1
+        pool.release(conn)
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_unowned_does_not_record(self, mock_rec):
+        """Unowned (inherited-across-fork) release must not record; fork-time
+        accounting is owned by reset()/__del__."""
+        pool = self._pool()
+        mock_rec.reset_mock()
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        conn.pid = -1
+        pool.release(conn)
+
+        assert mock_rec.call_args_list == [], (
+            "unowned release must not record connection.count"
+        )
+
+    @patch("redis.connection.record_connection_count")
+    def test_release_rejected_same_pid_decrements_used(self, mock_rec):
+        """A connection checked out by this process but rejected by
+        owns_connection() must decrement USED and be removed from _connections
+        so a later reset() does not decrement USED again."""
+        pool = self._pool()
+        pn = get_pool_name(pool)
+
+        conn = pool.get_connection()
+        mock_rec.reset_mock()
+        with patch.object(pool, "owns_connection", return_value=False):
+            pool.release(conn)
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == -1, f"USED must be decremented, got {used_net}"
+        assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
+        assert conn not in pool._connections
+
+        mock_rec.reset_mock()
+        pool.reset()
+
+        calls = _pool_metric_calls(mock_rec, pn)
+        idle_net, used_net = _net(calls)
+        assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
+        assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"

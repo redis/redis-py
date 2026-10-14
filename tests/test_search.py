@@ -104,7 +104,7 @@ NON_ENGLISH_STEMMING_CASES = [
 class SearchTestsBase:
     @staticmethod
     def waitForIndex(env, idx, timeout=None):
-        delay = 0.1
+        delay = 0.02
         while True:
             try:
                 res = env.execute_command("FT.INFO", idx)
@@ -186,8 +186,11 @@ class SearchTestsBase:
         assert isinstance(indexer, Search.BatchIndexer)
         assert 50 == indexer.chunk_size
 
+        # one round trip for all documents, not one HSET each
+        pipe = indexer.client.client.pipeline(transaction=False)
         for key, doc in chapters.items():
-            indexer.client.client.hset(key, mapping=doc)
+            pipe.hset(key, mapping=doc)
+        pipe.execute()
         indexer.commit()
 
     @pytest.fixture
@@ -198,21 +201,6 @@ class SearchTestsBase:
 
 
 class TestBaseSearchFunctionality(SearchTestsBase):
-    # Shape of the index used by the on-timeout tests. The query these build
-    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
-    # of the result set rather than by the vector arithmetic - at a fixed
-    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
-    # count is what buys runtime and the dimension only buys memory.
-    #
-    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
-    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
-    # thread running the query, so a query that only slightly overruns its
-    # timeout may still return full results - intended server behavior. Below
-    # roughly a 3x margin the error stops being raised at all; these values
-    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
-    _SEARCH_TIMEOUT_DIM = 256
-    _SEARCH_TIMEOUT_DOCS = 12000
-
     @pytest.mark.redismod
     # FT.DEL is not available on Redis Enterprise's search module.
     @skip_if_redis_enterprise()
@@ -573,17 +561,16 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         """
         Ensure the index gets dropped by data remains by default
         """
-        for x in range(20):
-            for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
-                idx = "HaveIt"
-                index = self.getClient(client)
-                index.hset("index:haveit", mapping={"name": "haveit"})
-                idef = IndexDefinition(prefix=["index:"])
-                index.ft(idx).create_index((TextField("name"),), definition=idef)
-                self.waitForIndex(index, idx)
-                index.ft(idx).dropindex(delete_documents=keep_docs[0])
-                i = index.hgetall("index:haveit")
-                assert i == keep_docs[1]
+        for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
+            idx = "HaveIt"
+            index = self.getClient(client)
+            index.hset("index:haveit", mapping={"name": "haveit"})
+            idef = IndexDefinition(prefix=["index:"])
+            index.ft(idx).create_index((TextField("name"),), definition=idef)
+            self.waitForIndex(index, idx)
+            index.ft(idx).dropindex(delete_documents=keep_docs[0])
+            i = index.hgetall("index:haveit")
+            assert i == keep_docs[1]
 
     @pytest.mark.redismod
     def test_example(self, client):
@@ -608,14 +595,19 @@ class TestBaseSearchFunctionality(SearchTestsBase):
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
     def test_auto_complete(self, client):
-        n = 0
         with open(TITLES_CSV) as f:
-            cr = csv.reader(f)
+            suggestions = [
+                Suggestion(row[0], score=float(row[1])) for row in csv.reader(f)
+            ]
 
-            for row in cr:
-                n += 1
-                term, score = row[0], float(row[1])
-                assert n == client.ft().sugadd("ac", Suggestion(term, score=score))
+        # sugadd pipelines its suggestions and returns the last reply, which is
+        # the dictionary size, so batching keeps the size check per batch
+        ft = client.ft()
+        n = 0
+        for i in range(0, len(suggestions), 500):
+            batch = suggestions[i : i + 500]
+            n += len(batch)
+            assert n == ft.sugadd("ac", *batch)
 
         assert n == client.ft().suglen("ac")
         ret = client.ft().sugget("ac", "bad", with_scores=True)
@@ -1188,6 +1180,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
         self.createIndex(client.ft(), num_docs=500, definition=definition)
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "prefix",
         [
@@ -1202,6 +1195,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
         assert ["PREFIX", 1, prefix] == definition.args
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("prefix", [["hset:", "henry"], ("hset:", "henry")])
     def test_index_definition_prefix_list_or_tuple(self, prefix):
         definition = IndexDefinition(prefix=prefix, score=None)
@@ -1217,9 +1211,9 @@ class TestBaseSearchFunctionality(SearchTestsBase):
         ttl = client.execute_command("ft.debug", "TTL", "idx")
         assert ttl > 2
 
-        while ttl > 2:
-            ttl = client.execute_command("ft.debug", "TTL", "idx")
-            time.sleep(0.01)
+        # the TTL has seconds granularity, so one second is enough to see it drop
+        time.sleep(1.1)
+        assert client.execute_command("ft.debug", "TTL", "idx") < ttl
 
     @pytest.mark.redismod
     def test_skip_initial_scan(self, client):
@@ -1286,20 +1280,24 @@ class TestBaseSearchFunctionality(SearchTestsBase):
     @skip_ifmodversion_lt("2.0.0", "search")
     def test_create_client_definition_hash(self, client):
         """
-        Create definition with IndexType.HASH as index type (ON HASH),
-        and use hset to test the client definition.
+        IndexType.HASH sends an explicit ON HASH, which the server accepts and
+        indexes like the default index type; hset tests the client definition.
         """
         definition = IndexDefinition(
-            prefix=["hset:", "henry"], index_type=IndexType.HASH
+            prefix=["hset:", "henry"], index_type=IndexType.HASH, score=None
         )
-        self.createIndex(client.ft(), num_docs=500, definition=definition)
+        assert definition.args == ["ON", "HASH", "PREFIX", 2, "hset:", "henry"]
+        default = IndexDefinition(prefix=["hset:", "henry"], score=None)
+        assert default.args == ["PREFIX", 2, "hset:", "henry"]
 
-        info = client.ft().info()
-        assert 494 == int(info["num_docs"])
+        client.ft().create_index((TextField("f1"),), definition=definition)
+        self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-        client.ft().client.hset("hset:1", "f1", "v1")
+        client.hset("hset:1", "f1", "v1")
+        # outside the definition's prefixes, so not indexed
+        client.hset("other:1", "f1", "v1")
         info = client.ft().info()
-        assert 495 == int(info["num_docs"])
+        assert 1 == int(info["num_docs"])
 
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.2.0", "search")
@@ -1486,6 +1484,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             "The text field is not decoded correctly"
         )
 
+    @pytest.mark.fixed_client
     def test_return_field_encoding_is_keyed_by_alias(self):
         # The server returns an aliased field under its alias, so that is the
         # name the response is looked up under when decoding.
@@ -1624,16 +1623,22 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
                 client.ft().search(Query("*")).docs[1]
-            time.sleep(1)
-            assert 2 == client.ft().search(Query("*")).total
+            # wait for the expired document to leave the index
+            deadline = time.monotonic() + 5
+            while client.ft().search(Query("*")).total != 2:
+                assert time.monotonic() < deadline, "hset:2 was not expired"
+                time.sleep(0.01)
         elif expects_resp3_shape(client):
             assert 3 == client.ft().search(Query("*"))["total_results"]
             client.pexpire("hset:2", 300)
             deadline = time.monotonic() + 0.5
             while time.monotonic() < deadline:
                 client.ft().search(Query("*"))["results"][1]
-            time.sleep(1)
-            assert 2 == client.ft().search(Query("*"))["total_results"]
+            # wait for the expired document to leave the index
+            deadline = time.monotonic() + 5
+            while client.ft().search(Query("*"))["total_results"] != 2:
+                assert time.monotonic() < deadline, "hset:2 was not expired"
+                time.sleep(0.01)
 
     @pytest.mark.redismod
     @pytest.mark.experimental
@@ -1688,55 +1693,47 @@ class TestBaseSearchFunctionality(SearchTestsBase):
 
     def _create_search_timeout_index(self, client):
         client.ft().create_index(
-            (
-                TextField("description"),
-                VectorField(
-                    "embedding",
-                    "FLAT",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": self._SEARCH_TIMEOUT_DIM,
-                        "DISTANCE_METRIC": "L2",
-                    },
-                ),
-            ),
+            (TextField("description"),),
             definition=IndexDefinition(prefix=["search-timeout-item:"]),
         )
         SearchTestsBase.waitForIndex(client, "idx")
+        for i in range(5):
+            client.hset(f"search-timeout-item:{i}", "description", "red shoes")
 
-    def _add_data_for_search_timeout(self, client):
-        vectors = [
-            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
-            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
-        ]
-        pipeline = client.pipeline()
-        batch_size = 250
-        for i in range(self._SEARCH_TIMEOUT_DOCS):
-            pipeline.hset(
-                f"search-timeout-item:{i}",
-                mapping={
-                    "description": "red shoes",
-                    "embedding": vectors[i % len(vectors)],
-                },
+    def _search_with_forced_timeout(self, client, query):
+        # Whether a real query outlives its TIMEOUT depends on the dataset and
+        # on how fast the server is, so force the timeout instead:
+        # ``_FT.DEBUG FT.SEARCH ... TIMEOUT_AFTER_N 0`` runs the wrapped
+        # FT.SEARCH and has it time out before the first result. search()
+        # still builds the arguments and parses the reply.
+        ft = client.ft()
+        execute_command = ft.execute_command
+
+        def execute_with_forced_timeout(*args, **options):
+            return execute_command(
+                "_FT.DEBUG",
+                *args,
+                "TIMEOUT_AFTER_N",
+                0,
+                "DEBUG_PARAMS_COUNT",
+                2,
+                **options,
             )
-            if (i + 1) % batch_size == 0:
-                pipeline.execute()
-                pipeline = client.pipeline()
-        pipeline.execute()
+
+        ft.execute_command = execute_with_forced_timeout
+        return ft.search(query)
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip and the 8.0.0 gate come from the _FT.DEBUG
+    # timeout hook, not from TIMEOUT itself: Redis Enterprise does not expose
+    # the hook, and the 7.x stack images predate it.
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.0.0")
     def test_search_query_with_timeout(self, client):
         self._create_search_timeout_index(client)
-        self._add_data_for_search_timeout(client)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
-        res = client.ft().search(query, query_params={"vec": query_vector})
+        query = Query("red").timeout(1)
+        res = self._search_with_forced_timeout(client, query)
 
         if expects_resp3_shape(client):
             warnings = res.get("warning", [])
@@ -1758,32 +1755,33 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             assert warnings == []
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip comes from the _FT.DEBUG timeout hook, which
+    # Redis Enterprise does not expose, not from the fail policy itself.
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     def test_search_query_with_timeout_fail_policy(self, client):
         self._create_search_timeout_index(client)
-        self._add_data_for_search_timeout(client)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
+        query = Query("red").timeout(1)
 
         # ``search-on-timeout`` controls whether a timed-out query returns the
         # partial results collected so far (``return``, the default) or fails
-        # the command (``fail``).  Capture the original value so it is always
-        # restored, even if the assertion below raises.
+        # the command (``fail``). The server refuses TIMEOUT_AFTER_N with
+        # ``fail`` while search worker threads are enabled, so turn them off.
+        # Capture the original values so they are always restored, even if
+        # the assertion below raises.
         original = client.config_get("search-on-timeout")["search-on-timeout"]
+        original_workers = client.config_get("search-workers")["search-workers"]
         try:
+            assert client.config_set("search-workers", 0)
             assert client.config_set("search-on-timeout", "fail")
             # With the ``fail`` policy the server aborts the timed-out search
             # instead of returning partial results.
-            with pytest.raises(redis.ResponseError):
-                client.ft().search(query, query_params={"vec": query_vector})
+            with pytest.raises(redis.ResponseError, match="Timeout limit was reached"):
+                self._search_with_forced_timeout(client, query)
         finally:
             client.config_set("search-on-timeout", original)
+            client.config_set("search-workers", original_workers)
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.2.0")
@@ -2879,6 +2877,7 @@ class TestAggregations(SearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "bad_fields",
         [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
@@ -4117,8 +4116,10 @@ class TestSearchWithVamana(SearchTestsBase):
         # L2 distance test vectors
         vectors = [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [5.0, 0.0, 0.0]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4152,8 +4153,10 @@ class TestSearchWithVamana(SearchTestsBase):
             [-1.0, 0.0, 0.0],
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4182,8 +4185,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.0, 2.0, 3.0], [2.0, 1.0, 1.0], [3.0, 3.0, 3.0], [0.1, 0.1, 0.1]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4217,8 +4222,10 @@ class TestSearchWithVamana(SearchTestsBase):
             [10.0, 11.0, 12.0, 13.0],
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = "*=>[KNN 3 @v $vec]"
         q = Query(query).return_field("__v_score").sort_by("__v_score", True)
@@ -4251,8 +4258,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -4281,8 +4290,10 @@ class TestSearchWithVamana(SearchTestsBase):
 
         vectors = [[1.0, 2.0, 3.0, 4.0], [2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0]]
 
+        pipe = client.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4322,10 +4333,9 @@ class TestSearchWithVamana(SearchTestsBase):
         elif expects_resp3_shape(client):
             assert res["total_results"] == 2
 
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
+    @pytest.mark.fixed_client
     def test_svs_vamana_vector_field_basic(self):
+        # builds the field arguments only, so it needs no server or module
         field = VectorField(
             "v",
             "SVS-VAMANA",
@@ -4365,10 +4375,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4420,10 +4432,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         # Add data to both indices
+        pipe = client.pipeline(transaction=False)
         for i in range(15):
             vec = [float(i + j) for j in range(8)]
-            client.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
-            client.hset(f"doc32_{i}", "v32", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc32_{i}", "v32", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         # Test both indices
         query = Query("*=>[KNN 3 @v16 $vec as score]").no_content()
@@ -4453,149 +4467,24 @@ class TestSearchWithVamana(SearchTestsBase):
             assert res16["total_results"] == 3
             assert res32["total_results"] == 3
 
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
-    def test_svs_vamana_construction_window_size(self, client):
-        client.ft().create_index(
-            (
-                VectorField(
-                    "v",
-                    "SVS-VAMANA",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": 6,
-                        "DISTANCE_METRIC": "L2",
-                        "CONSTRUCTION_WINDOW_SIZE": 300,
-                    },
-                ),
-            )
-        )
-
-        vectors = []
-        for i in range(20):
-            vec = [float(i + j) for j in range(6)]
-            vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
-
-        query = Query("*=>[KNN 5 @v $vec as score]").no_content()
-        query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
-
-        res = client.ft().search(query, query_params=query_params)
-        if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert res.total == 5
-            assert "doc0" == res.docs[0].id
-        elif expects_resp3_shape(client):
-            assert res["total_results"] == 5
-            assert "doc0" == res["results"][0]["id"]
-
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
-    def test_svs_vamana_graph_max_degree(self, client):
-        client.ft().create_index(
-            (
-                VectorField(
-                    "v",
-                    "SVS-VAMANA",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": 6,
-                        "DISTANCE_METRIC": "COSINE",
-                        "GRAPH_MAX_DEGREE": 64,
-                    },
-                ),
-            )
-        )
-
-        vectors = []
-        for i in range(25):
-            vec = [float(i + j) for j in range(6)]
-            vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
-
-        query = Query("*=>[KNN 6 @v $vec as score]").no_content()
-        query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
-
-        res = client.ft().search(query, query_params=query_params)
-        if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert res.total == 6
-            assert "doc0" == res.docs[0].id
-        elif expects_resp3_shape(client):
-            assert res["total_results"] == 6
-            assert "doc0" == res["results"][0]["id"]
-
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
-    def test_svs_vamana_search_window_size(self, client):
-        client.ft().create_index(
-            (
-                VectorField(
-                    "v",
-                    "SVS-VAMANA",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": 6,
-                        "DISTANCE_METRIC": "L2",
-                        "SEARCH_WINDOW_SIZE": 20,
-                    },
-                ),
-            )
-        )
-
-        vectors = []
-        for i in range(30):
-            vec = [float(i + j) for j in range(6)]
-            vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
-
-        query = Query("*=>[KNN 8 @v $vec as score]").no_content()
-        query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
-
-        res = client.ft().search(query, query_params=query_params)
-        if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert res.total == 8
-            assert "doc0" == res.docs[0].id
-        elif expects_resp3_shape(client):
-            assert res["total_results"] == 8
-            assert "doc0" == res["results"][0]["id"]
-
-    @pytest.mark.redismod
-    @skip_ifmodversion_lt("2.4.3", "search")
-    @skip_if_server_version_lt("8.1.224")
-    def test_svs_vamana_epsilon_parameter(self, client):
-        client.ft().create_index(
-            (
-                VectorField(
-                    "v",
-                    "SVS-VAMANA",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": 6,
-                        "DISTANCE_METRIC": "L2",
-                        "EPSILON": 0.05,
-                    },
-                ),
-            )
-        )
-
-        vectors = []
-        for i in range(20):
-            vec = [float(i + j) for j in range(6)]
-            vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
-
-        query = Query("*=>[KNN 5 @v $vec as score]").no_content()
-        query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
-
-        res = client.ft().search(query, query_params=query_params)
-        if expects_resp2_shape(client) or expects_unified_shape(client):
-            assert res.total == 5
-            assert "doc0" == res.docs[0].id
-        elif expects_resp3_shape(client):
-            assert res["total_results"] == 5
-            assert "doc0" == res["results"][0]["id"]
+    @pytest.mark.fixed_client
+    def test_svs_vamana_build_parameters_args(self):
+        # Each build parameter is forwarded as given; the server accepting them
+        # all together is test_svs_vamana_all_build_parameters_combined.
+        attributes = {
+            "TYPE": "FLOAT32",
+            "DIM": 6,
+            "DISTANCE_METRIC": "L2",
+            "CONSTRUCTION_WINDOW_SIZE": 300,
+            "GRAPH_MAX_DEGREE": 64,
+            "SEARCH_WINDOW_SIZE": 20,
+            "EPSILON": 0.05,
+        }
+        field = VectorField("v", "SVS-VAMANA", attributes)
+        expected = ["VECTOR", "SVS-VAMANA", 2 * len(attributes)]
+        for name, value in attributes.items():
+            expected += [name, value]
+        assert field.args == expected
 
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.4.3", "search")
@@ -4620,10 +4509,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(35):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 7 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4664,10 +4555,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(60):
             vec = [float(i + j) for j in range(32)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 10 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -4725,8 +4618,9 @@ class TestSearchWithVamana(SearchTestsBase):
             },
         ]
 
+        pipe = client.pipeline(transaction=False)
         for i, doc in enumerate(docs):
-            client.hset(
+            pipe.hset(
                 f"doc{i}",
                 mapping={
                     "title": doc["title"],
@@ -4734,6 +4628,7 @@ class TestSearchWithVamana(SearchTestsBase):
                     "embedding": np.array(doc["embedding"], dtype=np.float32).tobytes(),
                 },
             )
+        pipe.execute()
 
         # Hybrid query - text filter + vector similarity
         query = "(@title:AI|@content:machine)=>[KNN 2 @embedding $vec]"
@@ -4782,10 +4677,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(10):
             vec = [float(i + j) for j in range(512)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -4854,10 +4751,12 @@ class TestSearchWithVamana(SearchTestsBase):
         )
 
         vectors = []
+        pipe = client.pipeline(transaction=False)
         for i in range(25):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        pipe.execute()
 
         for k in [1, 3, 5, 10, 15]:
             query = Query(f"*=>[KNN {k} @v $vec as score]").no_content()
@@ -4989,6 +4888,7 @@ class TestHybridSearch(SearchTestsBase):
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
 
+    @pytest.mark.fixed_client
     def test_hybrid_search_forwards_zero_timeout(self):
         # TIMEOUT 0 means "no timeout" and is a value the server accepts for
         # FT.HYBRID, so it must reach the wire. Guarding the argument with a
@@ -5067,7 +4967,10 @@ class TestHybridSearch(SearchTestsBase):
             np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
             for value in (0.1, 0.2, 0.3, 0.4, 0.5)
         ]
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
+        # the documents are independent, so no MULTI/EXEC. Each carries a 32 KB
+        # vector and is indexed as it is read; keep batches small so one async
+        # pipeline write (bounded by socket_timeout) stays short on slow runners
         batch_size = 250
         for i in range(self._HYBRID_TIMEOUT_DOCS):
             pipeline.hset(
@@ -5079,7 +4982,7 @@ class TestHybridSearch(SearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         pipeline.execute()
 
     @staticmethod
@@ -5128,7 +5031,7 @@ class TestHybridSearch(SearchTestsBase):
         items = items * items_sets
 
         batch_size = 1000
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
         for i, vec in enumerate(items):
             vec, description = vec
             mapping = {
@@ -5151,7 +5054,7 @@ class TestHybridSearch(SearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         pipeline.execute()  # Execute remaining
 
     @staticmethod

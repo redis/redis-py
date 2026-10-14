@@ -1033,6 +1033,9 @@ class ManagementCommands(CommandsProtocol):
         Turn on the tracking mode.
         For more information, about the options look at client_tracking func.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself.
+
         See https://redis.io/commands/client-tracking
         """
         return self.client_tracking(
@@ -1073,6 +1076,9 @@ class ManagementCommands(CommandsProtocol):
         """
         Turn off the tracking mode.
         For more information, about the options look at client_tracking func.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        turning tracking off would stop invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1143,6 +1149,10 @@ class ManagementCommands(CommandsProtocol):
 
         ``prefix``  for broadcasting, register a given key prefix, so that
         notifications will be provided only for keys starting with this string.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself, and changing it would stop
+        invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1817,6 +1827,9 @@ class ManagementCommands(CommandsProtocol):
 
     def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the reset turns off the tracking the cache relies on for invalidations.
 
         See: https://redis.io/commands/reset
         """
@@ -6308,7 +6321,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        if no_values is not None:
+        if no_values:
             pieces.extend([b"NOVALUES"])
         return self.execute_command("HSCAN", *pieces, no_values=no_values)
 
@@ -8901,7 +8914,7 @@ class SortedSetCommands(CommandsProtocol):
                 "``withscores`` not supported in combination with ``bylex``."
             )
         pieces = [command]
-        if dest:
+        if dest is not None:
             pieces.append(dest)
         pieces.extend([name, start, end])
         if byscore:
@@ -9679,7 +9692,7 @@ class SortedSetCommands(CommandsProtocol):
         if dest is not None:
             pieces.append(dest)
         pieces.append(len(keys))
-        if isinstance(keys, dict):
+        if isinstance(keys, Mapping):
             keys, weights = keys.keys(), keys.values()
         else:
             weights = None
@@ -12099,8 +12112,8 @@ class GeoCommands(CommandsProtocol):
         if kwargs["member"] is None:
             if kwargs["longitude"] is None or kwargs["latitude"] is None:
                 raise DataError("GEOSEARCH must have member or longitude and latitude")
-        if kwargs["member"]:
-            if kwargs["longitude"] or kwargs["latitude"]:
+        if kwargs["member"] is not None:
+            if kwargs["longitude"] is not None or kwargs["latitude"] is not None:
                 raise DataError(
                     "GEOSEARCH member and longitude or latitude can't be set together"
                 )
@@ -12116,13 +12129,13 @@ class GeoCommands(CommandsProtocol):
             raise DataError("GEOSEARCH must have unit")
         if kwargs["unit"].lower() not in ("m", "km", "mi", "ft"):
             raise DataError("GEOSEARCH invalid unit")
-        if kwargs["radius"]:
-            if kwargs["width"] or kwargs["height"]:
+        if kwargs["radius"] is not None:
+            if kwargs["width"] is not None or kwargs["height"] is not None:
                 raise DataError(
                     "GEOSEARCH radius and width or height can't be set together"
                 )
             pieces.extend([b"BYRADIUS", kwargs["radius"], kwargs["unit"]])
-        if kwargs["width"] and kwargs["height"]:
+        if kwargs["width"] is not None and kwargs["height"] is not None:
             pieces.extend([b"BYBOX", kwargs["width"], kwargs["height"], kwargs["unit"]])
 
         # sort
@@ -12135,7 +12148,7 @@ class GeoCommands(CommandsProtocol):
                 raise DataError("GEOSEARCH invalid sort")
 
         # count any
-        if kwargs["count"]:
+        if kwargs["count"] is not None:
             pieces.extend([b"COUNT", kwargs["count"]])
             if kwargs["any"]:
                 pieces.append(b"ANY")

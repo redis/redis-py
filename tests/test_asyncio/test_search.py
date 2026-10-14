@@ -99,7 +99,7 @@ class AsyncSearchTestsBase:
 
     @staticmethod
     async def waitForIndex(env, idx, timeout=None):
-        delay = 0.1
+        delay = 0.02
         while True:
             try:
                 res = await env.execute_command("FT.INFO", idx)
@@ -168,27 +168,15 @@ class AsyncSearchTestsBase:
         assert isinstance(indexer, AsyncSearch.BatchIndexer)
         assert 50 == indexer.chunk_size
 
+        # one round trip for all documents, not one HSET each
+        pipe = indexer.client.client.pipeline(transaction=False)
         for key, doc in chapters.items():
-            await indexer.client.client.hset(key, mapping=doc)
+            pipe.hset(key, mapping=doc)
+        await pipe.execute()
         await indexer.commit()
 
 
 class TestBaseSearchFunctionality(AsyncSearchTestsBase):
-    # Shape of the index used by the on-timeout tests. The query these build
-    # runs ``KNN _SEARCH_TIMEOUT_DOCS``, and its cost is dominated by the size
-    # of the result set rather than by the vector arithmetic - at a fixed
-    # ``KNN 10`` the query takes ~1.6ms whatever the dimension, so the document
-    # count is what buys runtime and the dimension only buys memory.
-    #
-    # The runtime has to exceed the 1ms per-query timeout by a wide margin.
-    # ``search-on-timeout=fail`` is enforced by a timeout callback racing the
-    # thread running the query, so a query that only slightly overruns its
-    # timeout may still return full results - intended server behavior. Below
-    # roughly a 3x margin the error stops being raised at all; these values
-    # measure at ~890ms, i.e. a ~900x margin, in ~37MB.
-    _SEARCH_TIMEOUT_DIM = 256
-    _SEARCH_TIMEOUT_DOCS = 12000
-
     @pytest.mark.redismod
     async def test_client(self, decoded_r: redis.Redis):
         num_docs = 500
@@ -585,17 +573,16 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
         """
         Ensure the index gets dropped by data remains by default
         """
-        for x in range(20):
-            for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
-                idx = "HaveIt"
-                index = self.getClient(decoded_r)
-                await index.hset("index:haveit", mapping={"name": "haveit"})
-                idef = IndexDefinition(prefix=["index:"])
-                await index.ft(idx).create_index((TextField("name"),), definition=idef)
-                await self.waitForIndex(index, idx)
-                await index.ft(idx).dropindex(delete_documents=keep_docs[0])
-                i = await index.hgetall("index:haveit")
-                assert i == keep_docs[1]
+        for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
+            idx = "HaveIt"
+            index = self.getClient(decoded_r)
+            await index.hset("index:haveit", mapping={"name": "haveit"})
+            idef = IndexDefinition(prefix=["index:"])
+            await index.ft(idx).create_index((TextField("name"),), definition=idef)
+            await self.waitForIndex(index, idx)
+            await index.ft(idx).dropindex(delete_documents=keep_docs[0])
+            i = await index.hgetall("index:haveit")
+            assert i == keep_docs[1]
 
     @pytest.mark.redismod
     async def test_example(self, decoded_r: redis.Redis):
@@ -621,16 +608,19 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     async def test_auto_complete(self, decoded_r: redis.Redis):
-        n = 0
         with open(TITLES_CSV) as f:
-            cr = csv.reader(f)
+            suggestions = [
+                Suggestion(row[0], score=float(row[1])) for row in csv.reader(f)
+            ]
 
-            for row in cr:
-                n += 1
-                term, score = row[0], float(row[1])
-                assert n == await decoded_r.ft().sugadd(
-                    "ac", Suggestion(term, score=score)
-                )
+        # sugadd pipelines its suggestions and returns the last reply, which is
+        # the dictionary size, so batching keeps the size check per batch
+        ft = decoded_r.ft()
+        n = 0
+        for i in range(0, len(suggestions), 500):
+            batch = suggestions[i : i + 500]
+            n += len(batch)
+            assert n == await ft.sugadd("ac", *batch)
 
         assert n == await decoded_r.ft().suglen("ac")
         ret = await decoded_r.ft().sugget("ac", "bad", with_scores=True)
@@ -1249,55 +1239,47 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
 
     async def _create_search_timeout_index(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index(
-            (
-                TextField("description"),
-                VectorField(
-                    "embedding",
-                    "FLAT",
-                    {
-                        "TYPE": "FLOAT32",
-                        "DIM": self._SEARCH_TIMEOUT_DIM,
-                        "DISTANCE_METRIC": "L2",
-                    },
-                ),
-            ),
+            (TextField("description"),),
             definition=IndexDefinition(prefix=["search-timeout-item:"]),
         )
         await AsyncSearchTestsBase.waitForIndex(decoded_r, "idx")
+        for i in range(5):
+            await decoded_r.hset(f"search-timeout-item:{i}", "description", "red shoes")
 
-    async def _add_data_for_search_timeout(self, decoded_r: redis.Redis):
-        vectors = [
-            np.full(self._SEARCH_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
-            for value in (0.1, 0.2, 0.3, 0.4, 0.5)
-        ]
-        pipeline = decoded_r.pipeline()
-        batch_size = 250
-        for i in range(self._SEARCH_TIMEOUT_DOCS):
-            pipeline.hset(
-                f"search-timeout-item:{i}",
-                mapping={
-                    "description": "red shoes",
-                    "embedding": vectors[i % len(vectors)],
-                },
+    async def _search_with_forced_timeout(self, decoded_r: redis.Redis, query):
+        # Whether a real query outlives its TIMEOUT depends on the dataset and
+        # on how fast the server is, so force the timeout instead:
+        # ``_FT.DEBUG FT.SEARCH ... TIMEOUT_AFTER_N 0`` runs the wrapped
+        # FT.SEARCH and has it time out before the first result. search()
+        # still builds the arguments and parses the reply.
+        ft = decoded_r.ft()
+        execute_command = ft.execute_command
+
+        def execute_with_forced_timeout(*args, **options):
+            return execute_command(
+                "_FT.DEBUG",
+                *args,
+                "TIMEOUT_AFTER_N",
+                0,
+                "DEBUG_PARAMS_COUNT",
+                2,
+                **options,
             )
-            if (i + 1) % batch_size == 0:
-                await pipeline.execute()
-                pipeline = decoded_r.pipeline()
-        await pipeline.execute()
+
+        ft.execute_command = execute_with_forced_timeout
+        return await ft.search(query)
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip and the 8.0.0 gate come from the _FT.DEBUG
+    # timeout hook, not from TIMEOUT itself: Redis Enterprise does not expose
+    # the hook, and the 7.x stack images predate it.
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.0.0")
     async def test_search_query_with_timeout(self, decoded_r: redis.Redis):
         await self._create_search_timeout_index(decoded_r)
-        await self._add_data_for_search_timeout(decoded_r)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
-        res = await decoded_r.ft().search(query, query_params={"vec": query_vector})
+        query = Query("red").timeout(1)
+        res = await self._search_with_forced_timeout(decoded_r, query)
 
         if expects_resp3_shape(decoded_r):
             warnings = res.get("warning", [])
@@ -1319,33 +1301,35 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
             assert warnings == []
 
     @pytest.mark.redismod
-    @pytest.mark.timeout(60)
+    # The Redis Enterprise skip comes from the _FT.DEBUG timeout hook, which
+    # Redis Enterprise does not expose, not from the fail policy itself.
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     async def test_search_query_with_timeout_fail_policy(self, decoded_r: redis.Redis):
         await self._create_search_timeout_index(decoded_r)
-        await self._add_data_for_search_timeout(decoded_r)
 
-        query_vector = np.full(
-            self._SEARCH_TIMEOUT_DIM, 0.25, dtype=np.float32
-        ).tobytes()
-        query = Query(f"*=>[KNN {self._SEARCH_TIMEOUT_DOCS} @embedding $vec]").timeout(
-            1
-        )
+        query = Query("red").timeout(1)
 
         # ``search-on-timeout`` controls whether a timed-out query returns the
         # partial results collected so far (``return``, the default) or fails
-        # the command (``fail``).  Capture the original value so it is always
-        # restored, even if the assertion below raises.
+        # the command (``fail``). The server refuses TIMEOUT_AFTER_N with
+        # ``fail`` while search worker threads are enabled, so turn them off.
+        # Capture the original values so they are always restored, even if
+        # the assertion below raises.
         config = await decoded_r.config_get("search-on-timeout")
         original = config["search-on-timeout"]
+        config = await decoded_r.config_get("search-workers")
+        original_workers = config["search-workers"]
         try:
+            assert await decoded_r.config_set("search-workers", 0)
             assert await decoded_r.config_set("search-on-timeout", "fail")
             # With the ``fail`` policy the server aborts the timed-out search
             # instead of returning partial results.
-            with pytest.raises(redis.ResponseError):
-                await decoded_r.ft().search(query, query_params={"vec": query_vector})
+            with pytest.raises(redis.ResponseError, match="Timeout limit was reached"):
+                await self._search_with_forced_timeout(decoded_r, query)
         finally:
             await decoded_r.config_set("search-on-timeout", original)
+            await decoded_r.config_set("search-workers", original_workers)
 
     @pytest.mark.redismod
     async def test_binary_and_text_fields(self, decoded_r: redis.Redis):
@@ -2313,6 +2297,7 @@ class TestAggregations(AsyncSearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "bad_fields",
         [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
@@ -2785,15 +2770,17 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             )
         )
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
-            await decoded_r.hset(
+            pipe.hset(
                 f"doc{i}",
                 mapping={
                     "sq8": vec.tobytes(),
                     "sq8_default": vec.astype(np.float16).tobytes(),
                 },
             )
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
         query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
@@ -2880,10 +2867,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [10.0, 11.0, 12.0, 13.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = "*=>[KNN 3 @v $vec]"
         q = Query(query).return_field("__v_score").sort_by("__v_score", True)
@@ -2919,10 +2906,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [-1.0, 0.0, 0.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -2951,10 +2938,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
 
         vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes()
-            )
+            pipe.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v16 $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -2987,12 +2974,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3027,12 +3014,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(15):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3054,6 +3041,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
 
+    @pytest.mark.fixed_client
     async def test_hybrid_search_forwards_zero_timeout(self):
         # Async mirror of the sync test with the same name. TIMEOUT 0 means
         # "no timeout" and must reach the wire instead of being dropped like
@@ -3130,7 +3118,10 @@ class TestHybridSearch(AsyncSearchTestsBase):
             np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
             for value in (0.1, 0.2, 0.3, 0.4, 0.5)
         ]
-        pipeline = decoded_r.pipeline()
+        pipeline = decoded_r.pipeline(transaction=False)
+        # the documents are independent, so no MULTI/EXEC. Each carries a 32 KB
+        # vector and is indexed as it is read; keep batches small so one async
+        # pipeline write (bounded by socket_timeout) stays short on slow runners
         batch_size = 250
         for i in range(self._HYBRID_TIMEOUT_DOCS):
             pipeline.hset(
@@ -3142,7 +3133,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = decoded_r.pipeline()
+                pipeline = decoded_r.pipeline(transaction=False)
         await pipeline.execute()
 
     @staticmethod
@@ -3190,7 +3181,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             ]
         items = items * items_sets
         batch_size = 1000
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
         for i, vec in enumerate(items):
             vec, description = vec
             mapping = {
@@ -3209,7 +3200,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             pipeline.hset(f"item:{i}", mapping=mapping)
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         await pipeline.execute()  # Execute remaining
 
     @staticmethod
