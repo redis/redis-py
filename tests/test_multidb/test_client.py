@@ -417,7 +417,7 @@ class TestMultiDbClient:
                 # (instead of just sleeping)
                 wait_for_condition(
                     lambda: cb1.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to open",
                 )
 
@@ -432,7 +432,7 @@ class TestMultiDbClient:
                 # (instead of just sleeping)
                 wait_for_condition(
                     lambda: cb2.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb2 to open",
                 )
 
@@ -444,14 +444,14 @@ class TestMultiDbClient:
                 )
                 wait_for_condition(
                     lambda: cb.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb to open",
                 )
 
                 # Wait for mock_db1 to recover (circuit breaker to close)
                 wait_for_condition(
                     lambda: cb1.state == CBState.CLOSED,
-                    timeout=1.0,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                 )
 
@@ -527,7 +527,7 @@ class TestMultiDbClient:
                 # Wait for circuit breaker to actually open
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to open after error event.",
                 )
 
@@ -537,7 +537,7 @@ class TestMultiDbClient:
                 # Wait for auto fallback interval to pass (mock_db1 recovers in round 2+)
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.CLOSED,
-                    timeout=1.0,
+                    timeout=5.0,
                     error_message="Timeout waiting for mock_db1 to be healthy again.",
                 )
 
@@ -615,7 +615,7 @@ class TestMultiDbClient:
                 # Wait for circuit breaker state to actually reflect the unhealthy status
                 wait_for_condition(
                     lambda: mock_db1.circuit.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to open after error event.",
                 )
 

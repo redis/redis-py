@@ -2,6 +2,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from redis._defaults import DEFAULT_RETRY_COUNT
+from redis.backoff import NoBackoff
 from redis.connection import ConnectionPool
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import (
@@ -61,6 +63,28 @@ class TestMultiDbConfig:
         )
         assert config.auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL
         assert isinstance(config.command_retry, Retry)
+
+    def test_default_command_retry_is_isolated(self):
+        first = MultiDbConfig(databases_config=[])
+        second = MultiDbConfig(databases_config=[])
+
+        assert first.command_retry is not second.command_retry
+        assert first.command_retry._backoff is not second.command_retry._backoff
+        assert first.command_retry == second.command_retry
+
+        first.command_retry.update_retries(0)
+        first.command_retry.update_supported_errors((ValueError,))
+
+        for config in (second, MultiDbConfig(databases_config=[])):
+            assert config.command_retry.get_retries() == DEFAULT_RETRY_COUNT
+            assert ValueError not in config.command_retry._supported_errors
+
+    def test_explicit_command_retry_is_preserved(self):
+        retry = Retry(backoff=NoBackoff(), retries=2)
+        config = MultiDbConfig(databases_config=[], command_retry=retry)
+
+        assert config.command_retry is retry
+        assert config.command_retry.get_retries() == 2
 
     def test_overridden_config(self):
         grace_period = 2

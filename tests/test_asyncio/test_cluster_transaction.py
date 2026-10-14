@@ -184,6 +184,9 @@ class TestClusterTransaction:
 
             parse_response.side_effect = ask_redirect_effect
 
+            # the migration never completes, so one retry is enough;
+            # move_slot still runs on the first failure
+            r.set_retry(Retry(NoBackoff(), 1))
             async with r.pipeline(transaction=True) as pipe:
                 pipe.set(key, "val")
                 with pytest.raises(redis.exceptions.AskError) as ex:

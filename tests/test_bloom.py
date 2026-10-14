@@ -145,13 +145,17 @@ def test_bf_scandump_and_loadchunk(client):
     # test is probabilistic and might fail. It is OK to change variables if
     # certain to not break anything
     def do_verify():
-        res = 0
+        pipe = client.pipeline(transaction=False)
+        bf = pipe.bf()
         for x in range(1000):
-            client.bf().add("myBloom", x)
-            rv = client.bf().exists("myBloom", x)
-            assert rv
-            rv = client.bf().exists("myBloom", f"nonexist_{x}")
-            res += rv == x
+            bf.add("myBloom", x)
+            bf.exists("myBloom", x)
+            bf.exists("myBloom", f"nonexist_{x}")
+        replies = pipe.execute()
+        res = 0
+        for exists, false_positive in zip(replies[1::3], replies[2::3]):
+            assert exists
+            res += false_positive
         assert res < 5
 
     do_verify()
@@ -182,7 +186,6 @@ def test_bf_scandump_and_loadchunk(client):
     do_verify()
 
     client.bf().client.delete("myBloom")
-    client.bf().create("myBloom", "0.0001", "10000000")
 
 
 @pytest.mark.redismod

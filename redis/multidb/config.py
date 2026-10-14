@@ -102,6 +102,7 @@ class MultiDbConfig:
         databases_config: A list of database configurations.
         client_class: The client class used to manage database connections.
         command_retry: Retry strategy for executing database commands.
+            Defaults to a separate instance for each configuration.
         failure_detectors: Optional list of additional failure detectors for monitoring database failures.
         min_num_failures: Minimal count of failures required for failover
         failure_rate_threshold: Percentage of failures required for failover
@@ -140,11 +141,13 @@ class MultiDbConfig:
 
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster]] = Redis
-    command_retry: Retry = Retry(
-        backoff=ExponentialWithJitterBackoff(
-            base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
-        ),
-        retries=DEFAULT_RETRY_COUNT,
+    command_retry: Retry = field(
+        default_factory=lambda: Retry(
+            backoff=ExponentialWithJitterBackoff(
+                base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+            ),
+            retries=DEFAULT_RETRY_COUNT,
+        )
     )
     failure_detectors: Optional[List[FailureDetector]] = None
     min_num_failures: int = DEFAULT_MIN_NUM_FAILURES
