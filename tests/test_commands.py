@@ -5,7 +5,9 @@ import threading
 import time
 import warnings
 from asyncio import CancelledError
+from collections import ChainMap, UserDict
 from string import ascii_letters
+from types import MappingProxyType
 from unittest import mock
 from unittest.mock import patch
 
@@ -4852,6 +4854,32 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    def test_zaggregate_mapping_weights(self, r, keys_factory, command, expected):
+        # Mapping wrappers must retain weights and the resulting rank order.
+        r.zadd("a", {"shared": 2, "left": 3})
+        r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert getattr(r, command)("destination", keys) == len(expected)
+            result = r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
     def test_zinter(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -5256,6 +5284,15 @@ class TestRedisCommands:
         # by lex
         assert r.zrangestore("b", "a", "[a2", "(a3", bylex=True, offset=0, num=1)
         assert r.zrange("b", 0, -1) == [b"a2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
+    def test_zrangestore_empty_destination(self, r, dest):
+        r.zadd("source", {"a": 1, "b": 2, "c": 3})
+        assert r.zrangestore(dest, "source", 0, 1) == 2
+        assert r.zrange(dest, 0, -1) == [b"a", b"b"]
+        assert r.zrange("source", 0, -1) == [b"a", b"b", b"c"]
 
     @skip_if_server_version_lt("2.8.9")
     def test_zrangebylex(self, r):

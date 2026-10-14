@@ -8,7 +8,9 @@ import datetime
 import re
 import sys
 import warnings
+from collections import ChainMap, UserDict
 from string import ascii_letters
+from types import MappingProxyType
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -3755,6 +3757,34 @@ class TestRedisCommands:
         assert await r.zlexcount("a", "[b", "[f") == 5
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    async def test_zaggregate_mapping_weights(
+        self, r: redis.Redis, keys_factory, command, expected
+    ):
+        # Mapping wrappers must retain weights and the resulting rank order.
+        await r.zadd("a", {"shared": 2, "left": 3})
+        await r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert await getattr(r, command)("destination", keys) == len(expected)
+            result = await r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = await getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
+
+    @pytest.mark.onlynoncluster
     async def test_zinterstore_sum(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -3953,6 +3983,15 @@ class TestRedisCommands:
             [(b"a1", "1"), (b"a2", "2")],
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
+    async def test_zrangestore_empty_destination(self, r: redis.Redis, dest):
+        await r.zadd("source", {"a": 1, "b": 2, "c": 3})
+        assert await r.zrangestore(dest, "source", 0, 1) == 2
+        assert await r.zrange(dest, 0, -1) == [b"a", b"b"]
+        assert await r.zrange("source", 0, -1) == [b"a", b"b", b"c"]
 
     @skip_if_server_version_lt("2.8.9")
     async def test_zrangebylex(self, r: redis.Redis):

@@ -73,13 +73,15 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
             "failed to retrieve a successful response from the ocsp responder"
         )
 
-    if ocsp_response.this_update >= datetime.datetime.now():
+    # this_update / next_update are reported in UTC, so compare against UTC now
+    # rather than datetime.now(), which is local time. Comparing a UTC timestamp
+    # to local time let a stale response (next_update already in the past) pass
+    # the freshness check by the host's offset west of UTC.
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    if ocsp_response.this_update >= now:
         raise ConnectionError("ocsp certificate was issued in the future")
 
-    if (
-        ocsp_response.next_update
-        and ocsp_response.next_update < datetime.datetime.now()
-    ):
+    if ocsp_response.next_update and ocsp_response.next_update < now:
         raise ConnectionError("ocsp certificate has invalid update - in the past")
 
     responder_name = ocsp_response.responder_name
