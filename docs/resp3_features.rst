@@ -345,8 +345,10 @@ Refreshes show up in the cache metrics:
   - ``redis.client.csc.refresh.failure`` - the re-read failed: an error reply, a
     connection error or a timeout, counted per key.
   - ``redis.client.csc.refresh.discarded`` - the re-read was answered but not stored:
-    the key was invalidated again while it was in flight, the reply was nil, or the
-    ``cache_predicate`` did not select it.
+    the key was invalidated again while it was in flight, or the reply was nil because
+    the key was deleted, expired or evicted. Nil replies are never cached, so on a
+    workload that deletes or expires many cached keys this counter grows without any
+    churn on hot keys.
   - ``redis.client.csc.refresh.rejected`` - no re-read ran, because the queue was full or
     the pool had no free connection.
   - ``redis.client.csc.refresh.rate_limited`` - reserved for the refresh rate limit, and

@@ -2576,6 +2576,60 @@ class TestClusterCacheRefresh:
 
         assert cache.collection.get(get_cache_key("{refresh}foo")) is None
 
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache_config": _refresh_config(max_size=128)}],
+        indirect=True,
+    )
+    def test_a_flush_on_one_node_drops_the_refreshes_of_another(self, r):
+        # Served by different primaries in the test cluster.
+        if r.get_node_from_key("foo").name == r.get_node_from_key("bar").name:
+            pytest.skip("the keys share a node in this cluster")
+        for node in r.get_primaries():
+            r.ping(target_nodes=node)
+        keys = ["{foo}1", "{foo}2"]
+        for key in keys:
+            r.set(key, "1")
+            r.get(key)
+        cache = r.get_node_from_key("foo").redis_connection.get_cache()
+
+        # The first refresh is held before it checks the cache, so the second one stays
+        # queued behind it while the other node's pool disconnects.
+        started = threading.Event()
+        release = threading.Event()
+        done = threading.Event()
+        refresh = CacheRefresher._refresh
+
+        def held_refresh(self, pool, cache_key, generation):
+            started.set()
+            release.wait(5)
+            try:
+                return refresh(self, pool, cache_key, generation)
+            finally:
+                done.set()
+
+        with patch.object(CacheRefresher, "_refresh", held_refresh):
+            for key in keys:
+                r.set(key, "2")
+            refresher = self._pick_up(r, "{foo}1")
+            assert started.wait(2)
+
+            # A disconnect on the node of "bar" empties the shared cache.
+            r.get_node_from_key("bar").redis_connection.connection_pool.disconnect()
+            release.set()
+
+            assert done.wait(2)
+            wait_for_condition(
+                refresher._queue.empty,
+                timeout=2,
+                error_message="the queued refresh was never dequeued",
+            )
+
+        # Neither refresh refilled the emptied cache: the held one stopped at its
+        # generation check, and the queued one was dropped unrun.
+        for key in keys:
+            assert cache.collection.get(get_cache_key(key)) is None
+
 
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
@@ -3608,6 +3662,125 @@ class TestCacheRefresher:
         # here and there must answer no.
         refresher.cancel_pending()
         assert not is_current()
+
+    def test_a_cancel_reaches_every_refresher_of_the_cache(
+        self, make_refresher, pool, gate
+    ):
+        # The node pools of a cluster share one cache, and each has its own refresher.
+        flushing = make_refresher(FakeRefresherPool(pool.cache), 4)
+        refresher = make_refresher(pool, 4)
+        k1, k2, k3 = get_cache_key("k1"), get_cache_key("k2"), get_cache_key("k3")
+
+        refresher.submit([k1, k2])
+        _wait(lambda: pool.connection.send_command.called)
+        is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
+
+        flushing.cancel_pending()
+        # The running refresh is told the cache was emptied, and the queued one is dropped.
+        assert not is_current()
+
+        gate.set()
+        assert refresher.submit([k3]) == []
+        wait_for_refreshes(refresher)
+        assert _sent_keys(pool.connection) == [("k1",), ("k3",)]
+
+    def test_a_cancel_leaves_the_refreshers_of_other_caches_alone(
+        self, make_refresher, pool, gate
+    ):
+        other = make_refresher(FakeRefresherPool(), 4)
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
+
+        other.cancel_pending()
+        assert is_current()
+
+    def test_a_stop_cancels_only_its_own_refresher(self, make_refresher, pool, gate):
+        # Closing one pool empties nothing, so the other pools' refreshes keep running.
+        closing = make_refresher(FakeRefresherPool(pool.cache), 4)
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
+
+        closing.stop()
+        assert is_current()
+
+    def test_a_cache_that_cannot_be_hashed_is_cancelled_alone(
+        self, make_refresher, pool, gate
+    ):
+        class UnhashableCache(DefaultCache):
+            __hash__ = None
+
+        pool.cache = UnhashableCache(CacheConfig())
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([get_cache_key("k1")])
+        _wait(lambda: pool.connection.send_command.called)
+        is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
+
+        refresher.cancel_pending()
+        assert not is_current()
+
+    def test_a_cancel_inside_submit_neither_hangs_nor_leaks_the_bound(self, pool):
+        # A client collected by the garbage collector during an allocation in ``submit``
+        # flushes the cache from its ``__del__``, on the thread that holds ``_lock``.
+        # Built without ``make_refresher``: a deadlocked refresher could not be stopped.
+        refresher = CacheRefresher(pool, 2)
+        k1, k2, k3 = get_cache_key("k1"), get_cache_key("k2"), get_cache_key("k3")
+
+        def keys():
+            yield k1
+            refresher.cancel_pending()
+            yield k2
+
+        submitter = threading.Thread(
+            target=refresher.submit, args=(keys(),), daemon=True
+        )
+        submitter.start()
+        submitter.join(2)
+        assert not submitter.is_alive(), "a re-entrant cancel deadlocked submit"
+
+        try:
+            # Both keys were taken in around the cancel, so both are dropped, and the
+            # whole bound is free again.
+            assert refresher._pending == set()
+            assert refresher.submit([k3]) == []
+            wait_for_refreshes(refresher)
+            assert _sent_keys(pool.connection) == [("k3",)]
+        finally:
+            worker = refresher._thread
+            refresher.stop()
+            if worker is not None:
+                worker.join(timeout=2)
+
+    def test_a_cancel_inside_the_sharing_lock_does_not_hang(
+        self, make_refresher, pool, monkeypatch
+    ):
+        # The same ``__del__`` re-entry, during the registry lookup or a registration. A
+        # fresh lock of the same type, so a deadlock here cannot hold the real one for the
+        # rest of the session.
+        reentrant = isinstance(CacheRefresher._sharing_lock, type(threading.RLock()))
+        monkeypatch.setattr(
+            CacheRefresher,
+            "_sharing_lock",
+            threading.RLock() if reentrant else threading.Lock(),
+        )
+        refresher = make_refresher(pool, 4)
+        sharing = FakeRefresherPool(pool.cache)
+
+        def cancel_under_the_sharing_lock():
+            with CacheRefresher._sharing_lock:
+                CacheRefresher(sharing, 4)
+                refresher.cancel_pending()
+
+        canceller = threading.Thread(target=cancel_under_the_sharing_lock, daemon=True)
+        canceller.start()
+        canceller.join(2)
+        assert not canceller.is_alive(), "a re-entrant cancel deadlocked"
 
     def test_keys_over_the_bound_are_rejected(self, make_refresher, pool, gate):
         refresher = make_refresher(pool, 2)

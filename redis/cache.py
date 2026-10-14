@@ -980,10 +980,23 @@ class CacheRefresher:
     and hands it to every connection it builds; applications do not build one. It belongs
     to the process that built it: in a forked child it accepts nothing, and the child's
     pool builds a refresher of its own.
+
+    Pools can share one cache: every node pool of a ``RedisCluster`` does, and so do clients
+    handed the same ``cache=``. Each of them keeps its own refresher and bound, but an
+    emptying of the cache cancels the queued work of all of them, because the cache they
+    would refill is the one that was emptied.
     """
 
     IDLE_TIMEOUT = 30.0
     _STOP = object()
+
+    # The refreshers of every pool, by the cache they refresh into: cache -> ``WeakSet`` of
+    # refreshers. Weak on both sides, so it keeps neither a cache nor a refresher alive.
+    # ``_sharing_lock`` is a leaf, like ``_lock``, and the two are never held together. Both
+    # are re-entrant: an allocation under either can run a garbage-collected client's
+    # ``__del__`` on the same thread, and its disconnect flushes the cache, which cancels.
+    _sharing: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    _sharing_lock = threading.RLock()
 
     def __init__(
         self, pool, max_inflight: int, idle_timeout: float = IDLE_TIMEOUT
@@ -1002,7 +1015,19 @@ class CacheRefresher:
         # by a ``close()``.
         self._stopped_generation = 0
         self._thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        # Held strongly: it is the key this refresher is registered under, and the pool
+        # holds it anyway.
+        self._cache = pool.cache
+        try:
+            with CacheRefresher._sharing_lock:
+                CacheRefresher._sharing.setdefault(self._cache, weakref.WeakSet()).add(
+                    self
+                )
+        except TypeError:
+            # A third-party cache that cannot be hashed or weakly referenced. Its emptying
+            # cancels only this refresher, as for a cache no other pool shares.
+            pass
 
     def submit(self, cache_keys: Iterable[CacheKey]) -> list[CacheKey]:
         """
@@ -1058,6 +1083,14 @@ class CacheRefresher:
             for cache_key in accepted:
                 self._queue.put((generation, cache_key))
 
+            # A cancel re-entered on this thread while the keys were taken in: the cache was
+            # emptied after they were removed, so they are dropped like any work queued
+            # before a flush, rather than left in ``_pending`` under a generation the worker
+            # skips without releasing.
+            if self._generation != generation:
+                self._pending.difference_update(accepted)
+                self._drop_queued_jobs()
+
         if start_error is not None:
             logger.debug("Client-side cache refresher could not start: %r", start_error)
 
@@ -1068,20 +1101,40 @@ class CacheRefresher:
 
     def cancel_pending(self) -> None:
         """
-        Drop every accepted key that has not run yet.
+        Drop every accepted key that has not run yet, in every refresher of this cache.
 
         Called wherever the cache is flushed, before the flush: an emptied cache must not be
-        refilled by work queued before it was emptied. The queued jobs are removed, so the
-        queue never holds more than ``max_inflight`` keys, however often the cache is
-        flushed while the worker is busy. The job the worker holds checks the generation
-        once it has a connection, again when ``send_command`` has staked its placeholder,
-        and again when ``read_response`` has stored its reply: a flush before the second
-        check stops it, and a flush after it either removes the placeholder or is seen by
-        the third check, which removes the stored reply.
+        refilled by work queued before it was emptied, whichever pool queued it. The other
+        pools sharing the cache are cancelled too, so that a flush caused by one cluster
+        node also drops the refreshes the other nodes queued.
 
-        Does no I/O and takes no lock but ``_lock``, like ``submit``: it is called under a
-        connection's cache lock.
+        The queued jobs are removed, so the queue never holds more than ``max_inflight``
+        keys, however often the cache is flushed while the worker is busy. The job the
+        worker holds checks the generation once it has a connection, again when
+        ``send_command`` has staked its placeholder, and again when ``read_response`` has
+        stored its reply: a flush before the second check stops it, and a flush after it
+        either removes the placeholder or is seen by the third check, which removes the
+        stored reply.
+
+        Does no I/O, like ``submit``: it is called under a connection's cache lock. It takes
+        ``_sharing_lock`` and then each refresher's ``_lock``, one at a time.
         """
+        if self._pid != os.getpid():
+            return
+
+        try:
+            with CacheRefresher._sharing_lock:
+                sharing = list(CacheRefresher._sharing.get(self._cache, ()))
+        except TypeError:
+            sharing = []
+        if self not in sharing:
+            sharing.append(self)
+
+        for refresher in sharing:
+            refresher._cancel_own()
+
+    def _cancel_own(self) -> None:
+        # A refresher inherited across a fork shares no worker with this process.
         if self._pid != os.getpid():
             return
 
@@ -1102,7 +1155,9 @@ class CacheRefresher:
         if self._pid != os.getpid():
             return
 
-        self.cancel_pending()
+        # Only this pool's work: closing one pool empties nothing that other pools sharing
+        # the cache would refill.
+        self._cancel_own()
         with self._lock:
             self._stopped_generation = self._generation
             # Only a running worker needs waking; one started later finds the queue empty.
@@ -1231,3 +1286,21 @@ class CacheRefresher:
                 record_csc_refresh(result=result)
         finally:
             pool.release(conn)
+
+
+def _reset_refresher_sharing_after_fork() -> None:
+    # Another thread may have held the lock at fork time, and none of the parent's
+    # refreshers runs in the child: the child's pools register refreshers of their own.
+    CacheRefresher._sharing = weakref.WeakKeyDictionary()
+    CacheRefresher._sharing_lock = threading.RLock()
+
+
+# Registered here, at import, because a fork hook must be registered once per process: a
+# registration in a method would add the hook again on every call. It follows the class
+# because the hook resets the class's state. A lazy pid check, as the pools use, cannot
+# replace it: it would run before ``_sharing_lock`` is taken, so two threads in the child
+# could both reset the registry and lose a registration, while this hook runs in the
+# child before it has a second thread. ``register_at_fork`` is POSIX-only; Windows has no
+# fork to guard against.
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_refresher_sharing_after_fork)

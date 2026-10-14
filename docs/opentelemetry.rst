@@ -170,7 +170,8 @@ The following metrics are collected based on enabled metric groups:
 - ``redis.client.csc.refresh.success`` - Refreshes after an invalidation whose reply was
   stored (counter)
 - ``redis.client.csc.refresh.failure`` - Refreshes that failed (counter)
-- ``redis.client.csc.refresh.discarded`` - Refreshes answered but not stored (counter)
+- ``redis.client.csc.refresh.discarded`` - Refreshes answered but not stored, because the
+  key was invalidated again or the reply was nil (counter)
 - ``redis.client.csc.refresh.rejected`` - Refreshes not run for lack of queue room or of a
   free connection (counter)
 - ``redis.client.csc.refresh.rate_limited`` - Invalidations absorbed by the refresh rate
