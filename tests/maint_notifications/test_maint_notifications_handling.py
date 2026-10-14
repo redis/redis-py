@@ -4,7 +4,6 @@ from typing import List, Union
 from unittest.mock import MagicMock, patch
 
 import pytest
-from time import sleep
 
 from redis import Redis
 from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
@@ -390,6 +389,35 @@ class MockSocket:
         pass
 
 
+class _FakeTimer:
+    """Stands in for ``threading.Timer``; runs only when the test advances time."""
+
+    def __init__(self, test, interval, function, args=None, kwargs=None):
+        self._test = test
+        self.interval = interval
+        self.function = function
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        self.due = None
+
+    def start(self):
+        self.due = self._test._timer_clock + self.interval
+        self._test._pending_timers.append(self)
+
+
+class _ThreadingWithFakeTimer:
+    """The ``threading`` module, with ``Timer`` replaced by ``_FakeTimer``."""
+
+    def __init__(self, test):
+        self._test = test
+
+    def Timer(self, interval, function, args=None, kwargs=None):
+        return _FakeTimer(self._test, interval, function, args, kwargs)
+
+    def __getattr__(self, name):
+        return getattr(threading, name)
+
+
 class TestMaintenanceNotificationsBase:
     """Base class for maintenance notifications handling tests."""
 
@@ -423,6 +451,15 @@ class TestMaintenanceNotificationsBase:
         self.select_patcher = patch("select.select", side_effect=mock_select)
         self.select_patcher.start()
 
+        # The handlers schedule MOVING follow-ups with threading.Timer. Record
+        # them instead, so tests run them with _advance_timers, not sleeps.
+        self._timer_clock = 0.0
+        self._pending_timers = []
+        self.timer_patcher = patch(
+            "redis.maint_notifications.threading", _ThreadingWithFakeTimer(self)
+        )
+        self.timer_patcher.start()
+
         # Create maintenance notifications config
         self.config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
@@ -432,6 +469,24 @@ class TestMaintenanceNotificationsBase:
         """Clean up test fixtures."""
         self.socket_patcher.stop()
         self.select_patcher.stop()
+        self.timer_patcher.stop()
+
+    def _advance_timers(self, seconds):
+        """Move the fake timer clock forward and run the timers that come due.
+
+        Timers run in due order, on the calling thread. A timer scheduled by
+        another timer's callback runs too if it is due by the new time. The
+        handlers' duplicate detection still expires on real time, so a test
+        that resends the same MOVING after advancing would see it deduped.
+        """
+        self._timer_clock += seconds
+        while True:
+            due = [t for t in self._pending_timers if t.due <= self._timer_clock]
+            if not due:
+                return
+            timer = min(due, key=lambda t: t.due)
+            self._pending_timers.remove(timer)
+            timer.function(*timer.args, **timer.kwargs)
 
     def _get_client(
         self,
@@ -1447,7 +1502,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 connected_to_tmp_address=True,
             )
             # Wait for MOVING timeout to expire and the moving completed handler to run
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
 
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
@@ -1579,7 +1634,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 connected_to_tmp_address=False,
             )
             # Wait for half of MOVING timeout to expire and the proactive reconnect to run
-            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            self._advance_timers(MOVING_TIMEOUT / 2 + 0.2)
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
                 expected_should_reconnect=True,
@@ -1599,7 +1654,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
             self._validate_connected(5)
 
             # Wait for MOVING timeout to expire and the moving completed handler to run
-            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            self._advance_timers(MOVING_TIMEOUT / 2 + 0.2)
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
                 expected_state=MaintenanceState.NONE,
@@ -1761,7 +1816,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
             assert result is True, "SET key_receive_moving command failed"
 
             # Wait for MOVING timeout to expire
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
 
             # Now get several new connections after expiration
             old_connections = []
@@ -2030,7 +2085,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 AFTER_MOVING_ADDRESS = orig_after_moving
 
             # Wait for both MOVING timeouts to expire
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.NONE,
@@ -2768,8 +2823,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         assert conn.maintenance_state == MaintenanceState.NONE
         assert conn.socket_timeout == DEFAULT_SOCKET_TIMEOUT
 
-        # sleep to expire only the first MOVING notifications
-        sleep(1.3)
+        # expire only the first MOVING notifications
+        self._advance_timers(1.3)
         # validate only the connections affected by the first MOVING notification
         # have lost their MOVING state
         Helpers.validate_in_use_connections_state(
@@ -2811,8 +2866,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # TODO validate free connections
 
-        # sleep to expire the second MOVING notifications
-        sleep(1)
+        # expire the second MOVING notifications
+        self._advance_timers(1)
         # validate all connections have lost their MOVING state
         Helpers.validate_in_use_connections_state(
             [

@@ -519,6 +519,7 @@ class TestPipeline:
         assert "JSON.GET" in r.response_callbacks
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncPipelineOperationDurationMetricsRecording:
     """

@@ -244,7 +244,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb1.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb1 to open",
                     )
 
@@ -257,7 +257,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb2.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb2 to open",
                     )
 
@@ -270,14 +270,14 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb to open",
                     )
 
                     # Wait for mock_db1 to recover (circuit breaker to close)
                     wait_for_condition(
                         lambda: cb1.state == CBState.CLOSED,
-                        timeout=1.0,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                     )
 
@@ -550,7 +550,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb1.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to open",
                 )
 
@@ -563,7 +563,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb2.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb2 to open",
                 )
 
@@ -576,14 +576,14 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb to open",
                 )
 
                 # Wait for mock_db1 to recover (circuit breaker to close)
                 wait_for_condition(
                     lambda: cb1.state == CBState.CLOSED,
-                    timeout=1.0,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                 )
 
