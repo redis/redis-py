@@ -1,4 +1,5 @@
 import datetime
+import math
 
 from redis.utils import str_if_bytes
 
@@ -437,7 +438,58 @@ def _score_to_resp2_bytes(value):
         return value.encode()
     if isinstance(value, bool):
         return b"1" if value else b"0"
-    return format(float(value), ".17g").encode()
+    return _redis_double_to_string(float(value)).encode()
+
+
+def _redis_double_to_string(value):
+    """Format a double the way Redis does in replies (``d2string``).
+
+    Redis writes integral values in the 64-bit range as plain integers and
+    everything else with the shortest round-trip digits (``fpconv_dtoa``),
+    e.g. ``0.1`` and not ``0.10000000000000001``.
+    """
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    if value == 0:
+        return "-0" if math.copysign(1.0, value) < 0 else "0"
+    if -(2**62) <= value <= 2**62 and value.is_integer():
+        return str(int(value))
+    # repr() gives the shortest digits that round-trip; lay them out with
+    # the same rules as fpconv's emit_digits().
+    text = repr(value)
+    sign = ""
+    if text[0] == "-":
+        sign, text = "-", text[1:]
+    mantissa, _, exponent = text.partition("e")
+    int_part, _, frac = mantissa.partition(".")
+    if not exponent:
+        # repr() is plain decimal; Redis prints it the same way unless it
+        # has 7+ fractional digits and a decimal exponent of 4 or more.
+        if int_part != "0":
+            exp = len(int_part) - 1
+        else:
+            exp = len(frac) - len(frac.lstrip("0")) + 1
+        if len(frac) < 7 or exp < 4:
+            return sign + text
+    digits = (int_part + frac).lstrip("0")
+    k = int(exponent or 0) - len(frac)
+    stripped = digits.rstrip("0")
+    k += len(digits) - len(stripped)
+    digits = stripped
+    ndigits = len(digits)
+    exp = abs(k + ndigits - 1)
+    if k >= 0 and exp < ndigits + 7:
+        out = digits + "0" * k
+    elif k < 0 and (k > -7 or exp < 4):
+        offset = ndigits + k
+        if offset <= 0:
+            out = "0." + "0" * -offset + digits
+        else:
+            out = digits[:offset] + "." + digits[offset:]
+    else:
+        out = digits[0] + ("." + digits[1:] if ndigits > 1 else "")
+        out += f"e{'-' if k + ndigits - 1 < 0 else '+'}{exp}"
+    return sign + out
 
 
 def zset_score_pairs_resp3_to_resp2_legacy(response, **options):

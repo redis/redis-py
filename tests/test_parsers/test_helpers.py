@@ -12,7 +12,9 @@ from redis._parsers.helpers import (
     parse_command,
     parse_info,
     parse_sentinel_masters_resp3,
+    zmpop_resp3_to_resp2_legacy,
     zpop_score_pairs,
+    zset_score_pairs_resp3_to_resp2_legacy,
 )
 
 
@@ -337,3 +339,37 @@ def test_pairs_to_dict_typed_mixed_typed_and_untyped_keys():
         {"count": int, "ratio": float},
     )
     assert result == {"count": 5, "ratio": 1.5, "name": "redis"}
+
+
+# Expected values are what Redis 8 sends for these scores on a RESP2 connection.
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "score, expected",
+    [
+        (0.1, b"0.1"),
+        (1 / 3, b"0.3333333333333333"),
+        (2.5, b"2.5"),
+        (-2.5, b"-2.5"),
+        (1.0, b"1"),
+        (-3.0, b"-3"),
+        (0.0, b"0"),
+        (-0.0, b"-0"),
+        (1e16, b"10000000000000000"),
+        (1e20, b"1e+20"),
+        (1.5e300, b"1.5e+300"),
+        (0.00001, b"0.00001"),
+        (1e-7, b"1e-7"),
+        (1.2345e-8, b"1.2345e-8"),
+        (float("inf"), b"inf"),
+        (float("-inf"), b"-inf"),
+    ],
+)
+def test_resp3_to_resp2_legacy_score_matches_resp2_wire(score, expected):
+    identity = {"withscores": True, "score_cast_func": lambda x: x}
+    assert zset_score_pairs_resp3_to_resp2_legacy([[b"m", score]], **identity) == [
+        (b"m", expected)
+    ]
+    assert zmpop_resp3_to_resp2_legacy([b"key", [[b"m", score]]]) == [
+        b"key",
+        [[b"m", expected]],
+    ]
