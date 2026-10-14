@@ -512,6 +512,9 @@ class DefaultCache(CacheInterface):
         return holders
 
     def flush(self) -> int:
+        # Before emptying, as every flush does: refreshes queued before it must not refill
+        # the cache, whoever empties it (R3).
+        CacheRefresher._cancel_all_for(self)
         elem_count = len(self._cache)
         self._cache.clear()
         return elem_count
@@ -574,6 +577,9 @@ class CacheProxy(CacheInterface):
         return self._cache.take_entries_by_redis_keys(redis_keys)
 
     def flush(self) -> int:
+        # The pools register their refreshers under this proxy, not under the cache it
+        # wraps, so the proxy cancels them itself.
+        CacheRefresher._cancel_all_for(self)
         return self._cache.flush()
 
     def is_cachable(self, key: CacheKey) -> bool:
@@ -1122,13 +1128,26 @@ class CacheRefresher:
         if self._pid != os.getpid():
             return
 
+        CacheRefresher._cancel_all_for(self._cache, also=self)
+
+    @classmethod
+    def _cancel_all_for(
+        cls, cache: "CacheInterface", also: "CacheRefresher | None" = None
+    ) -> None:
+        """
+        Cancel every refresher registered for ``cache``, and ``also``.
+
+        ``also`` is the caller's own refresher, cancelled even when its cache could not be
+        registered. The cache's own ``flush`` calls this with none, so that an emptying the
+        application makes through ``get_cache().flush()`` drops queued refreshes as well.
+        """
         try:
-            with CacheRefresher._sharing_lock:
-                sharing = list(CacheRefresher._sharing.get(self._cache, ()))
+            with cls._sharing_lock:
+                sharing = list(cls._sharing.get(cache, ()))
         except TypeError:
             sharing = []
-        if self not in sharing:
-            sharing.append(self)
+        if also is not None and also not in sharing:
+            sharing.append(also)
 
         for refresher in sharing:
             refresher._cancel_own()
@@ -1147,8 +1166,8 @@ class CacheRefresher:
         """
         Cancel all queued work and let the worker exit.
 
-        A refresh that is waiting for a connection when it is stopped closes the connection
-        it gets rather than leave a socket open in a closed pool. The refresher stays
+        A refresh that holds or is waiting for a connection when it is stopped closes that
+        connection before it returns it, rather than leave a socket open in a closed pool. The refresher stays
         usable: a pool is reusable after ``close()``, and the next accepted key starts a new
         worker.
         """
@@ -1260,10 +1279,6 @@ class CacheRefresher:
             # Getting a connection can wait for a handshake, and a flush in that time must
             # still refresh nothing.
             if not self._is_current(generation):
-                if self._was_stopped_after(generation):
-                    # A ``close()`` came while this job connected a socket, and the pool
-                    # must not get an open one back.
-                    conn.disconnect()
                 return
             result = conn._refresh_entry(
                 cache_key, is_current=lambda: self._is_current(generation)
@@ -1285,6 +1300,11 @@ class CacheRefresher:
             if result is not None:
                 record_csc_refresh(result=result)
         finally:
+            # A ``close()`` came while this job held the connection: while it connected a
+            # socket, or during the round trip, which reconnects a socket the close swept.
+            # The closed pool must not get an open one back.
+            if self._was_stopped_after(generation):
+                conn.disconnect()
             pool.release(conn)
 
 

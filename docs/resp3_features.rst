@@ -293,7 +293,9 @@ so the refreshed reply is stored and tracked exactly as a read's would be. Refre
 the cache serve an older value than it would without it: the old value is gone before the
 refresh is queued, and a reply the server invalidates again while it is in flight is not
 stored. A server ``FLUSHALL`` or ``FLUSHDB`` empties the cache and refreshes nothing, and
-every time a connection empties the cache, refreshes still queued on its pool are dropped.
+every time the cache is emptied - by a connection, or by the application through
+``get_cache().flush()`` - the refreshes still queued on every pool that shares it are
+dropped.
 
 Refresh is best effort, and has costs to weigh before turning it on:
 
@@ -325,10 +327,10 @@ Refresh is best effort, and has costs to weigh before turning it on:
   fetches the value itself, so refresh gains nothing.
 - A refresh that fails with a connection error or a timeout closes that connection, which
   empties the cache, as any closed caching connection does.
-- On a Cluster client every node's pool refreshes on its own node, within its own bound, and
-  a flush drops only the refreshes queued on the pool that read it. A refresh answered with
-  ``MOVED`` or ``ASK`` is not redirected: the entry stays removed, and the next read is routed
-  as usual.
+- On a Cluster client every node's pool refreshes on its own node, within its own bound.
+  All nodes share one cache, so a flush caused by one node drops the refreshes queued on
+  every node. A refresh answered with ``MOVED`` or ``ASK`` is not redirected: the entry
+  stays removed, and the next read is routed as usual.
 - ``cache_predicate`` is also called from the refresh thread, so it must be thread-safe.
 - With refresh, a custom ``CacheInterface`` implementation has invalidated entries removed
   through ``take_entries_by_redis_keys``, not ``delete_by_redis_keys``.

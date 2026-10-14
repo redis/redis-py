@@ -4499,9 +4499,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
-        self.disconnect()
+        # Stopped first: a refresh that connects a socket after the disconnect below then
+        # closes it before returning it, rather than leave it open in the closed pool.
         if self._cache_refresher is not None:
             self._cache_refresher.stop()
+        self.disconnect()
 
     def _reset_cache_refresher(self) -> None:
         """

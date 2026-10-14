@@ -34,7 +34,7 @@ from redis.commands.metadata import (
     ResponsePolicy,
     StaticMetadataResolver,
 )
-from redis.connection import CacheProxyConnection
+from redis.connection import CacheProxyConnection, ConnectionPool
 from redis.event import (
     EventDispatcher,
 )
@@ -2630,6 +2630,36 @@ class TestClusterCacheRefresh:
         for key in keys:
             assert cache.collection.get(get_cache_key(key)) is None
 
+    def test_closing_a_cluster_built_from_a_url_stops_every_refresher(self, request):
+        # ``from_url`` builds each node as ``Redis(connection_pool=...)``, which does not
+        # close the pool it was handed. Its refresher is stopped, and the pool is left as
+        # it was.
+        cluster = redis.RedisCluster.from_url(
+            request.config.getoption("--redis-url"),
+            protocol=3,
+            cache_config=_refresh_config(max_size=128),
+        )
+        try:
+            for node in cluster.get_primaries():
+                cluster.ping(target_nodes=node)
+            pools = [
+                node.redis_connection.connection_pool for node in cluster.get_nodes()
+            ]
+        finally:
+            cluster.close()
+
+        refreshers = [pool._cache_refresher for pool in pools]
+        assert refreshers
+        assert all(refresher is not None for refresher in refreshers)
+        # ``stop`` leaves the generation it cancelled behind; one never stopped keeps 0.
+        assert all(refresher._stopped_generation > 0 for refresher in refreshers)
+        # The connections stay open, as they did before refresh existed.
+        assert any(
+            connection._conn._sock is not None
+            for pool in pools
+            for connection in pool._available_connections
+        )
+
 
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
@@ -4139,6 +4169,62 @@ class TestCacheRefresher:
         assert not connection.send_command.called
         connection.disconnect.assert_called_once_with()
         assert recorded == []
+
+    def test_a_close_during_the_round_trip_closes_the_connection(
+        self, make_refresher, pool, gate
+    ):
+        # The round trip reconnects a socket that ``close()`` swept, so the connection is
+        # closed before the closed pool gets it back.
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([get_cache_key("foo")])
+        _wait(lambda: pool.connection.send_command.called)
+        refresher.stop()
+        gate.set()
+
+        _wait(lambda: pool.released == [pool.connection])
+        pool.connection.disconnect.assert_called_once_with()
+
+    def test_a_refresh_without_a_close_keeps_its_connection_open(
+        self, make_refresher, pool
+    ):
+        refresher = make_refresher(pool, 1)
+
+        refresher.submit([get_cache_key("foo")])
+        wait_for_refreshes(refresher)
+
+        assert pool.released == [pool.connection]
+        assert not pool.connection.disconnect.called
+
+    def test_a_pool_close_stops_the_refresher_before_disconnecting(self):
+        pool = ConnectionPool(protocol=3, cache_config=_refresh_config())
+        calls = MagicMock()
+        with (
+            patch.object(pool._cache_refresher, "stop", calls.stop),
+            patch.object(pool, "disconnect", calls.disconnect),
+        ):
+            pool.close()
+
+        assert [name for name, _, _ in calls.mock_calls] == ["stop", "disconnect"]
+
+    @pytest.mark.parametrize("wrapped", [False, True], ids=["default", "proxy"])
+    def test_an_application_flush_cancels_the_refreshes(
+        self, make_refresher, pool, gate, wrapped
+    ):
+        # ``get_cache()`` hands out the object the pools registered their refreshers under:
+        # a ``CacheProxy`` when the cache was built from a ``CacheConfig``, or the cache
+        # the caller passed as ``cache=``.
+        if wrapped:
+            pool.cache = CacheProxy(pool.cache)
+        refresher = make_refresher(pool, 4)
+
+        refresher.submit([get_cache_key("k1"), get_cache_key("k2")])
+        _wait(lambda: pool.connection.send_command.called)
+        is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
+
+        pool.cache.flush()
+        assert not is_current()
+        assert refresher._pending == set()
 
     def test_a_worker_that_cannot_start_hands_the_keys_back(self, make_refresher, pool):
         refresher = make_refresher(pool, 4)
