@@ -9394,6 +9394,11 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        if withscore and score_cast_func is not float:
+            # Lets the RESP3 -> legacy callback match RESP2's str scores.
+            options["decode_responses"] = self.get_connection_kwargs().get(
+                "decode_responses", False
+            )
 
         return self.execute_command(*pieces, **options)
 
@@ -9518,6 +9523,11 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        if withscore and score_cast_func is not float:
+            # Lets the RESP3 -> legacy callback match RESP2's str scores.
+            options["decode_responses"] = self.get_connection_kwargs().get(
+                "decode_responses", False
+            )
 
         return self.execute_command(*pieces, **options)
 

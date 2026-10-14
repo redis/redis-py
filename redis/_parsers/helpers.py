@@ -441,6 +441,14 @@ def _score_to_resp2_bytes(value):
     return _redis_double_to_string(float(value)).encode()
 
 
+def _score_to_resp2_reply(value, decode):
+    """Like ``_score_to_resp2_bytes`` but returns ``str`` when the client
+    decodes responses, as the RESP2 parser does with ``decode_responses=True``.
+    """
+    text = _score_to_resp2_bytes(value)
+    return text.decode() if decode else text
+
+
 def _redis_double_to_string(value):
     """Format a double the way Redis does in replies (``d2string``).
 
@@ -504,8 +512,10 @@ def zset_score_pairs_resp3_to_resp2_legacy(response, **options):
     if score_cast_func is float:
         return [(member, float(score)) for member, score in response]
     score_cast_func = _wrap_score_cast_func(score_cast_func)
+    # Members are str exactly when the client decodes responses.
+    decode = isinstance(response[0][0], str)
     return [
-        (member, score_cast_func(_score_to_resp2_bytes(score)))
+        (member, score_cast_func(_score_to_resp2_reply(score, decode)))
         for member, score in response
     ]
 
@@ -522,10 +532,11 @@ def zset_score_pairs_resp3_to_resp2_legacy_flat(response, **options):
     """
     if not response or not options.get("withscores"):
         return response
+    decode = isinstance(response[0][0], str)
     flat = []
     for member, score in response:
         flat.append(member)
-        flat.append(_score_to_resp2_bytes(score))
+        flat.append(_score_to_resp2_reply(score, decode))
     return flat
 
 
@@ -543,7 +554,10 @@ def zset_score_for_rank_resp3_to_resp2_legacy(response, **options):
     if score_cast_func is float:
         return [response[0], float(response[1])]
     score_cast_func = _wrap_score_cast_func(score_cast_func)
-    return [response[0], score_cast_func(_score_to_resp2_bytes(response[1]))]
+    # The reply has no member to tell whether the client decodes responses,
+    # so ZRANK/ZREVRANK pass ``decode_responses`` in the options.
+    decode = options.get("decode_responses", False)
+    return [response[0], score_cast_func(_score_to_resp2_reply(response[1], decode))]
 
 
 def zset_score_pairs_unified(response, **options):
@@ -619,11 +633,13 @@ def zpop_score_pairs_resp3_to_resp2_legacy(response, **options):
         return [(response[0], float(response[1]))]
     score_cast_func = _wrap_score_cast_func(score_cast_func)
     if isinstance(response[0], list):
+        decode = isinstance(response[0][0], str)
         return [
-            (member, score_cast_func(_score_to_resp2_bytes(score)))
+            (member, score_cast_func(_score_to_resp2_reply(score, decode)))
             for member, score in response
         ]
-    return [(response[0], score_cast_func(_score_to_resp2_bytes(response[1])))]
+    decode = isinstance(response[0], str)
+    return [(response[0], score_cast_func(_score_to_resp2_reply(response[1], decode)))]
 
 
 def bzpop_score_unified(response, **options):
@@ -654,9 +670,13 @@ def zmpop_resp3_to_resp2_legacy(response, **options):
     """
     if not response:
         return response
+    decode = isinstance(response[0], str)
     return [
         response[0],
-        [[member, _score_to_resp2_bytes(score)] for member, score in response[1]],
+        [
+            [member, _score_to_resp2_reply(score, decode)]
+            for member, score in response[1]
+        ],
     ]
 
 
