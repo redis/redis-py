@@ -1571,6 +1571,7 @@ def test_arrindex_dollar(client):
     assert client.json().arrindex("test_None", "..nested2_not_found.arr", "None") == 0
 
 
+@pytest.mark.fixed_client
 @pytest.mark.redismod
 def test_decoders_and_unstring():
     assert unstring("4") == 4

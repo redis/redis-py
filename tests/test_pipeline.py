@@ -460,6 +460,7 @@ class TestPipeline:
             )
 
 
+@pytest.mark.fixed_client
 class TestPipelineMetricsRecording:
     """
     Unit tests that verify metrics are properly recorded from Pipeline

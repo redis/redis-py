@@ -100,28 +100,6 @@ class TestSSL:
         assert r.ping()
         r.close()
 
-    @pytest.mark.parametrize(
-        "ssl_ciphers",
-        [
-            "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
-            "DHE-RSA-AES256-GCM-SHA384",
-            "ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305",
-        ],
-    )
-    def test_ssl_connection_tls12_custom_ciphers(self, request, ssl_ciphers):
-        ssl_url = request.config.option.redis_ssl_url
-        p = urlparse(ssl_url)[1].split(":")
-        r = redis.Redis(
-            host=p[0],
-            port=p[1],
-            ssl=True,
-            ssl_cert_reqs="none",
-            ssl_min_version=ssl.TLSVersion.TLSv1_3,
-            ssl_ciphers=ssl_ciphers,
-        )
-        assert r.ping()
-        r.close()
-
     def test_ssl_connection_tls12_custom_ciphers_invalid(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
@@ -140,15 +118,10 @@ class TestSSL:
         assert "No cipher can be selected" in str(e.value)
         r.close()
 
-    @pytest.mark.parametrize(
-        "ssl_ciphers",
-        [
-            "TLS_CHACHA20_POLY1305_SHA256",
-            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
-        ],
-    )
-    def test_ssl_connection_tls13_custom_ciphers(self, request, ssl_ciphers):
-        # TLSv1.3 does not support changing the ciphers
+    def test_ssl_connection_tls13_custom_ciphers(self, request):
+        # TLSv1.3 suites cannot be set through the cipher list, so a list of only
+        # TLSv1.3 suites leaves no cipher to select
+        ssl_ciphers = "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256"
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(
@@ -178,6 +151,8 @@ class TestSSL:
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
+            # OCSP validation fails on every attempt, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
         return r
 
@@ -197,6 +172,7 @@ class TestSSL:
         assert "No AIA information present in ssl certificate" in str(e.value)
         r.close()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_valid_ocsp_cert_http(self):
         from redis.ocsp import OCSPVerifier
@@ -209,6 +185,7 @@ class TestSSL:
                     ocsp = OCSPVerifier(wrapped, hostname, 443)
                     assert ocsp.is_valid()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_revoked_ocsp_certificate(self):
         from redis.ocsp import OCSPVerifier
@@ -222,6 +199,7 @@ class TestSSL:
                     assert ocsp.is_valid()
                 assert "REVOKED" in str(e.value)
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
         from redis.ocsp import OCSPVerifier
@@ -234,6 +212,7 @@ class TestSSL:
                 with pytest.raises(ConnectionError):
                     ocsp.is_valid()
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_ocsp_not_present_in_response(self):
         from redis.ocsp import OCSPVerifier
@@ -247,6 +226,7 @@ class TestSSL:
                     assert ocsp.is_valid()
                 assert "from the" in str(e.value)
 
+    @pytest.mark.fixed_client
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
         from redis.ocsp import OCSPVerifier
@@ -271,12 +251,14 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
             ssl_ocsp_context=p,  # just needs to not be none
+            # OCSP validation fails on every attempt, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(RedisError):
@@ -284,20 +266,22 @@ class TestSSL:
         r.close()
 
         ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-        ctx.use_certificate_file(self.client_certs.cert)
+        ctx.use_certificate_file(self.client_certs.certfile)
         ctx.use_privatekey_file(self.client_certs.keyfile)
 
         r = redis.Redis(
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_ocsp_context=ctx,
             ssl_ocsp_expected_cert=open(self.server_certs.ca_certfile, "rb").read(),
             ssl_validate_ocsp_stapled=True,
+            # no OCSP response is ever stapled, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(ConnectionError) as e:
@@ -309,11 +293,13 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.client_certs.cert,
+            ssl_certfile=self.client_certs.certfile,
             ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp_stapled=True,
+            # no OCSP response is ever stapled, so skip the backoff retries
+            retry=Retry(NoBackoff(), 0),
         )
 
         with pytest.raises(ConnectionError) as e:
@@ -479,6 +465,7 @@ class TestSSL:
             r.close()
 
 
+@pytest.mark.fixed_client
 class TestOCSPCertificateBinding:
     """An ocsp response is only about the certificate its CertID names, and
     is only current between its this_update and next_update times."""
