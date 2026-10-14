@@ -1,5 +1,5 @@
-import warnings
 from datetime import datetime, timedelta, timezone
+import warnings
 import pytest
 from redis.exceptions import DataError
 import redis.utils as ru
@@ -196,7 +196,6 @@ class TestDeprecatedArgs:
             assert len(w) == 1
             assert "param1" in str(w[0].message) or "param2" in str(w[0].message)
 
-    @pytest.mark.anyio
     async def test_async_function_warns_on_deprecated_arg(self):
         @deprecated_args(args_to_warn=["old_param"])
         async def async_func(new_param=None, old_param=None):
@@ -209,7 +208,6 @@ class TestDeprecatedArgs:
             assert len(w) == 1
             assert "old_param" in str(w[0].message)
 
-    @pytest.mark.anyio
     async def test_async_function_no_warning_on_normal_call(self):
         @deprecated_args(args_to_warn=["old_param"])
         async def async_func(new_param=None, old_param=None):
@@ -324,7 +322,6 @@ class TestExperimentalArgs:
             assert result == "no_args"
             assert len(w) == 0
 
-    @pytest.mark.anyio
     async def test_async_experimental_args(self):
         @experimental_args(args_to_warn=["beta_param"])
         async def async_func(stable=None, beta_param=None):
