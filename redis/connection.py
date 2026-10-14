@@ -97,6 +97,7 @@ from .observability.recorder import (
     record_connection_closed,
     record_connection_count,
     record_connection_create_time,
+    record_connection_timeout,
     record_connection_wait_time,
     record_csc_eviction,
     record_csc_network_saved,
@@ -168,8 +169,16 @@ def add_debug_log_for_connection_failure(
 
 
 class HiredisRespSerializer:
+    def __init__(self, fallback=None, encode=None):
+        self._fallback = fallback
+        self._encode = encode
+
     def pack(self, *args: List):
         """Pack a series of arguments into the Redis protocol"""
+        if self._fallback is not None and any(
+            isinstance(arg, memoryview) for arg in args
+        ):
+            return self._fallback(*args)
         output = []
 
         if isinstance(args[0], str):
@@ -177,7 +186,11 @@ class HiredisRespSerializer:
         elif b" " in args[0]:
             args = tuple(args[0].split()) + args[1:]
         args = tuple(
-            bytes(arg) if isinstance(arg, (bytearray, memoryview)) else arg
+            bytes(arg)
+            if isinstance(arg, (bytearray, memoryview))
+            else self._encode(arg)
+            if self._encode is not None
+            else arg
             for arg in args
         )
         try:
@@ -1217,7 +1230,8 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if packer is not None:
             return packer
         elif HIREDIS_AVAILABLE:
-            return HiredisRespSerializer()
+            fallback = PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
+            return HiredisRespSerializer(fallback.pack, self.encoder.encode)
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
@@ -4546,6 +4560,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 connection = self.pool.get(block=True, timeout=self.timeout)
             except Empty:
+                record_connection_timeout(pool_name=get_pool_name(self))
                 # Note that this is not caught by the redis client and will be
                 # raised unless handled by application code. If you want never to
                 raise ConnectionError("No connection available.")

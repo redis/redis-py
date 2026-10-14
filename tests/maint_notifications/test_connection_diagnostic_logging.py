@@ -105,6 +105,7 @@ def _async_uds_conn(connected=True):
     return conn
 
 
+@pytest.mark.fixed_client
 class TestExtractConnectionDetails:
     @pytest.mark.parametrize(
         "factory", [_sync_conn, _async_conn, _sync_uds_conn, _async_uds_conn]
@@ -178,6 +179,7 @@ class TestExtractConnectionDetails:
         assert "local socket port: None" in conn.extract_connection_details()
 
 
+@pytest.mark.fixed_client
 class TestDebugGating:
     """These sites are on the per-command path; nothing may be built when off."""
 
@@ -223,6 +225,7 @@ class TestDebugGating:
         assert caplog.records == []
 
 
+@pytest.mark.fixed_client
 class TestHostErrorRegression:
     def test_cache_proxy_connection_reports_the_wrapped_host(self):
         """It used to drop the return value, rendering 'Timeout reading from None'."""
@@ -252,6 +255,7 @@ class _RetimeableSock(FakeSock):
         self._timeout = value
 
 
+@pytest.mark.fixed_client
 class TestFailureDetailsSurviveTheFailurePath:
     """The failure path closes the socket, so the details must be rendered first.
 
@@ -336,6 +340,7 @@ class TestFailureDetailsSurviveTheFailurePath:
         assert caplog.records == []
 
 
+@pytest.mark.fixed_client
 class TestParserTimeoutIsReraisedWithTheHost:
     """The parsers raise redis TimeoutError, which is not an OSError.
 
@@ -374,6 +379,7 @@ class TestParserTimeoutIsReraisedWithTheHost:
         assert conn._sock is not None
 
 
+@pytest.mark.fixed_client
 class TestRelaxedTimeoutStaysConsistent:
     """The parser caches the timeout to restore after a per-call override.
 

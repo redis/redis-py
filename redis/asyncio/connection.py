@@ -71,11 +71,13 @@ from redis.asyncio.observability.recorder import (
     record_connection_closed,
     record_connection_count,
     record_connection_create_time,
+    record_connection_timeout,
     record_connection_wait_time,
     record_error_count,
 )
 from redis.asyncio.retry import Retry, _to_async_retry
 from redis.backoff import NoBackoff
+from redis.connection import HiredisRespSerializer
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.event import MaintenanceCompletedEvent
 from redis.exceptions import (
@@ -853,6 +855,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
+        self._command_packer = (
+            HiredisRespSerializer(self._pack_command_python, self.encoder.encode)
+            if HIREDIS_AVAILABLE
+            else None
+        )
         self._should_reconnect = False
 
         try:
@@ -1577,6 +1584,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         return await self._parser.read_response(disable_decoding=disable_decoding)
 
     def pack_command(self, *args: EncodableT) -> List[bytes]:
+        if self._command_packer is not None:
+            return self._command_packer.pack(*args)
+        return self._pack_command_python(*args)
+
+    def _pack_command_python(self, *args: EncodableT) -> List[bytes]:
         """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
@@ -1955,7 +1967,6 @@ class UnixDomainSocketConnection(AbstractConnection):
             reader, writer = await asyncio.open_unix_connection(path=self.path)
         self._reader = reader
         self._writer = writer
-        await self.on_connect()
 
     def _host_error(self) -> str:
         return self.path
@@ -2945,6 +2956,10 @@ class ConnectionPool(
         arguments always win.
         """
         url_options = parse_url(url)
+
+        if "connection_class" in kwargs:
+            url_options["connection_class"] = kwargs["connection_class"]
+
         kwargs.update(url_options)
         return cls(**kwargs)
 
@@ -3454,6 +3469,7 @@ class BlockingConnectionPool(ConnectionPool):
                         )
                         is_created = connections_after > connections_before
         except asyncio.TimeoutError as err:
+            await record_connection_timeout(pool_name=get_pool_name(self))
             raise ConnectionError("No connection available.") from err
 
         # Record state transition for observability.

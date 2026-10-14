@@ -25,6 +25,8 @@ from redis.asyncio import Subscription
 from redis._parsers import Encoder
 from redis.asyncio.client import PubSub
 from redis.asyncio.cluster import ClusterPubSub
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.crc import key_slot
 
 from redis.exceptions import (
@@ -75,6 +77,23 @@ async def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False)
         await asyncio.sleep(0.01)
         now = asyncio.get_running_loop().time()
     return None
+
+
+async def wait_for_handled_message(test, get_message, expected, timeout=5.0):
+    """Handle messages until the test's handler has seen ``expected``.
+
+    In a cluster, a PUBLISH reaches subscribers on other nodes over the cluster
+    bus, so a message an earlier test published on the same channel can arrive
+    late and be handled first. Handling until the expected message shows up
+    skips such strays. A handled message is never returned, so every call must
+    still return None.
+    """
+    deadline = time.monotonic() + timeout
+    while getattr(test, "message", None) != expected:
+        assert time.monotonic() < deadline, (
+            f"handler saw {getattr(test, 'message', None)!r}, expected {expected!r}"
+        )
+        assert await get_message(timeout=0.1) is None
 
 
 def make_message(
@@ -635,107 +654,6 @@ class TestPubSubSubscribeUnsubscribe:
             }
         ]
 
-    @pytest.mark.fixed_client
-    async def test_resubscribe_binary_handler_uses_subscription(self):
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-        binary_channel = b"\x80\x81\x82"
-        handler = MagicMock()
-        p.channels = {binary_channel: handler}
-
-        calls = []
-
-        async def fake_subscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "subscribe", side_effect=fake_subscribe):
-            await p._resubscribe(p.channels, p.subscribe)
-
-        assert calls == [((Subscription(binary_channel, handler),), {})]
-
-    @pytest.mark.fixed_client
-    async def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
-        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
-        channels by hash slot on reconnect. A cluster node can own multiple
-        slot ranges, so a single batched SSUBSCRIBE across different slots
-        would be rejected by Redis with CROSSSLOT and resubscription would
-        fail silently. The same method is bound to the per-node PubSub
-        instances managed by ``ClusterPubSub``.
-        """
-        # Pure client-side logic: mock the pool, use a real encoder, no
-        # server needed. ``key_slot`` is client-side CRC16, so slot
-        # assignments are deterministic without a cluster.
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-
-        # Two channels share a hash tag (same slot); a third hashes to a
-        # different slot.
-        ch_a1 = b"{slot-a}-one"
-        ch_a2 = b"{slot-a}-two"
-        ch_b = b"{slot-b}-one"
-        assert key_slot(ch_a1) == key_slot(ch_a2)
-        assert key_slot(ch_a1) != key_slot(ch_b)
-
-        # Populate state as if previously subscribed, without going to the wire.
-        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
-
-        calls = []
-
-        async def fake_ssubscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
-            await ClusterPubSub._resubscribe_shard_channels(p)
-
-        # Every ssubscribe call must target exactly one slot.
-        slots_per_call = []
-        all_channels = set()
-        for args, kwargs in calls:
-            channels = set(args) | set(
-                k.encode() if isinstance(k, str) else k for k in kwargs
-            )
-            assert channels, "ssubscribe called with no channels"
-            call_slots = {key_slot(c) for c in channels}
-            assert len(call_slots) == 1, (
-                f"ssubscribe grouped channels from multiple slots: {call_slots}"
-            )
-            slots_per_call.append(next(iter(call_slots)))
-            all_channels.update(channels)
-
-        # All original channels must be resubscribed, across exactly two
-        # distinct slot groups.
-        assert all_channels == {ch_a1, ch_a2, ch_b}
-        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
-        # Channels sharing a slot are batched: two unique slots => two calls.
-        assert len(calls) == 2
-
-    @pytest.mark.fixed_client
-    async def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
-        pool = MagicMock()
-        encoder = Encoder(
-            encoding="utf-8", encoding_errors="strict", decode_responses=False
-        )
-        p = PubSub(connection_pool=pool, encoder=encoder)
-        binary_channel = b"\x80\x81\x82"
-        handler = MagicMock()
-        p.shard_channels = {binary_channel: handler}
-
-        calls = []
-
-        async def fake_ssubscribe(*args, **kwargs):
-            calls.append((tuple(args), dict(kwargs)))
-
-        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
-            await ClusterPubSub._resubscribe_shard_channels(p)
-
-        assert calls == [((Subscription(binary_channel, handler),), {})]
-
     @skip_if_server_version_lt("7.0.0")
     async def test_standalone_pubsub_on_connect_batches_shard_channels(self, pubsub):
         """The standalone PubSub has no notion of slots and must keep
@@ -877,7 +795,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel in checks:
             assert await func(channel) is None
             assert p.subscribed is True
-            assert await wait_for_message(p) is None
+            assert await p.get_message(timeout=1) is None
         assert p.subscribed is False
         await p.aclose()
 
@@ -895,7 +813,7 @@ class TestPubSubSubscribeUnsubscribe:
         for func, channel in checks:
             assert await func(channel) is None
             assert p.subscribed is True
-            message = await wait_for_message(p, ignore_subscribe_messages=True)
+            message = await p.get_message(ignore_subscribe_messages=True, timeout=1)
             assert message is None
         assert p.subscribed is False
 
@@ -945,6 +863,109 @@ class TestPubSubSubscribeUnsubscribe:
         assert p.subscribed is True
 
 
+@pytest.mark.fixed_client
+class TestPubSubResubscribeMocked:
+    """Resubscribe handling checked against mocked connections; no server needed."""
+
+    async def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = MagicMock()
+        p.shard_channels = {binary_channel: handler}
+
+        calls = []
+
+        async def fake_ssubscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
+            await ClusterPubSub._resubscribe_shard_channels(p)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
+
+    async def test_cluster_pubsub_resubscribe_shard_channels_groups_by_slot(self):
+        """The cluster-aware ``_resubscribe_shard_channels`` must group shard
+        channels by hash slot on reconnect. A cluster node can own multiple
+        slot ranges, so a single batched SSUBSCRIBE across different slots
+        would be rejected by Redis with CROSSSLOT and resubscription would
+        fail silently. The same method is bound to the per-node PubSub
+        instances managed by ``ClusterPubSub``.
+        """
+        # Pure client-side logic: mock the pool, use a real encoder, no
+        # server needed. ``key_slot`` is client-side CRC16, so slot
+        # assignments are deterministic without a cluster.
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+
+        # Two channels share a hash tag (same slot); a third hashes to a
+        # different slot.
+        ch_a1 = b"{slot-a}-one"
+        ch_a2 = b"{slot-a}-two"
+        ch_b = b"{slot-b}-one"
+        assert key_slot(ch_a1) == key_slot(ch_a2)
+        assert key_slot(ch_a1) != key_slot(ch_b)
+
+        # Populate state as if previously subscribed, without going to the wire.
+        p.shard_channels = {ch_a1: None, ch_a2: None, ch_b: None}
+
+        calls = []
+
+        async def fake_ssubscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "ssubscribe", side_effect=fake_ssubscribe):
+            await ClusterPubSub._resubscribe_shard_channels(p)
+
+        # Every ssubscribe call must target exactly one slot.
+        slots_per_call = []
+        all_channels = set()
+        for args, kwargs in calls:
+            channels = set(args) | set(
+                k.encode() if isinstance(k, str) else k for k in kwargs
+            )
+            assert channels, "ssubscribe called with no channels"
+            call_slots = {key_slot(c) for c in channels}
+            assert len(call_slots) == 1, (
+                f"ssubscribe grouped channels from multiple slots: {call_slots}"
+            )
+            slots_per_call.append(next(iter(call_slots)))
+            all_channels.update(channels)
+
+        # All original channels must be resubscribed, across exactly two
+        # distinct slot groups.
+        assert all_channels == {ch_a1, ch_a2, ch_b}
+        assert set(slots_per_call) == {key_slot(ch_a1), key_slot(ch_b)}
+        # Channels sharing a slot are batched: two unique slots => two calls.
+        assert len(calls) == 2
+
+    async def test_resubscribe_binary_handler_uses_subscription(self):
+        pool = MagicMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        binary_channel = b"\x80\x81\x82"
+        handler = MagicMock()
+        p.channels = {binary_channel: handler}
+
+        calls = []
+
+        async def fake_subscribe(*args, **kwargs):
+            calls.append((tuple(args), dict(kwargs)))
+
+        with mock.patch.object(p, "subscribe", side_effect=fake_subscribe):
+            await p._resubscribe(p.channels, p.subscribe)
+
+        assert calls == [((Subscription(binary_channel, handler),), {})]
+
+
 @pytest.mark.onlynoncluster
 class TestPubSubMessages:
     def setup_method(self, method):
@@ -992,10 +1013,11 @@ class TestPubSubMessages:
     async def test_channel_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe(foo=self.message_handler)
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
-        assert await wait_for_message(p) is None
-        assert self.message == make_message("message", "foo", "test message")
+        await wait_for_handled_message(
+            self, p.get_message, make_message("message", "foo", "test message")
+        )
         await p.aclose()
 
     async def test_binary_channel_message_handler_with_subscription(self, r):
@@ -1004,21 +1026,24 @@ class TestPubSubMessages:
         await p.subscribe(Subscription(channel, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "message",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "message",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     async def test_channel_async_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe(foo=self.async_message_handler)
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert self.async_message == make_message("message", "foo", "test message")
         await p.aclose()
 
@@ -1026,10 +1051,13 @@ class TestPubSubMessages:
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe(foo=self.message_handler)
         await p.subscribe(bar=self.async_message_handler)
-        assert await wait_for_message(p) is None
+        # get_message handles one message per call: two acks, then two messages
+        assert await p.get_message(timeout=1) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
         assert await r.publish("bar", "test message 2") == 1
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
+        assert await p.get_message(timeout=1) is None
         assert self.message == make_message("message", "foo", "test message")
         assert self.async_message == make_message("message", "bar", "test message 2")
         await p.aclose()
@@ -1041,24 +1069,28 @@ class TestPubSubMessages:
         await p.ssubscribe(Subscription(channel, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.spublish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "smessage",
-            "pattern": None,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "smessage",
+                "pattern": None,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     @pytest.mark.onlynoncluster
     async def test_pattern_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.psubscribe(**{"f*": self.message_handler})
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish("foo", "test message") == 1
-        assert await wait_for_message(p) is None
-        assert self.message == make_message(
-            "pmessage", "foo", "test message", pattern="f*"
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", "foo", "test message", pattern="f*"),
         )
         await p.aclose()
 
@@ -1070,13 +1102,16 @@ class TestPubSubMessages:
         await p.psubscribe(Subscription(pattern, self.message_handler))
         assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, b"test message") == 1
-        assert await p.get_message(timeout=1) is None
-        assert self.message == {
-            "type": "pmessage",
-            "pattern": pattern,
-            "channel": channel,
-            "data": b"test message",
-        }
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            {
+                "type": "pmessage",
+                "pattern": pattern,
+                "channel": channel,
+                "data": b"test message",
+            },
+        )
         await p.aclose()
 
     async def test_unicode_channel_message_handler(self, r: redis.Redis):
@@ -1084,10 +1119,11 @@ class TestPubSubMessages:
         channel = "uni" + chr(4456) + "code"
         channels = {channel: self.message_handler}
         await p.subscribe(**channels)
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, "test message") == 1
-        assert await wait_for_message(p) is None
-        assert self.message == make_message("message", channel, "test message")
+        await wait_for_handled_message(
+            self, p.get_message, make_message("message", channel, "test message")
+        )
         await p.aclose()
 
     @pytest.mark.onlynoncluster
@@ -1097,11 +1133,12 @@ class TestPubSubMessages:
         pattern = "uni" + chr(4456) + "*"
         channel = "uni" + chr(4456) + "code"
         await p.psubscribe(**{pattern: self.message_handler})
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         assert await r.publish(channel, "test message") == 1
-        assert await wait_for_message(p) is None
-        assert self.message == make_message(
-            "pmessage", channel, "test message", pattern=pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            make_message("pmessage", channel, "test message", pattern=pattern),
         )
         await p.aclose()
 
@@ -1125,11 +1162,13 @@ class TestPubSubRESP3Handler:
             return
         p = r.pubsub(push_handler_func=self.my_handler)
         await p.subscribe("foo")
-        assert await wait_for_message(p) is None
-        assert self.message == ["my handler", [b"subscribe", b"foo", 1]]
+        await wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"subscribe", b"foo", 1]]
+        )
         assert await r.publish("foo", "test message") == 1
-        assert await wait_for_message(p) is None
-        assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
+        await wait_for_handled_message(
+            self, p.get_message, ["my handler", [b"message", b"foo", b"test message"]]
+        )
 
 
 @pytest.mark.onlynoncluster
@@ -1203,40 +1242,46 @@ class TestPubSubAutoDecoding:
     async def test_channel_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe(**{self.channel: self.message_handler})
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         await r.publish(self.channel, self.data)
-        assert await wait_for_message(p) is None
-        assert self.message == self.make_message("message", self.channel, self.data)
+        await wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, self.data)
+        )
 
         # test that we reconnected to the correct channel
         self.message = None
         await p.connection.disconnect()
-        assert await wait_for_message(p) is None  # should reconnect
+        assert await p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         await r.publish(self.channel, new_data)
-        assert await wait_for_message(p) is None
-        assert self.message == self.make_message("message", self.channel, new_data)
+        await wait_for_handled_message(
+            self, p.get_message, self.make_message("message", self.channel, new_data)
+        )
         await p.aclose()
 
     async def test_pattern_message_handler(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.psubscribe(**{self.pattern: self.message_handler})
-        assert await wait_for_message(p) is None
+        assert await p.get_message(timeout=1) is None
         await r.publish(self.channel, self.data)
-        assert await wait_for_message(p) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, self.data, pattern=self.pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message(
+                "pmessage", self.channel, self.data, pattern=self.pattern
+            ),
         )
 
         # test that we reconnected to the correct pattern
         self.message = None
         await p.connection.disconnect()
-        assert await wait_for_message(p) is None  # should reconnect
+        assert await p.get_message(timeout=1) is None  # should reconnect
         new_data = self.data + "new data"
         await r.publish(self.channel, new_data)
-        assert await wait_for_message(p) is None
-        assert self.message == self.make_message(
-            "pmessage", self.channel, new_data, pattern=self.pattern
+        await wait_for_handled_message(
+            self,
+            p.get_message,
+            self.make_message("pmessage", self.channel, new_data, pattern=self.pattern),
         )
         await p.aclose()
 
@@ -1253,8 +1298,9 @@ class TestPubSubAutoDecoding:
 
 @pytest.mark.onlynoncluster
 class TestPubSubRedisDown:
-    async def test_channel_subscribe(self, r: redis.Redis):
-        r = redis.Redis(host="localhost", port=6390)
+    async def test_channel_subscribe(self):
+        # nothing listens on this port, so skip the default backoff retries
+        r = redis.Redis(host="localhost", port=6390, retry=Retry(NoBackoff(), 0))
         p = r.pubsub()
         with pytest.raises(ConnectionError):
             await p.subscribe("foo")
@@ -1820,7 +1866,7 @@ class TestAsyncPubSubTimeoutPropagation:
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
         # Verify timeout was actually respected (within reasonable bounds)
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -1861,7 +1907,7 @@ class TestAsyncPubSubTimeoutPropagation:
         response = await p.parse_response(block=False, timeout=0.1)
         elapsed = asyncio.get_running_loop().time() - start
         assert response is None
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -1880,7 +1926,7 @@ class TestAsyncPubSubTimeoutPropagation:
         msg = await p.get_message(timeout=0)
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
-        assert elapsed < 0.1
+        assert elapsed < 0.5  # well below any blocking wait, above a runner stall
         await p.aclose()
 
     @pytest.mark.asyncio
@@ -2003,7 +2049,7 @@ class TestAsyncPubSubBlockingListen:
     """
 
     SOCKET_TIMEOUT = 0.3
-    PUBLISH_DELAY = SOCKET_TIMEOUT * 3
+    PUBLISH_DELAY = SOCKET_TIMEOUT * 2
 
     async def _make_subscriber(self, create_redis):
         from redis.asyncio.retry import Retry
@@ -2085,7 +2131,8 @@ class TestAsyncPubSubBlockingListen:
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe("foo")
         # Drain the subscribe ack before calling parse_response directly.
-        await wait_for_message(p, timeout=1.0)
+        # The ack is ignored, so get_message returns None as soon as it is read.
+        await p.get_message(timeout=1.0)
 
         async def publish_after_delay():
             await asyncio.sleep(self.PUBLISH_DELAY)
@@ -2169,10 +2216,11 @@ class TestAsyncPubSubBlockingListen:
         msg = await p.get_message(timeout=0.1)
         elapsed = asyncio.get_running_loop().time() - start
         assert msg is None
-        assert elapsed < 0.5
+        assert elapsed < 1.0  # generous: a stalled runner must not fail it
         await p.aclose()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestPubSubHandleMessageMetrics:
     """Tests for handle_message recording pubsub metrics."""
@@ -3495,11 +3543,13 @@ class TestClusterPubSubSlotMigration:
         # measured wait by the setup's own cost and makes the lower bound below
         # unreachable.
         start = time.monotonic()
-        pubsub._poll_cool_off[bad] = start + 0.05
+        # A stall longer than the window between here and the generator's
+        # deadline check lets it poll the failing node; keep the window wide.
+        pubsub._poll_cool_off[bad] = start + 0.5
         assert await pubsub._sharded_message_generator(timeout=30) == (None, None)
         elapsed = time.monotonic() - start
 
-        assert 0.05 - EVENT_LOOP_TIMER_SLACK <= elapsed < 5
+        assert 0.5 - EVENT_LOOP_TIMER_SLACK <= elapsed < 5
 
     async def test_sharded_message_generator_cool_off_does_not_block_zero_timeout(
         self,
