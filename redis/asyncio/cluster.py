@@ -3263,10 +3263,13 @@ class PipelineStrategy(AbstractStrategy):
                     result = cmd.result
                     if isinstance(result, Exception):
                         command = " ".join(map(safe_str, cmd.args))
+                        # Errors from the redirect retry may carry no args,
+                        # e.g. MaxConnectionsError() from acquire_connection().
+                        error = result.args[0] if result.args else type(result).__name__
                         msg = (
                             f"Command # {cmd.position + 1} "
                             f"({truncate_text(command)}) "
-                            f"of pipeline caused error: {result.args}"
+                            f"of pipeline caused error: {error}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
