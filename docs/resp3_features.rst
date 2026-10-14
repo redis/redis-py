@@ -310,14 +310,15 @@ Refresh is best effort, and has costs to weigh before turning it on:
   refresh, counting the one being refreshed. It bounds the backlog, not concurrency. When
   invalidations arrive faster than one round trip per key, the queue fills, and an
   invalidation that finds it full is handled as without refresh: the entry is removed and
-  the next read fetches it. A failed refresh, a nil reply, and a reply the
-  ``cache_predicate`` does not select do the same.
+  the next read fetches it. A failed refresh and a nil reply do the same.
 - Each refresh borrows a connection from the pool while it runs, and only one the pool can
   hand out at once: an idle connection, or a new one below ``max_connections``. When every
   connection is in use and the pool is at its limit, or while a ``BlockingConnectionPool``
-  is in maintenance, the refresh is skipped and the entry stays removed, so a refresh never
-  makes an application command fail or wait to get a connection. It can still take the last
-  free one, for the length of one round trip. A client built with
+  is in maintenance, the refresh is skipped and the entry stays removed: a refresh never
+  fails or waits to get a connection itself. It can still take the last free one, for the
+  length of one round trip, and an application command that needs a connection in that
+  time fails with ``MaxConnectionsError``, or on a ``BlockingConnectionPool`` waits for the
+  refresh to return it. A client built with
   ``single_connection_client=True`` opens a second connection for refreshes.
 - An invalidation is processed when the connection that received it next sends a
   command, or when a read finds the invalidated entry: before serving a cached value, the
@@ -333,7 +334,10 @@ Refresh is best effort, and has costs to weigh before turning it on:
   stays removed, and the next read is routed as usual.
 - ``cache_predicate`` is also called from the refresh thread, so it must be thread-safe.
 - With refresh, a custom ``CacheInterface`` implementation has invalidated entries removed
-  through ``take_entries_by_redis_keys``, not ``delete_by_redis_keys``.
+  through ``take_entries_by_redis_keys``, not ``delete_by_redis_keys``. Calling ``flush()``
+  on a custom cache passed as ``cache=`` does not drop the refreshes already queued, so they
+  can store entries again after it; the values they store are read after the flush and are
+  tracked.
 
 Refreshes show up in the cache metrics:
 

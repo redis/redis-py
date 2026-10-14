@@ -3739,21 +3739,43 @@ class TestCacheRefresher:
         closing.stop()
         assert is_current()
 
-    def test_a_cache_that_cannot_be_hashed_is_cancelled_alone(
+    def test_a_shared_cache_that_cannot_be_hashed_cancels_every_pool(
         self, make_refresher, pool, gate
     ):
+        # Registered by identity, so the cache needs no ``__hash__``.
         class UnhashableCache(DefaultCache):
             __hash__ = None
 
         pool.cache = UnhashableCache(CacheConfig())
+        flushing = make_refresher(FakeRefresherPool(pool.cache), 4)
         refresher = make_refresher(pool, 4)
 
         refresher.submit([get_cache_key("k1")])
         _wait(lambda: pool.connection.send_command.called)
         is_current = pool.connection._refresh_entry.call_args.kwargs["is_current"]
 
-        refresher.cancel_pending()
+        flushing.cancel_pending()
         assert not is_current()
+
+    def test_a_collected_pool_ends_its_idle_worker_at_once(self):
+        # The worker would otherwise wait out its idle timeout holding the refresher, and
+        # through it the cache.
+        pool = FakeRefresherPool()
+        refresher = CacheRefresher(pool, 4)
+        refresher.submit([get_cache_key("k1")])
+        wait_for_refreshes(refresher)
+        worker = refresher._thread
+        assert worker is not None
+
+        cache = weakref.ref(pool.cache)
+        del pool
+        gc.collect()
+
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        del refresher, worker
+        gc.collect()
+        assert cache() is None
 
     def test_a_cancel_inside_submit_neither_hangs_nor_leaks_the_bound(self, pool):
         # A client collected by the garbage collector during an allocation in ``submit``

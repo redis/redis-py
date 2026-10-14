@@ -996,12 +996,16 @@ class CacheRefresher:
     IDLE_TIMEOUT = 30.0
     _STOP = object()
 
-    # The refreshers of every pool, by the cache they refresh into: cache -> ``WeakSet`` of
-    # refreshers. Weak on both sides, so it keeps neither a cache nor a refresher alive.
+    # The refreshers of every pool, by the identity of the cache they refresh into:
+    # ``id(cache)`` -> ``WeakSet`` of refreshers, so it keeps no refresher alive. Keyed by
+    # identity rather than by the cache, so that every cache can be registered, hashable
+    # or not, and no ``__hash__`` or ``__eq__`` of a third-party cache runs under the lock.
+    # A live refresher holds its cache, so the id of a registered cache is never reused;
+    # lookups still keep only the refreshers whose cache is the one asked for.
     # ``_sharing_lock`` is a leaf, like ``_lock``, and the two are never held together. Both
     # are re-entrant: an allocation under either can run a garbage-collected client's
     # ``__del__`` on the same thread, and its disconnect flushes the cache, which cancels.
-    _sharing: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+    _sharing: "dict[int, weakref.WeakSet[CacheRefresher]]" = {}
     _sharing_lock = threading.RLock()
 
     def __init__(
@@ -1022,18 +1026,24 @@ class CacheRefresher:
         self._stopped_generation = 0
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
-        # Held strongly: it is the key this refresher is registered under, and the pool
-        # holds it anyway.
+        # Held strongly: it keeps the id this refresher is registered under from being
+        # reused, and the pool holds it anyway.
         self._cache = pool.cache
-        try:
-            with CacheRefresher._sharing_lock:
-                CacheRefresher._sharing.setdefault(self._cache, weakref.WeakSet()).add(
-                    self
-                )
-        except TypeError:
-            # A third-party cache that cannot be hashed or weakly referenced. Its emptying
-            # cancels only this refresher, as for a cache no other pool shares.
-            pass
+        with CacheRefresher._sharing_lock:
+            # Sets emptied by collected refreshers are dropped here, so the map does not
+            # grow with every client ever built.
+            for key in [
+                key for key, group in CacheRefresher._sharing.items() if not group
+            ]:
+                del CacheRefresher._sharing[key]
+            CacheRefresher._sharing.setdefault(id(self._cache), weakref.WeakSet()).add(
+                self
+            )
+        # The worker waits up to ``idle_timeout`` for work, and holds this refresher, and
+        # so the cache, while it waits. Woken when the pool is collected, it finds no pool
+        # and exits, so a discarded client's cache is freed at once rather than after the
+        # timeout. ``finalize`` holds the queue, not the refresher.
+        weakref.finalize(pool, self._queue.put, CacheRefresher._STOP)
 
     def submit(self, cache_keys: Iterable[CacheKey]) -> list[CacheKey]:
         """
@@ -1137,15 +1147,16 @@ class CacheRefresher:
         """
         Cancel every refresher registered for ``cache``, and ``also``.
 
-        ``also`` is the caller's own refresher, cancelled even when its cache could not be
-        registered. The cache's own ``flush`` calls this with none, so that an emptying the
-        application makes through ``get_cache().flush()`` drops queued refreshes as well.
+        ``also`` is the caller's own refresher, cancelled even if it is not registered. The
+        cache's own ``flush`` calls this with none, so that an emptying the application
+        makes through ``get_cache().flush()`` drops queued refreshes as well.
         """
-        try:
-            with cls._sharing_lock:
-                sharing = list(cls._sharing.get(cache, ()))
-        except TypeError:
-            sharing = []
+        with cls._sharing_lock:
+            sharing = [
+                refresher
+                for refresher in cls._sharing.get(id(cache), ())
+                if refresher._cache is cache
+            ]
         if also is not None and also not in sharing:
             sharing.append(also)
 
@@ -1311,7 +1322,7 @@ class CacheRefresher:
 def _reset_refresher_sharing_after_fork() -> None:
     # Another thread may have held the lock at fork time, and none of the parent's
     # refreshers runs in the child: the child's pools register refreshers of their own.
-    CacheRefresher._sharing = weakref.WeakKeyDictionary()
+    CacheRefresher._sharing = {}
     CacheRefresher._sharing_lock = threading.RLock()
 
 
