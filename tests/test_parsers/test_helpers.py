@@ -1,4 +1,5 @@
 import inspect
+import math
 
 import pytest
 
@@ -14,6 +15,8 @@ from redis._parsers.helpers import (
     parse_sentinel_masters_resp3,
     zmpop_resp3_to_resp2_legacy,
     zpop_score_pairs,
+    zpop_score_pairs_resp3_to_resp2_legacy,
+    zset_score_for_rank_resp3_to_resp2_legacy,
     zset_score_pairs_resp3_to_resp2_legacy,
 )
 
@@ -355,6 +358,9 @@ def test_pairs_to_dict_typed_mixed_typed_and_untyped_keys():
         (0.0, b"0"),
         (-0.0, b"-0"),
         (1e16, b"10000000000000000"),
+        (2.0**62, b"4611686018427387904"),
+        (-(2.0**62), b"-4611686018427387904"),
+        (5e18, b"5e+18"),
         (1e20, b"1e+20"),
         (1.5e300, b"1.5e+300"),
         (0.00001, b"0.00001"),
@@ -373,3 +379,29 @@ def test_resp3_to_resp2_legacy_score_matches_resp2_wire(score, expected):
         b"key",
         [[b"m", expected]],
     ]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("score", [0.1, -0.0, float("inf")])
+def test_resp3_to_resp2_legacy_default_float_cast(score):
+    def check(value):
+        assert type(value) is float
+        assert math.copysign(1.0, value) == math.copysign(1.0, score)
+        assert value == score
+
+    for options in (
+        {"withscores": True},
+        {"withscores": True, "score_cast_func": float},
+    ):
+        [(member, value)] = zset_score_pairs_resp3_to_resp2_legacy(
+            [[b"m", score]], **options
+        )
+        check(value)
+    [rank, value] = zset_score_for_rank_resp3_to_resp2_legacy(
+        [3, score], withscore=True
+    )
+    check(value)
+    [(member, value)] = zpop_score_pairs_resp3_to_resp2_legacy([b"m", score])
+    check(value)
+    [(member, value)] = zpop_score_pairs_resp3_to_resp2_legacy([[b"m", score]])
+    check(value)

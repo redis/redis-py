@@ -500,7 +500,10 @@ def zset_score_pairs_resp3_to_resp2_legacy(response, **options):
     """
     if not response or not options.get("withscores"):
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        return [(member, float(score)) for member, score in response]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
     return [
         (member, score_cast_func(_score_to_resp2_bytes(score)))
         for member, score in response
@@ -536,7 +539,10 @@ def zset_score_for_rank_resp3_to_resp2_legacy(response, **options):
     """
     if not response or not options.get("withscore"):
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        return [response[0], float(response[1])]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
     return [response[0], score_cast_func(_score_to_resp2_bytes(response[1]))]
 
 
@@ -606,7 +612,12 @@ def zpop_score_pairs_resp3_to_resp2_legacy(response, **options):
     """
     if not response:
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        if isinstance(response[0], list):
+            return [(member, float(score)) for member, score in response]
+        return [(response[0], float(response[1]))]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
     if isinstance(response[0], list):
         return [
             (member, score_cast_func(_score_to_resp2_bytes(score)))
