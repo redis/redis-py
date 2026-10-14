@@ -184,22 +184,23 @@ async def test_add_elem_with_attr(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
-@pytest.mark.parametrize("attributes", [{}, "{}", "", None, {"source": "new"}])
-async def test_add_elem_updates_attributes(d_client, attributes):
+@pytest.mark.parametrize(
+    "attributes, expected",
+    [
+        ({}, None),
+        ("{}", None),
+        ("", None),
+        (None, {"source": "old"}),
+        ({"source": "new"}, {"source": "new"}),
+    ],
+)
+async def test_add_elem_updates_attributes(d_client, attributes, expected):
     vset = d_client.vset()
     await vset.vadd("myset", [1, 0], "elem", attributes={"source": "old"})
 
     await vset.vadd("myset", [0, 1], "elem", attributes=attributes)
 
-    saved = await d_client.execute_command("VGETATTR", "myset", "elem")
-    if attributes is None:
-        assert json.loads(saved) == {"source": "old"}
-    elif attributes == "":
-        assert saved is None
-    else:
-        assert json.loads(saved) == (
-            json.loads(attributes) if isinstance(attributes, str) else attributes
-        )
+    assert await vset.vgetattr("myset", "elem") == expected
 
 
 @skip_if_server_version_lt("7.9.0")
