@@ -9692,7 +9692,7 @@ class SortedSetCommands(CommandsProtocol):
         if dest is not None:
             pieces.append(dest)
         pieces.append(len(keys))
-        if isinstance(keys, dict):
+        if isinstance(keys, Mapping):
             keys, weights = keys.keys(), keys.values()
         else:
             weights = None
