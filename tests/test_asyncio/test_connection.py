@@ -1,9 +1,12 @@
 import asyncio
+import gc
 import math
 import os
+import platform
 import socket
 import ssl
 import types
+import weakref
 from unittest import mock
 from errno import ECONNREFUSED, ETIMEDOUT
 from unittest.mock import patch
@@ -28,7 +31,12 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.exceptions import (
+    ConnectionError,
+    InvalidResponse,
+    ResponseError,
+    TimeoutError,
+)
 from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
@@ -1663,6 +1671,46 @@ async def test_read_response_user_timeout_still_returns_none():
 
     assert await conn.read_response(timeout=0.01) is None
     conn.disconnect.assert_not_awaited()
+
+
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="Immediate reclamation is a refcounting property",
+)
+async def test_read_response_error_reply_breaks_reference_cycle():
+    """
+    read_response raises the ResponseError the parser returned. The exception's
+    traceback references the read_response frame, so a ``response`` local still
+    bound to it would form a cycle only the cycle collector can reclaim, keeping
+    every frame on the traceback alive until then. The sync Connection clears
+    the local when it raises; with the collector off, refcounting alone must
+    reclaim the exception here too.
+    """
+    conn = Connection()
+
+    # Build the error in a factory so the test itself never holds a strong
+    # reference; the weakref is the only handle on it.
+    error_refs = []
+
+    async def error_reply(*args, **kwargs):
+        error = ResponseError("NOSCRIPT No matching script. Please use EVAL.")
+        error_refs.append(weakref.ref(error))
+        return error
+
+    conn._read_response_from_parser = error_reply
+
+    gc.collect()
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        with pytest.raises(ResponseError):
+            await conn.read_response()
+
+        (ref,) = error_refs
+        assert ref() is None
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
 
 async def test_send_packed_command_os_level_timeout_is_a_connection_error():
