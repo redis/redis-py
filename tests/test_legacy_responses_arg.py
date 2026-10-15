@@ -131,6 +131,7 @@ _DEBUG_OBJECT_REPLY = (
 )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("protocol", _PROTOCOL_VARIANTS)
 def test_unified_status_replies_have_the_resp2_shape(protocol):
     """BGSAVE, BGREWRITEAOF and DEBUG OBJECT give the RESP2 shape when unified."""
