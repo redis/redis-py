@@ -1,14 +1,17 @@
 import binascii
 import datetime
+import gc
+import platform
 import select
 import socket
 import socketserver
 import threading
 from typing import List
 import warnings
+import weakref
 from queue import LifoQueue, Queue
 from time import monotonic, sleep
-from unittest.mock import DEFAULT, Mock, call, patch
+from unittest.mock import DEFAULT, MagicMock, Mock, call, patch
 
 import pytest
 import redis
@@ -3761,6 +3764,124 @@ class TestNodesManager:
 
         shuffle.assert_called_once()
         execute_command.assert_any_call("CLUSTER SLOTS")
+
+    @pytest.mark.fixed_client
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
+    def test_initialize_breaks_reference_cycle_when_a_later_startup_node_answers(
+        self,
+    ):
+        """
+        When a startup node fails but a later one answers, initialize() must
+        not return while still holding the caught exception: its traceback
+        refers to the initialize() frame, so the pair would stay alive, with
+        the slots built by that call, until the cyclic GC runs.
+        """
+        failing_connection, working_connection = MagicMock(), MagicMock()
+        # The constructor calls initialize(), so the failing node answers here;
+        # the failure is set up below, once the manager exists.
+        failing_connection.execute_command.return_value = default_cluster_slots
+        working_connection.execute_command.return_value = default_cluster_slots
+        nodes_manager = NodesManager(
+            startup_nodes=[
+                ClusterNode("127.0.0.1", 7000, redis_connection=failing_connection),
+                ClusterNode("127.0.0.1", 7001, redis_connection=working_connection),
+            ],
+            from_url=False,
+            dynamic_startup_nodes=False,
+        )
+
+        # Raise from a factory so the test itself never holds a strong
+        # reference; the weakref is the only handle on the failure.
+        raised_ref = []
+
+        def fail_cluster_slots(*args, **kwargs):
+            err = ConnectionError("Connection refused")
+            raised_ref.append(weakref.ref(err))
+            try:
+                raise err
+            finally:
+                # Clear this frame's local too, or the traceback keeps the
+                # exception alive here and the assertion measures the test
+                # rather than initialize().
+                err = None
+
+        failing_connection.execute_command.side_effect = fail_cluster_slots
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            # Keep the startup order: the failing node is tried first.
+            with patch("redis.cluster.random.shuffle"):
+                nodes_manager.initialize()
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
+    def test_initialize_breaks_reference_cycle_when_a_later_startup_node_fails_after_a_partial_answer(
+        self,
+    ):
+        """
+        When a startup node answers with a partial slot map and a later one
+        fails, initialize() must not store the later error: nothing raises it
+        once a node has answered, and its traceback refers to the
+        initialize() frame, so the pair would stay alive, with the slots
+        built by that call, until the cyclic GC runs.
+        """
+        partial_connection, failing_connection = MagicMock(), MagicMock()
+        partial_slots = default_cluster_slots[:1]
+        # The constructor calls initialize(), so both nodes are given an answer
+        # here; the failure is set up below, once the manager exists.
+        partial_connection.execute_command.return_value = partial_slots
+        failing_connection.execute_command.return_value = default_cluster_slots
+        nodes_manager = NodesManager(
+            startup_nodes=[
+                ClusterNode("127.0.0.1", 7000, redis_connection=partial_connection),
+                ClusterNode("127.0.0.1", 7001, redis_connection=failing_connection),
+            ],
+            from_url=False,
+            require_full_coverage=False,
+            dynamic_startup_nodes=False,
+        )
+
+        # Raise from a factory so the test itself never holds a strong
+        # reference; the weakref is the only handle on the failure.
+        raised_ref = []
+
+        def fail_cluster_slots(*args, **kwargs):
+            err = ConnectionError("Connection refused")
+            raised_ref.append(weakref.ref(err))
+            try:
+                raise err
+            finally:
+                # Clear this frame's local too, or the traceback keeps the
+                # exception alive here and the assertion measures the test
+                # rather than initialize().
+                err = None
+
+        failing_connection.execute_command.side_effect = fail_cluster_slots
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            # Keep the startup order: the partial node is tried first, so the
+            # slots are not fully covered and the failing node is tried next.
+            with patch("redis.cluster.random.shuffle"):
+                nodes_manager.initialize()
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
 
     @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
