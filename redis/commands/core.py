@@ -8300,8 +8300,8 @@ class SortedSetCommands(CommandsProtocol):
     """
 
     def _zset_decode_responses(self) -> bool:
-        # Hosts such as the MultiDB clients don't define get_connection_kwargs();
-        # they keep the undecoded (bytes) legacy score text.
+        # Hosts that don't define get_connection_kwargs() keep the undecoded
+        # (bytes) legacy score text.
         get_connection_kwargs = getattr(self, "get_connection_kwargs", None)
         if get_connection_kwargs is None:
             return False

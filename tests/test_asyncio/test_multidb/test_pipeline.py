@@ -6,6 +6,7 @@ import pybreaker
 import pytest
 
 from redis.asyncio.client import Pipeline
+from redis.client import NEVER_DECODE
 from redis.asyncio.multidb.client import MultiDBClient, Pipeline as MultiDBPipeline
 from redis.exceptions import DataError
 from redis.asyncio.multidb.config import InitialHealthCheck
@@ -382,6 +383,58 @@ class TestPipeline:
             assert await pipe.execute() == ["OK1", "value"]
 
             await client.aclose()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    async def test_pipeline_slowlog_get_before_first_command(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        decode_responses,
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            pipe = mock_pipe()
+            pipe.execute.return_value = [[]]
+            mock_db1.client.pipeline.return_value = pipe
+            mock_db1.client.get_connection_kwargs.return_value = {
+                "decode_responses": decode_responses
+            }
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert not client.initialized
+                multi_db_pipe = client.pipeline()
+                multi_db_pipe.slowlog_get()
+                assert await multi_db_pipe.execute() == [[]]
+
+                expected = {NEVER_DECODE: []} if decode_responses else {}
+                pipe.execute_command.assert_called_once_with("SLOWLOG GET", **expected)
+            finally:
+                await client.aclose()
 
 
 @pytest.mark.fixed_client
