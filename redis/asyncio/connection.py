@@ -1586,7 +1586,10 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
-            raise response from None
+            try:
+                raise response from None
+            finally:
+                del response  # avoid creating ref cycles
         return response
 
     async def _read_response_from_parser(
