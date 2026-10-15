@@ -19,32 +19,47 @@ from cryptography.x509 import ocsp
 from redis.exceptions import AuthorizationError, ConnectionError
 
 
-def _verify_response(issuer_cert, ocsp_response):
+def _verify_signature(issuer_cert, signature, data, hash_algorithm):
     pubkey = issuer_cert.public_key()
+    if isinstance(pubkey, RSAPublicKey):
+        pubkey.verify(signature, data, PKCS1v15(), hash_algorithm)
+    elif isinstance(pubkey, DSAPublicKey):
+        pubkey.verify(signature, data, hash_algorithm)
+    elif isinstance(pubkey, EllipticCurvePublicKey):
+        pubkey.verify(signature, data, ECDSA(hash_algorithm))
+    else:
+        pubkey.verify(signature, data)
+
+
+def _verify_response(issuer_cert, ocsp_response):
     try:
-        if isinstance(pubkey, RSAPublicKey):
-            pubkey.verify(
-                ocsp_response.signature,
-                ocsp_response.tbs_response_bytes,
-                PKCS1v15(),
-                ocsp_response.signature_hash_algorithm,
-            )
-        elif isinstance(pubkey, DSAPublicKey):
-            pubkey.verify(
-                ocsp_response.signature,
-                ocsp_response.tbs_response_bytes,
-                ocsp_response.signature_hash_algorithm,
-            )
-        elif isinstance(pubkey, EllipticCurvePublicKey):
-            pubkey.verify(
-                ocsp_response.signature,
-                ocsp_response.tbs_response_bytes,
-                ECDSA(ocsp_response.signature_hash_algorithm),
-            )
-        else:
-            pubkey.verify(ocsp_response.signature, ocsp_response.tbs_response_bytes)
+        _verify_signature(
+            issuer_cert,
+            ocsp_response.signature,
+            ocsp_response.tbs_response_bytes,
+            ocsp_response.signature_hash_algorithm,
+        )
     except InvalidSignature:
         raise ConnectionError("failed to valid ocsp response")
+
+
+def _verify_issued_by(issuer_cert, cert):
+    """Raise unless cert was signed by issuer_cert."""
+    message = (
+        f"certificate {cert.subject.rfc4514_string()} was not issued by "
+        f"{issuer_cert.subject.rfc4514_string()}"
+    )
+    if cert.issuer != issuer_cert.subject:
+        raise ConnectionError(message)
+    try:
+        _verify_signature(
+            issuer_cert,
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            cert.signature_hash_algorithm,
+        )
+    except InvalidSignature:
+        raise ConnectionError(message)
 
 
 def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
@@ -112,6 +127,13 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
         cert_to_validate = responder_cert
 
     if validate:
+        # The issuer and any delegated responder certificate come from the
+        # peer's chain, the AIA fetch or the response itself, none of which is
+        # authenticated. Without these checks anyone can mint a key pair with
+        # the issuer's name and sign a GOOD response for a revoked certificate.
+        _verify_issued_by(issuer_cert, cert)
+        if cert_to_validate is not issuer_cert:
+            _verify_issued_by(issuer_cert, cert_to_validate)
         _verify_response(cert_to_validate, ocsp_response)
     return True
 
