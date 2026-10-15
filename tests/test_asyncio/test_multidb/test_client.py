@@ -122,6 +122,40 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_zrank_with_custom_score_cast(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        # MultiDBClient has no get_connection_kwargs(); zrank/zrevrank with a
+        # custom score cast must still reach the active database.
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command = AsyncMock(return_value=[1, b"2.5"])
+
+            mock_hc.check_health.return_value = True
+
+            async with MultiDBClient(mock_multi_db_config) as client:
+                for command in (client.zrank, client.zrevrank):
+                    assert await command(
+                        "key", "member", withscore=True, score_cast_func=bytes
+                    ) == [1, b"2.5"]
+                    options = mock_db1.client.execute_command.call_args.kwargs
+                    assert options["decode_responses"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
                 {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},

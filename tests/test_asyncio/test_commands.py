@@ -4074,6 +4074,39 @@ class TestRedisCommands:
         response = await r.zrank("a", "a3", withscore=True, score_cast_func=safe_str)
         assert_resp_response(r, response, [2, "3"], [2, "3.0"])
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zset_scores_decode_responses(self, decoded_r: redis.Redis):
+        # Scores handed back as text must be str, as on a RESP2 connection.
+        r = decoded_r
+        identity = lambda x: x  # noqa: E731
+        await r.zadd("a", {"a1": 1, "a2": 2.5})
+        await r.zadd("b", {"a1": 1})
+        assert_resp_response(
+            r,
+            await r.zdiff(["a", "b"], withscores=True),
+            ["a2", "2.5"],
+            [["a2", 2.5]],
+        )
+        assert_resp_response(
+            r,
+            await r.zrange("a", 0, -1, withscores=True, score_cast_func=identity),
+            [("a1", "1"), ("a2", "2.5")],
+            [["a1", 1.0], ["a2", 2.5]],
+        )
+        assert_resp_response(
+            r,
+            await r.zrank("a", "a2", withscore=True, score_cast_func=identity),
+            [1, "2.5"],
+            [1, 2.5],
+        )
+        assert_resp_response(
+            r,
+            await r.zmpop(1, ["b"], min=True),
+            ["b", [["a1", "1"]]],
+            ["b", [["a1", 1.0]]],
+        )
+
     async def test_zrem(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zrem("a", "a2") == 1

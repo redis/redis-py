@@ -2791,6 +2791,10 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
+    def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
+        """Get the connection kwargs from the cluster client."""
+        return self.cluster_client.get_connection_kwargs()
+
     # HIMPORT lifecycle on a cluster pipeline delegates to the parent client, mutating
     # the one shared registry that every node pool references. A fieldset declared here
     # is therefore visible to the batched himport_set pre-flight, mirroring the sync
