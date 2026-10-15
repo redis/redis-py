@@ -161,8 +161,9 @@ class TestPipeline:
             pipe.set("a", 1).set("b", 2).lpush("c", 3).set("d", 4)
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
-            assert str(ex.value).startswith(
+            assert str(ex.value) == (
                 "Command # 3 (LPUSH c 3) of pipeline caused error: "
+                "WRONGTYPE Operation against a key holding the wrong kind of value"
             )
 
             # make sure the pipe was restored to a working state

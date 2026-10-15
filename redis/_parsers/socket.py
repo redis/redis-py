@@ -5,7 +5,7 @@ from io import SEEK_END
 from typing import Optional, Union
 
 from ..exceptions import ConnectionError, TimeoutError
-from ..utils import SENTINEL, SSL_AVAILABLE
+from ..utils import SENTINEL, SSL_AVAILABLE, is_os_level_timeout
 
 NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {BlockingIOError: errno.EWOULDBLOCK}
 
@@ -106,7 +106,12 @@ class SocketBuffer:
                 if length is not None and length > marker:
                     continue
                 return True
-        except socket.timeout:
+        except socket.timeout as e:
+            if is_os_level_timeout(e):
+                # ETIMEDOUT from the OS (e.g. after a network change): the
+                # connection is dead, not slow. Reporting it as a timeout - or
+                # as "no data" when polling - would hide a broken connection.
+                raise ConnectionError(f"Error while reading from socket: {e.args}")
             if raise_on_timeout:
                 raise TimeoutError("Timeout reading from socket")
             return False
