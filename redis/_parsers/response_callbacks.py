@@ -395,6 +395,7 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
         "GEORADIUS GEORADIUSBYMEMBER GEOSEARCH",
         parse_geosearch_generic_unified,
     ),
+    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
     "ZSCAN": parse_zscan_unified,
     "ZRANDMEMBER": zset_score_pairs_resp3,
     "ACL CAT": lambda r: list(map(str_if_bytes, r)),
@@ -408,6 +409,7 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
     "CLIENT TRACKINGINFO": parse_client_trackinginfo_unified,
     "CLUSTER LINKS": parse_cluster_links_unified,
     "COMMAND": parse_command_unified,
+    "DEBUG OBJECT": parse_debug_object,
     "FUNCTION LIST": parse_function_list_unified,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "LCS": parse_lcs_idx_unified,
@@ -423,8 +425,9 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
 # RESP3 wire converted back to the legacy RESP2 Python shapes. Only the
 # entries needed to undo RESP3-side differences are listed; everything
 # else falls through to ``_RedisCallbacks``. Scores are re-encoded to bytes
-# before being passed to ``score_cast_func`` so the callable observes the
-# same input type it would on a RESP2 connection.
+# (``str`` when the client decodes responses) before being passed to
+# ``score_cast_func`` so the callable observes the same input type it would
+# on a RESP2 connection.
 _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     **string_keys_to_dict(
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
