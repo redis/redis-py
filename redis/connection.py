@@ -2061,6 +2061,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
+        # Only a pool release makes the connection available for another
+        # connection's invalidation drain. Pools update this under _pool_lock.
+        self._in_use = True
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
@@ -2285,12 +2288,22 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # (which returns non-push replies too) would consume either one.
             entry = self._cache.get(self._current_command_cache_key)
             if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                with self._pool_lock:
-                    self._drain_invalidations(entry.connection_ref)
-
-                # Re-check: the entry may have been invalidated during the drain, or filled
-                # in by the connection that was fetching it.
-                entry = self._cache.get(self._current_command_cache_key)
+                owner = entry.connection_ref
+                if isinstance(owner, CacheProxyConnection):
+                    with owner._pool_lock:
+                        if owner is self or not owner._in_use:
+                            self._drain_invalidations(owner._conn)
+                            # The drain may have invalidated the cached value.
+                            entry = self._cache.get(self._current_command_cache_key)
+                        else:
+                            # Reading a checked-out owner's socket can steal its
+                            # command reply. Fetch a fresh value on our own socket
+                            # instead of serving a possibly stale cache entry.
+                            entry = None
+                else:
+                    # A custom entry without pool ownership information cannot
+                    # be drained safely.
+                    entry = None
 
             # Whether this read is served locally is decided here, once, and the value is
             # carried to ``read_response`` - which must not re-derive it from cache state.
@@ -2318,7 +2331,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     cache_key=self._current_command_cache_key,
                     cache_value=self.DUMMY_CACHE_VALUE,
                     status=CacheEntryStatus.IN_PROGRESS,
-                    connection_ref=self._conn,
+                    connection_ref=self,
                 )
             )
 
@@ -2438,7 +2451,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 cache_entry is not None
                 and cache_entry.status == CacheEntryStatus.IN_PROGRESS
-                and cache_entry.connection_ref is self._conn
+                and cache_entry.connection_ref is self
             ):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
@@ -2474,7 +2487,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 entry is not None
                 and entry.status == CacheEntryStatus.IN_PROGRESS
-                and entry.connection_ref is self._conn
+                and entry.connection_ref is self
             ):
                 self._cache.delete_by_cache_keys([key])
 
@@ -2747,7 +2760,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     if (
                         entry is not None
                         and entry.status == CacheEntryStatus.IN_PROGRESS
-                        and entry.connection_ref is self._conn
+                        and entry.connection_ref is self
                     ):
                         own_placeholder = entry
                 self._cache.flush()
@@ -4115,6 +4128,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 connection = self.make_connection()
                 is_created = True
             self._in_use_connections.add(connection)
+            if isinstance(connection, CacheProxyConnection):
+                connection._in_use = True
 
         # Record state transition for observability
         pool_name = get_pool_name(self)
@@ -4230,6 +4245,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             f"{connection}, {connection.extract_connection_details()}"
                         )
                     connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    connection._in_use = False
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
@@ -4594,6 +4611,12 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
+        if isinstance(connection, CacheProxyConnection):
+            # Queue checkout is independent of _lock. Join the invalidation
+            # drain's critical section before connect/can_read can use the socket.
+            with self._lock:
+                connection._in_use = True
+
         # Record state transition for observability
         pool_name = get_pool_name(self)
         if is_created:
@@ -4678,6 +4701,9 @@ class BlockingConnectionPool(ConnectionPool):
                     )
                 connection.disconnect()
             # Put the connection back into the pool.
+            if isinstance(connection, CacheProxyConnection):
+                with self._lock:
+                    connection._in_use = False
             pool_name = get_pool_name(self)
             try:
                 self.pool.put_nowait(connection)
