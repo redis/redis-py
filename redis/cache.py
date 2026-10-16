@@ -1,14 +1,23 @@
+import logging
+import os
+import queue
 import threading
 import warnings
+import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from redis.commands.metadata import MetadataResolver, StaticMetadataResolver
-from redis.observability.attributes import CSCReason
+from redis.exceptions import ConnectionError, TimeoutError
+from redis.observability.attributes import CSCReason, CSCRefreshResult
+from redis.observability.recorder import record_csc_refresh
+from redis.utils import SENTINEL
+
+logger = logging.getLogger(__name__)
 
 
 class CacheEntryStatus(Enum):
@@ -44,6 +53,28 @@ class TrackingMode(Enum):
 
     OPTOUT = "optout"
     """``CLIENT TRACKING ON OPTOUT`` - tracked unless ``CLIENT CACHING NO``."""
+
+
+class InvalidationPolicy(Enum):
+    """
+    What the cache does with an entry the server reports as invalidated.
+
+    Either way the entry is removed the moment the invalidation is processed, so a
+    value the server has replaced is never served again. The policies differ only in
+    what happens next.
+    """
+
+    EVICT = "evict"
+    """Remove the entry; the next read of it fetches it again. The default."""
+
+    REFRESH = "refresh"
+    """
+    Remove the entry and queue it to be re-read in the background, on one thread per
+    connection pool; ``refresh_max_inflight`` sizes the queue.
+
+    Costs one extra server read per refreshed entry, whether or not the application
+    reads it again.
+    """
 
 
 CachePredicate = Callable[[str, tuple], bool]
@@ -162,6 +193,23 @@ class CacheConfigurationInterface(ABC):
     def is_trackable_read(self, command: str) -> bool:
         return False
 
+    # Concrete for the same reason as the tracking-mode decisions above: the defaults
+    # reproduce the existing behaviour for a third-party configuration, removing an
+    # invalidated entry and re-reading nothing.
+
+    def get_invalidation_policy(self) -> InvalidationPolicy:
+        return InvalidationPolicy.EVICT
+
+    def get_refresh_max_inflight(self) -> int | None:
+        """
+        The refresh queue size, read only under ``InvalidationPolicy.REFRESH``.
+
+        The default is a usable bound, so a configuration that overrides only
+        ``get_invalidation_policy`` still refreshes. ``CacheConfig`` returns None under
+        ``InvalidationPolicy.EVICT``, where nothing reads it.
+        """
+        return CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT
+
 
 class CacheInterface(ABC):
     @property
@@ -207,6 +255,56 @@ class CacheInterface(ABC):
     @abstractmethod
     def is_cachable(self, key: CacheKey) -> bool:
         pass
+
+    def take_entries_by_redis_keys(
+        self, redis_keys: list[bytes] | list[str]
+    ) -> list[CacheEntry]:
+        """
+        Remove every entry whose invocation named one of ``redis_keys``, and return them.
+
+        Entries of every status are removed and returned, so the caller can tell a stored
+        reply from a fetch still in flight. Concrete, because this ABC is public and
+        implemented by third parties: this default scans ``collection``, which is correct
+        for any implementation and costs O(entries). :class:`DefaultCache` answers it
+        from its reverse index instead.
+
+        Args:
+            redis_keys: The Redis keys the server reported, in either spelling.
+
+        Returns:
+            list[CacheEntry]: The removed entries.
+        """
+        wanted = set()
+        for redis_key in redis_keys:
+            wanted.update(_redis_key_spellings(redis_key))
+
+        entries = [
+            entry
+            for cache_key, entry in list(self.collection.items())
+            if any(key in wanted for key in cache_key.redis_keys)
+        ]
+        # Only what this call removed: an entry another caller removed since the snapshot
+        # is that caller's to return.
+        removed = self.delete_by_cache_keys([entry.cache_key for entry in entries])
+        return [entry for entry, was_removed in zip(entries, removed) if was_removed]
+
+
+def _redis_key_spellings(redis_key: bytes | str) -> list[bytes | str]:
+    """
+    The spellings a Redis key may be indexed under.
+
+    An entry is indexed under its keys exactly as the invocation supplied them, while the
+    server names them in its own encoding, so a lookup has to try both.
+    """
+    candidates = [redis_key]
+    if isinstance(redis_key, str):
+        candidates.append(redis_key.encode("utf-8"))
+    elif isinstance(redis_key, bytes):
+        try:
+            candidates.append(redis_key.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass  # Non-UTF-8 bytes, skip str version
+    return candidates
 
 
 class _IndexedCacheEntries(OrderedDict):
@@ -373,24 +471,7 @@ class DefaultCache(CacheInterface):
         keys_to_delete = []
 
         for redis_key in redis_keys:
-            # Prepare both versions for lookup
-            candidates = [redis_key]
-            if isinstance(redis_key, str):
-                candidates.append(redis_key.encode("utf-8"))
-            elif isinstance(redis_key, bytes):
-                try:
-                    candidates.append(redis_key.decode("utf-8"))
-                except UnicodeDecodeError:
-                    pass  # Non-UTF-8 bytes, skip str version
-
-            # The reverse index answers this without walking the map. Both spellings are
-            # looked up because an entry is indexed under its keys exactly as the invocation
-            # supplied them, while the server names them in its own encoding. The two results
-            # are unioned, so an entry indexed under both spellings of this one key is
-            # collected once.
-            holders: set[CacheKey] = set()
-            for candidate in candidates:
-                holders |= self._cache.holders_of(candidate)
+            holders = self._holders_of(redis_key)
 
             # An invalidation message never carries more than one key, so an entry holding
             # several keys (MGET) cannot be collected twice by one call. A duplicate pop for
@@ -404,7 +485,36 @@ class DefaultCache(CacheInterface):
 
         return response
 
+    def take_entries_by_redis_keys(
+        self, redis_keys: list[bytes] | list[str]
+    ) -> list[CacheEntry]:
+        entries = []
+
+        for redis_key in redis_keys:
+            # As in ``delete_by_redis_keys``, an invalidation names one key, so no entry is
+            # collected twice. An entry another connection popped since the lookup is gone
+            # already and has nothing left to return.
+            for cache_key in self._holders_of(redis_key):
+                entry = self._cache.pop(cache_key, None)
+                if entry is not None:
+                    entries.append(entry)
+
+        return entries
+
+    # Quoted: in this class body ``set`` is the ``set`` method, not the builtin.
+    def _holders_of(self, redis_key: bytes | str) -> "set[CacheKey]":
+        # The reverse index answers this without walking the map. Both spellings are looked
+        # up, and the two results are unioned, so an entry indexed under both spellings of
+        # this one key is collected once.
+        holders: set[CacheKey] = set()
+        for candidate in _redis_key_spellings(redis_key):
+            holders |= self._cache.holders_of(candidate)
+        return holders
+
     def flush(self) -> int:
+        # Before emptying, as every flush does: refreshes queued before it must not refill
+        # the cache, whoever empties it (R3).
+        CacheRefresher._cancel_all_for(self)
         elem_count = len(self._cache)
         self._cache.clear()
         return elem_count
@@ -461,7 +571,15 @@ class CacheProxy(CacheInterface):
     def delete_by_redis_keys(self, redis_keys: list[bytes]) -> list[bool]:
         return self._cache.delete_by_redis_keys(redis_keys)
 
+    def take_entries_by_redis_keys(
+        self, redis_keys: list[bytes] | list[str]
+    ) -> list[CacheEntry]:
+        return self._cache.take_entries_by_redis_keys(redis_keys)
+
     def flush(self) -> int:
+        # The pools register their refreshers under this proxy, not under the cache it
+        # wraps, so the proxy cancels them itself.
+        CacheRefresher._cancel_all_for(self)
         return self._cache.flush()
 
     def is_cachable(self, key: CacheKey) -> bool:
@@ -520,9 +638,31 @@ class EvictionPolicy(Enum):
 
 
 class CacheConfig(CacheConfigurationInterface):
+    """
+    Configuration of a client-side cache.
+
+    Args:
+        max_size: The most entries the cache holds before it evicts.
+        cache_class: The cache implementation built from this configuration.
+        eviction_policy: How an entry is chosen for eviction when the cache is full.
+        tracking_mode: How cache-managed connections enable server-side tracking.
+        cache_predicate: Whether the application wants an eligible reply stored;
+            consulted under ``optin`` and ``optout`` only.
+        invalidation_policy: What happens to an entry the server invalidates. Under
+            ``InvalidationPolicy.REFRESH`` it is re-read in the background.
+        refresh_max_inflight: Under ``InvalidationPolicy.REFRESH``, the size of each
+            connection pool's refresh queue: the most keys waiting for a refresh, counting
+            the one being refreshed. Refreshes run one at a time; an invalidation
+            beyond it only removes the entry. A positive integer, defaulting to
+            ``DEFAULT_REFRESH_MAX_INFLIGHT`` when omitted. Under
+            ``InvalidationPolicy.EVICT`` it is not used, so it is ``None``, and passing
+            it warns.
+    """
+
     DEFAULT_CACHE_CLASS = DefaultCache
     DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
     DEFAULT_MAX_SIZE = 10000
+    DEFAULT_REFRESH_MAX_INFLIGHT = 16
 
     # DEPRECATED - no longer consulted, and it will be removed in a future release.
     #
@@ -620,11 +760,12 @@ class CacheConfig(CacheConfigurationInterface):
         eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
         tracking_mode: TrackingMode = TrackingMode.PLAIN,
         cache_predicate: CachePredicate | None = None,
+        invalidation_policy: InvalidationPolicy = InvalidationPolicy.EVICT,
+        refresh_max_inflight: int | object = SENTINEL,
     ):
         # A bare string here - ``tracking_mode="optin"`` - would compare equal to no
         # ``TrackingMode`` member and so silently behave as plain mode, and the failure mode
-        # of a mis-configured cache is a wrongly-cached reply. Refused instead, which is the
-        # one thing this configuration validates.
+        # of a mis-configured cache is a wrongly-cached reply. Refused instead.
         if not isinstance(tracking_mode, TrackingMode):
             raise TypeError(
                 "tracking_mode must be a redis.cache.TrackingMode member, got "
@@ -648,11 +789,45 @@ class CacheConfig(CacheConfigurationInterface):
                 stacklevel=2,
             )
 
+        # Refused for the same reason as a bare-string ``tracking_mode``: ``"refresh"``
+        # would compare equal to no member and silently behave as evict.
+        if not isinstance(invalidation_policy, InvalidationPolicy):
+            raise TypeError(
+                "invalidation_policy must be a redis.cache.InvalidationPolicy member, "
+                f"got {invalidation_policy!r}"
+            )
+
+        if invalidation_policy is InvalidationPolicy.EVICT:
+            if refresh_max_inflight is not SENTINEL:
+                warnings.warn(
+                    "refresh_max_inflight is only consulted with "
+                    "invalidation_policy=refresh and is ignored with "
+                    "invalidation_policy=evict.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            refresh_max_inflight = None
+        elif refresh_max_inflight is SENTINEL:
+            refresh_max_inflight = CacheConfig.DEFAULT_REFRESH_MAX_INFLIGHT
+        # ``bool`` is an ``int`` subclass, and ``True`` as a bound is a typo, not a
+        # limit of 1.
+        elif (
+            not isinstance(refresh_max_inflight, int)
+            or isinstance(refresh_max_inflight, bool)
+            or refresh_max_inflight < 1
+        ):
+            raise ValueError(
+                "refresh_max_inflight must be a positive integer, got "
+                f"{refresh_max_inflight!r}"
+            )
+
         self._cache_class = cache_class
         self._max_size = max_size
         self._eviction_policy = eviction_policy
         self._tracking_mode = tracking_mode
         self._cache_predicate = cache_predicate
+        self._invalidation_policy = invalidation_policy
+        self._refresh_max_inflight = refresh_max_inflight
         # Defaulted here rather than taken as a constructor argument: eligibility is
         # configured at client level, through the ``metadata_resolver`` of the client or the
         # pool, which injects it below. Defaulting it means a config built standalone - in a
@@ -703,6 +878,12 @@ class CacheConfig(CacheConfigurationInterface):
 
     def get_cache_predicate(self) -> CachePredicate | None:
         return self._cache_predicate
+
+    def get_invalidation_policy(self) -> InvalidationPolicy:
+        return self._invalidation_policy
+
+    def get_refresh_max_inflight(self) -> int | None:
+        return self._refresh_max_inflight
 
     def is_allowed_to_cache(self, command: str) -> bool:
         # Fails closed on everything the resolver cannot decide: an unknown command, a name
@@ -773,3 +954,384 @@ class CacheFactory(CacheFactoryInterface):
     def get_cache(self) -> CacheInterface:
         cache_class = self._config.get_cache_class()
         return CacheProxy(cache_class(cache_config=self._config))
+
+
+class CacheRefresher:
+    """
+    Re-reads invalidated entries in the background, for one connection pool.
+
+    The invalidation callback hands over the keys of the entries it just removed, and a
+    single worker thread re-runs each one through the pool's normal caching miss path. That
+    path stakes the placeholder, re-registers tracking on the fetching connection and stores
+    the reply exactly as a user read would, so a refreshed entry cannot be told from one a
+    read stored, and an invalidation that lands mid-refresh drops the result the same way it
+    drops any read's.
+
+    ``submit`` is called from inside the invalidation callback, which can hold the pool lock
+    and a connection's cache lock, so it does no I/O and takes no lock but ``_lock``. The
+    one wait it can make is for a newly started worker thread to come up. ``_lock`` is a
+    leaf: nothing is acquired under it, and it is never held across a round trip.
+
+    ``max_inflight`` is the size of the queue: the number of keys accepted and not yet
+    completed, the one being refreshed included. One worker drains it, so it bounds the
+    backlog, not concurrency. A key that finds the queue full is rejected; the entry is
+    already removed, so the next read fetches it, as without refresh. A key already
+    pending is not queued twice.
+
+    The thread starts on the first accepted key and exits once the queue has stayed empty
+    for ``idle_timeout`` seconds, so a pool that is not refreshing holds no thread. It
+    refers to the pool weakly and never keeps it alive.
+
+    The pool builds one when its cache is configured with ``InvalidationPolicy.REFRESH``,
+    and hands it to every connection it builds; applications do not build one. It belongs
+    to the process that built it: in a forked child it accepts nothing, and the child's
+    pool builds a refresher of its own.
+
+    Pools can share one cache: every node pool of a ``RedisCluster`` does, and so do clients
+    handed the same ``cache=``. Each of them keeps its own refresher and bound, but an
+    emptying of the cache cancels the queued work of all of them, because the cache they
+    would refill is the one that was emptied.
+    """
+
+    IDLE_TIMEOUT = 30.0
+    _STOP = object()
+
+    # The refreshers of every pool, by the identity of the cache they refresh into:
+    # ``id(cache)`` -> ``WeakSet`` of refreshers, so it keeps no refresher alive. Keyed by
+    # identity rather than by the cache, so that every cache can be registered, hashable
+    # or not, and no ``__hash__`` or ``__eq__`` of a third-party cache runs under the lock.
+    # A live refresher holds its cache, so the id of a registered cache is never reused;
+    # lookups still keep only the refreshers whose cache is the one asked for.
+    # ``_sharing_lock`` is a leaf, like ``_lock``, and the two are never held together. Both
+    # are re-entrant: an allocation under either can run a garbage-collected client's
+    # ``__del__`` on the same thread, and its disconnect flushes the cache, which cancels.
+    _sharing: "dict[int, weakref.WeakSet[CacheRefresher]]" = {}
+    _sharing_lock = threading.RLock()
+
+    def __init__(
+        self, pool, max_inflight: int, idle_timeout: float = IDLE_TIMEOUT
+    ) -> None:
+        self._pid = os.getpid()
+        self._pool_ref = weakref.ref(pool)
+        self._max_inflight = max_inflight
+        self._idle_timeout = idle_timeout
+        self._queue: queue.SimpleQueue = queue.SimpleQueue()
+        self._pending: set[CacheKey] = set()
+        # Bumped by every cancel. A job of an older generation is dropped unrun, and a job
+        # that completes after a cancel does not touch ``_pending``, which by then belongs
+        # to newer work.
+        self._generation = 0
+        # The generation the last ``stop`` left behind. A job older than it was cut short
+        # by a ``close()``.
+        self._stopped_generation = 0
+        self._thread: threading.Thread | None = None
+        self._lock = threading.RLock()
+        # Held strongly: it keeps the id this refresher is registered under from being
+        # reused, and the pool holds it anyway.
+        self._cache = pool.cache
+        with CacheRefresher._sharing_lock:
+            # Sets emptied by collected refreshers are dropped here, so the map does not
+            # grow with every client ever built.
+            for key in [
+                key for key, group in CacheRefresher._sharing.items() if not group
+            ]:
+                del CacheRefresher._sharing[key]
+            CacheRefresher._sharing.setdefault(id(self._cache), weakref.WeakSet()).add(
+                self
+            )
+        # The worker waits up to ``idle_timeout`` for work, and holds this refresher, and
+        # so the cache, while it waits. Woken when the pool is collected, it finds no pool
+        # and exits, so a discarded client's cache is freed at once rather than after the
+        # timeout. ``finalize`` holds the queue, not the refresher.
+        weakref.finalize(pool, self._queue.put, CacheRefresher._STOP)
+
+    def submit(self, cache_keys: Iterable[CacheKey]) -> list[CacheKey]:
+        """
+        Accept keys for refresh, as far as the queue has room.
+
+        Args:
+            cache_keys: The keys of entries the cache has already removed.
+
+        Returns:
+            list[CacheKey]: The keys rejected, because the queue was full or because no
+            worker could be started. Their entries stay removed.
+        """
+        if self._pid != os.getpid():
+            # A connection held across a fork. The parent's worker does not run here, and
+            # ``_lock`` may have been held by it at fork time, so it is not taken. Not
+            # recorded: this is no lack of capacity, like a key dropped by a flush.
+            return list(cache_keys)
+
+        rejected = []
+        start_error = None
+
+        with self._lock:
+            generation = self._generation
+            accepted = []
+            for cache_key in cache_keys:
+                if cache_key in self._pending:
+                    continue
+                if len(self._pending) >= self._max_inflight:
+                    rejected.append(cache_key)
+                    continue
+                self._pending.add(cache_key)
+                accepted.append(cache_key)
+
+            # Under ``_lock``, together with the puts: the worker decides to exit under the
+            # same lock, so a key can never be queued after it checked and before it left.
+            if accepted and self._thread is None:
+                worker = threading.Thread(
+                    target=self._run, name="redis-csc-refresher", daemon=True
+                )
+                try:
+                    worker.start()
+                except RuntimeError as e:
+                    # No thread can be started - a thread limit, or interpreter shutdown.
+                    # Nothing would run what this call accepted, so it is handed back.
+                    # Raising instead would escape into the invalidation callback.
+                    start_error = e
+                    self._pending.difference_update(accepted)
+                    rejected.extend(accepted)
+                    accepted = []
+                else:
+                    self._thread = worker
+
+            for cache_key in accepted:
+                self._queue.put((generation, cache_key))
+
+            # A cancel re-entered on this thread while the keys were taken in: the cache was
+            # emptied after they were removed, so they are dropped like any work queued
+            # before a flush, rather than left in ``_pending`` under a generation the worker
+            # skips without releasing.
+            if self._generation != generation:
+                self._pending.difference_update(accepted)
+                self._drop_queued_jobs()
+
+        if start_error is not None:
+            logger.debug("Client-side cache refresher could not start: %r", start_error)
+
+        if rejected:
+            record_csc_refresh(result=CSCRefreshResult.REJECTED, count=len(rejected))
+
+        return rejected
+
+    def cancel_pending(self) -> None:
+        """
+        Drop every accepted key that has not run yet, in every refresher of this cache.
+
+        Called wherever the cache is flushed, before the flush: an emptied cache must not be
+        refilled by work queued before it was emptied, whichever pool queued it. The other
+        pools sharing the cache are cancelled too, so that a flush caused by one cluster
+        node also drops the refreshes the other nodes queued.
+
+        The queued jobs are removed, so the queue never holds more than ``max_inflight``
+        keys, however often the cache is flushed while the worker is busy. The job the
+        worker holds checks the generation once it has a connection, again when
+        ``send_command`` has staked its placeholder, and again when ``read_response`` has
+        stored its reply: a flush before the second check stops it, and a flush after it
+        either removes the placeholder or is seen by the third check, which removes the
+        stored reply.
+
+        Does no I/O, like ``submit``: it is called under a connection's cache lock. It takes
+        ``_sharing_lock`` and then each refresher's ``_lock``, one at a time.
+        """
+        if self._pid != os.getpid():
+            return
+
+        CacheRefresher._cancel_all_for(self._cache, also=self)
+
+    @classmethod
+    def _cancel_all_for(
+        cls, cache: "CacheInterface", also: "CacheRefresher | None" = None
+    ) -> None:
+        """
+        Cancel every refresher registered for ``cache``, and ``also``.
+
+        ``also`` is the caller's own refresher, cancelled even if it is not registered. The
+        cache's own ``flush`` calls this with none, so that an emptying the application
+        makes through ``get_cache().flush()`` drops queued refreshes as well.
+        """
+        with cls._sharing_lock:
+            sharing = [
+                refresher
+                for refresher in cls._sharing.get(id(cache), ())
+                if refresher._cache is cache
+            ]
+        if also is not None and also not in sharing:
+            sharing.append(also)
+
+        for refresher in sharing:
+            refresher._cancel_own()
+
+    def _cancel_own(self) -> None:
+        # A refresher inherited across a fork shares no worker with this process.
+        if self._pid != os.getpid():
+            return
+
+        with self._lock:
+            self._generation += 1
+            self._pending.clear()
+            self._drop_queued_jobs()
+
+    def stop(self) -> None:
+        """
+        Cancel all queued work and let the worker exit.
+
+        A refresh that holds or is waiting for a connection when it is stopped closes that
+        connection before it returns it, rather than leave a socket open in a closed pool. The refresher stays
+        usable: a pool is reusable after ``close()``, and the next accepted key starts a new
+        worker.
+        """
+        if self._pid != os.getpid():
+            return
+
+        # Only this pool's work: closing one pool empties nothing that other pools sharing
+        # the cache would refill.
+        self._cancel_own()
+        with self._lock:
+            self._stopped_generation = self._generation
+            # Only a running worker needs waking; one started later finds the queue empty.
+            if self._thread is not None:
+                self._queue.put(self._STOP)
+
+    def _drop_queued_jobs(self) -> None:
+        # Called under ``_lock``. A stop request is kept, so the worker still exits.
+        stop_requested = False
+        while True:
+            try:
+                job = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if job is self._STOP:
+                stop_requested = True
+        if stop_requested:
+            self._queue.put(self._STOP)
+
+    def _is_current(self, generation: int) -> bool:
+        with self._lock:
+            return generation == self._generation
+
+    def _was_stopped_after(self, generation: int) -> bool:
+        with self._lock:
+            return self._stopped_generation > generation
+
+    def _run(self) -> None:
+        try:
+            self._work()
+        finally:
+            # Whatever ended the loop - an exception the loop does not catch, or a pool
+            # that is gone - the next accepted key must find no worker registered and
+            # start one, rather than queue behind a thread that no longer runs.
+            with self._lock:
+                if self._thread is threading.current_thread():
+                    self._thread = None
+
+    def _work(self) -> None:
+        while True:
+            try:
+                job = self._queue.get(timeout=self._idle_timeout)
+            except queue.Empty:
+                job = self._STOP
+
+            if job is self._STOP:
+                with self._lock:
+                    # Whatever is still queued was accepted after the stop.
+                    if self._queue.empty():
+                        self._thread = None
+                        return
+                continue
+
+            generation, cache_key = job
+            if not self._is_current(generation):
+                continue
+
+            pool = self._pool_ref()
+            if pool is None:
+                return
+
+            try:
+                self._refresh(pool, cache_key, generation)
+            except Exception as e:
+                # Refresh is best effort, and the worker must outlive any one failure.
+                logger.debug("Client-side cache refresh failed: %r", e)
+            finally:
+                with self._lock:
+                    if generation == self._generation:
+                        self._pending.discard(cache_key)
+                # Not held across the wait for the next job, so the pool can be collected.
+                del pool
+
+    def _refresh(self, pool, cache_key: CacheKey, generation: int) -> None:
+        # A user read has already re-fetched the key, or is fetching it now. Refreshing too
+        # would race it for a reply that is no newer. ``in`` rather than ``get``, so the
+        # check does not count as a use for the eviction policy.
+        if cache_key in pool.cache.collection:
+            return
+
+        try:
+            # Only a connection the pool can hand out at once. With every connection in use
+            # and the pool at its limit, the refresh is skipped rather than make an
+            # application command fail or wait for the sake of a background read.
+            conn = pool._get_connection(if_available=True)
+        except Exception as e:
+            # A server that cannot be reached: the entry stays removed and the next read
+            # fetches it.
+            logger.debug("Client-side cache refresh could not get a connection: %r", e)
+            record_csc_refresh(result=CSCRefreshResult.FAILURE)
+            return
+
+        if conn is None:
+            # Skipped for lack of capacity, like a key that found the queue full: the entry
+            # stays removed and the next read fetches it.
+            record_csc_refresh(result=CSCRefreshResult.REJECTED)
+            return
+
+        try:
+            # Getting a connection can wait for a handshake, and a flush in that time must
+            # still refresh nothing.
+            if not self._is_current(generation):
+                return
+            result = conn._refresh_entry(
+                cache_key, is_current=lambda: self._is_current(generation)
+            )
+        except (ConnectionError, TimeoutError, OSError) as e:
+            # The socket is in an unknown state, so it is closed, as the client's own error
+            # path does. Closing a caching connection flushes the cache.
+            logger.debug("Client-side cache refresh failed: %r", e)
+            record_csc_refresh(result=CSCRefreshResult.FAILURE)
+            conn.disconnect()
+        except Exception as e:
+            # An error reply - WRONGTYPE, NOPERM, MOVED - or a failing cache predicate. The
+            # placeholder is already dropped, so the entry stays removed.
+            logger.debug("Client-side cache refresh failed: %r", e)
+            record_csc_refresh(result=CSCRefreshResult.FAILURE)
+        else:
+            # None: a read stored the entry before this refresh sent anything, so, like the
+            # check above, it is not a refresh outcome.
+            if result is not None:
+                record_csc_refresh(result=result)
+        finally:
+            # A ``close()`` came while this job held the connection: while it connected a
+            # socket, or during the round trip, which reconnects a socket the close swept.
+            # The closed pool must not get an open one back.
+            if self._was_stopped_after(generation):
+                conn.disconnect()
+            pool.release(conn)
+
+
+def _reset_refresher_sharing_after_fork() -> None:
+    # Another thread may have held the lock at fork time, and none of the parent's
+    # refreshers runs in the child: the child's pools register refreshers of their own.
+    CacheRefresher._sharing = {}
+    CacheRefresher._sharing_lock = threading.RLock()
+
+
+# Registered here, at import, because a fork hook must be registered once per process: a
+# registration in a method would add the hook again on every call. It follows the class
+# because the hook resets the class's state. A lazy pid check, as the pools use, cannot
+# replace it: it would run before ``_sharing_lock`` is taken, so two threads in the child
+# could both reset the registry and lose a registration, while this hook runs in the
+# child before it has a second thread. ``register_at_fork`` is POSIX-only; Windows has no
+# fork to guard against.
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_refresher_sharing_after_fork)

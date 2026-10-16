@@ -3157,6 +3157,16 @@ class NodesManager:
         for node in nodes:
             if node.redis_connection:
                 node.redis_connection.close()
+                # A node built by ``from_url`` is handed its pool, so the close above leaves
+                # the pool and its connections open. Its cache refresher is stopped anyway:
+                # no refresh may keep reading through a closed cluster.
+                if not node.redis_connection.auto_close_connection_pool:
+                    # ``getattr``: ``connection_pool_class`` may be a pool class with no
+                    # refresher.
+                    pool = node.redis_connection.connection_pool
+                    refresher = getattr(pool, "_cache_refresher", None)
+                    if refresher is not None:
+                        refresher.stop()
 
     def reset(self):
         try:

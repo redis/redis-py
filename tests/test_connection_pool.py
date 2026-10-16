@@ -165,6 +165,25 @@ class TestConnectionPool:
         with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
 
+    @pytest.mark.fixed_client
+    def test_if_available_returns_none_only_when_every_connection_is_in_use(self):
+        # The checkout background work uses: it must never take the last connection.
+        pool = self.get_pool(max_connections=2, connection_class=DummyConnection)
+        c1 = pool.get_connection()
+
+        # Below the limit, a new connection is made.
+        c2 = pool._get_connection(if_available=True)
+        assert isinstance(c2, DummyConnection) and c2 is not c1
+
+        # At the limit with both in use: nothing, and nothing is counted or reserved.
+        assert pool._get_connection(if_available=True) is None
+        assert pool._created_connections == 2
+        assert pool._in_use_connections == {c1, c2}
+
+        # An idle connection is handed out even at the limit.
+        pool.release(c1)
+        assert pool._get_connection(if_available=True) is c1
+
     def test_capacity_survives_failed_connection_creation(self):
         pool = self.get_pool(
             max_connections=2, connection_class=failing_connection_class(2)
@@ -300,6 +319,30 @@ class TestBlockingConnectionPool:
         assert c1 != c2
         with pytest.raises(redis.ConnectionError):
             pool.get_connection()
+
+    @pytest.mark.fixed_client
+    def test_if_available_returns_none_at_once_when_every_connection_is_in_use(self):
+        pool = self.get_pool(max_connections=1, timeout=5)
+        c1 = pool._get_connection(if_available=True)
+        assert isinstance(c1, DummyConnection)
+
+        # Returned without waiting for the pool timeout.
+        start = time.monotonic()
+        assert pool._get_connection(if_available=True) is None
+        assert time.monotonic() - start < 1
+
+        pool.release(c1)
+        assert pool._get_connection(if_available=True) is c1
+
+    @pytest.mark.fixed_client
+    def test_if_available_returns_none_during_maintenance(self):
+        # Maintenance serializes checkouts behind the pool lock, which an application
+        # thread can hold while it waits; background work does not queue behind it.
+        pool = self.get_pool(max_connections=2, timeout=5)
+        pool._in_maintenance = True
+
+        assert pool._get_connection(if_available=True) is None
+        assert pool.pool.qsize() == 2
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
         "When out of connections, block for timeout seconds, then raise"
