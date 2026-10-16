@@ -2045,6 +2045,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
+    # Bound peer reads when a checked-out owner stops processing invalidations.
+    # Active readers renew this window without extra network requests.
+    _BUSY_CACHE_GRACE_SECONDS = 0.1
 
     def __init__(
         self,
@@ -2064,6 +2067,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # Only a pool release makes the connection available for another
         # connection's invalidation drain. Pools update this under _pool_lock.
         self._in_use = True
+        self._busy_cache_deadline = 0.0
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
@@ -2160,6 +2164,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.on_connect()
 
     def disconnect(self, *args, **kwargs):
+        self._busy_cache_deadline = 0.0
         with self._cache_lock:
             self._cache.flush()
         # Both flags describe an exchange on the socket that is about to die with it. A stale
@@ -2192,6 +2197,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._pending_caching_reply = False
         self._skip_next_caching = False
         self._pending_cache_hit = _NO_PENDING_HIT
+        self._busy_cache_deadline = 0.0
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -2211,6 +2217,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # slot, and the attempt is tracked by default under optout anyway.
             self._skip_next_caching = False
             self._current_command_cache_key = None
+            self._busy_cache_deadline = 0.0
             self._conn.send_command(*args, **kwargs)
             return
 
@@ -2254,6 +2261,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         if not store:
             self._current_command_cache_key = None
+            # PubSub, blocking commands and unknown commands may hold this
+            # connection indefinitely without processing invalidations.
+            self._busy_cache_deadline = 0.0
 
             # One path for keyless and ineligible commands alike, so an eligible read whose
             # command method never plumbed ``keys=`` still gets its optout ``NO``. That is the
@@ -2295,10 +2305,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                             self._drain_invalidations(owner._conn)
                             # The drain may have invalidated the cached value.
                             entry = self._cache.get(self._current_command_cache_key)
-                        else:
-                            # Reading a checked-out owner's socket can steal its
-                            # command reply. Fetch a fresh value on our own socket
-                            # instead of serving a possibly stale cache entry.
+                        elif time.monotonic() >= owner._busy_cache_deadline:
+                            # Never touch a checked-out owner's socket. Recent
+                            # cache reads can share its value, but a pending wire
+                            # reply or an owner that stopped reading needs a fresh
+                            # read on our connection. Hits do not move ownership.
                             entry = None
                 else:
                     # A custom entry without pool ownership information cannot
@@ -2334,6 +2345,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     connection_ref=self,
                 )
             )
+
+        # A wire reply may be followed by invalidations we have not read yet.
+        # Keep peers on the fresh-read path until this exchange completes.
+        self._busy_cache_deadline = 0.0
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached. Under optin the server remembers nothing
@@ -2458,6 +2473,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._cache.set(cache_entry)
 
             self._current_command_cache_key = None
+            self._busy_cache_deadline = (
+                time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
+            )
 
         return response
 
@@ -2807,6 +2825,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         self._drain_invalidations(self._conn)
+        self._busy_cache_deadline = time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:

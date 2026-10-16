@@ -1,9 +1,11 @@
 import threading
+import time
 import uuid
 from unittest.mock import patch
 
 import pytest
 
+from redis import Redis
 from redis._parsers import _HiredisParser, _RESP3Parser
 from redis.cache import CacheConfig, TrackingMode
 from redis.connection import BlockingConnectionPool, ConnectionPool
@@ -42,7 +44,7 @@ class TestCachePoolOwnership:
             protocol=3,
             parser_class=parser_class,
             cache_config=config,
-            max_connections=4,
+            max_connections=16,
             socket_timeout=1,
             maint_notifications_config=MaintNotificationsConfig(enabled=False),
         )
@@ -70,6 +72,130 @@ class TestCachePoolOwnership:
             assert borrower.read_response() == (b"new" if invalidate else b"old")
             assert owner.read_response() == b"B"
         finally:
+            pool.release(owner)
+            pool.release(borrower)
+
+    @pytest.mark.parametrize("readers", [2, 8])
+    def test_concurrent_readers_keep_hitting_cache(self, pool, r2, readers):
+        key = str(uuid.uuid4())
+        r2.set(key, "value")
+        client = Redis(connection_pool=pool)
+        connections = [pool.get_connection() for _ in range(readers)]
+        for connection in connections:
+            pool.release(connection)
+
+        barrier = threading.Barrier(readers)
+        errors = []
+        sends = []
+
+        def read_cached():
+            connection = pool.get_connection()
+            try:
+                with patch.object(
+                    connection._conn,
+                    "send_packed_command",
+                    wraps=connection._conn.send_packed_command,
+                ) as send:
+                    for _ in range(20):
+                        barrier.wait(timeout=3)
+                        connection.send_command("GET", key, keys=[key])
+                        assert connection.read_response() == b"value"
+                    sends.append(send.call_count)
+            except BaseException as exc:
+                errors.append(exc)
+                barrier.abort()
+            finally:
+                pool.release(connection)
+
+        # Keep the invalidation grace period fixed independently of CI scheduling.
+        # The expiration test below covers an owner that stops processing reads.
+        with patch("redis.connection.time", wraps=time) as clock:
+            clock.monotonic.return_value = time.monotonic()
+            assert client.get(key) == b"value"
+            threads = [
+                threading.Thread(target=read_cached, daemon=True)
+                for _ in range(readers)
+            ]
+            try:
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(5)
+                assert not any(thread.is_alive() for thread in threads)
+                assert not errors
+                assert sends == [0] * readers
+            finally:
+                barrier.abort()
+                for thread in threads:
+                    thread.join(5)
+                client.close()
+
+    def test_busy_owner_stops_serving_hits_when_invalidation_check_expires(
+        self, pool, r2
+    ):
+        key = str(uuid.uuid4())
+        r2.set(key, "old")
+        owner = pool.get_connection()
+        borrower = pool.get_connection()
+        try:
+            with patch("redis.connection.time", wraps=time) as clock:
+                clock.monotonic.return_value = time.monotonic()
+                owner.send_command("GET", key, keys=[key])
+                assert owner.read_response() == b"old"
+                r2.set(key, "new")
+                assert owner.can_read(timeout=1)
+
+                with patch.object(
+                    borrower._conn,
+                    "send_packed_command",
+                    wraps=borrower._conn.send_packed_command,
+                ) as send:
+                    borrower.send_command("GET", key, keys=[key])
+                    assert borrower.read_response() == b"old"
+                    send.assert_not_called()
+
+                # A checked-out connection may remain idle indefinitely, including
+                # a single-connection client. Its old entries must expire for peers;
+                # the peer's hit above must not renew the owner's grace period.
+                clock.monotonic.return_value += owner._BUSY_CACHE_GRACE_SECONDS
+                borrower.send_command("GET", key, keys=[key])
+                assert borrower.read_response() == b"new"
+        finally:
+            pool.release(owner)
+            pool.release(borrower)
+
+    @pytest.mark.parametrize("command", ["BLPOP", "SUBSCRIBE", "packed"])
+    def test_long_lived_owner_does_not_serve_stale_values(self, pool, r2, command):
+        key, other = str(uuid.uuid4()), str(uuid.uuid4())
+        r2.set(key, "old")
+        owner = pool.get_connection()
+        borrower = pool.get_connection()
+        try:
+            owner.send_command("GET", key, keys=[key])
+            assert owner.read_response() == b"old"
+            if command == "packed":
+                owner.send_packed_command(owner.pack_command("BLPOP", other, 0))
+            elif command == "BLPOP":
+                owner.send_command("BLPOP", other, 0)
+            else:
+                messages = []
+                owner._conn._parser.set_pubsub_push_handler(messages.append)
+                owner.send_command("SUBSCRIBE", other)
+            r2.set(key, "new")
+
+            borrower.send_command("GET", key, keys=[key])
+            assert borrower.read_response() == b"new"
+            if command != "SUBSCRIBE":
+                r2.rpush(other, "B")
+                assert owner.read_response() == [other.encode(), b"B"]
+            else:
+                assert messages == []
+                # An invalidation push can precede the subscription acknowledgement.
+                while not messages:
+                    owner.read_response(push_request=True)
+                assert messages == [[b"subscribe", other.encode(), 1]]
+        finally:
+            owner.disconnect()
             pool.release(owner)
             pool.release(borrower)
 
