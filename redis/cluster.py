@@ -5896,7 +5896,7 @@ class TransactionStrategy(AbstractStrategy):
         response = None
         # parse the EXEC.
         never_decode = _transaction_never_decode(
-            redis_node.get_encoder, (c.options for c in self._command_queue)
+            redis_node.get_encoder, ((c.args, c.options) for c in self._command_queue)
         )
         try:
             if never_decode:
@@ -5942,7 +5942,7 @@ class TransactionStrategy(AbstractStrategy):
             response = decode_transaction_replies(
                 redis_node.get_encoder(),
                 response,
-                [c.options for c in self._command_queue],
+                [(c.args, c.options) for c in self._command_queue],
             )
 
         # find any errors in the response and raise if necessary

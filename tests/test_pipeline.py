@@ -487,8 +487,15 @@ def test_decode_transaction_replies():
     encoder = Encoder("utf-8", "strict", decode_responses=True)
     error = redis.ResponseError("WRONGTYPE")
     response = [b"\xff raw", b"v", [b"a", [b"b", 1]], {b"k": [b"v", 1.5]}, error, None]
-    options = [{NEVER_DECODE: []}, {}, {}, {}, {}, {}]
-    assert decode_transaction_replies(encoder, response, options) == [
+    commands = [
+        (("DUMP", "k"), {NEVER_DECODE: []}),
+        (("GET", "k"), {}),
+        (("LRANGE", "l", 0, -1), {}),
+        (("FT.SEARCH", "idx", "*"), {NEVER_DECODE: True}),
+        (("LPUSH", "k", "x"), {}),
+        (("GET", "missing"), {}),
+    ]
+    assert decode_transaction_replies(encoder, response, commands) == [
         b"\xff raw",
         "v",
         ["a", ["b", 1]],

@@ -124,7 +124,16 @@ def _decode_nested(encoder, value):
     return value
 
 
-def _transaction_never_decode(get_encoder, options_list) -> bool:
+# Transactional pipelines have always returned FT.SEARCH and FT.HYBRID replies
+# decoded, so their NEVER_DECODE option is not applied inside MULTI/EXEC.
+_TRANSACTION_DECODED_COMMANDS = frozenset(("FT.SEARCH", "FT.HYBRID"))
+
+
+def _keeps_raw_reply(args, options) -> bool:
+    return NEVER_DECODE in options and args[0] not in _TRANSACTION_DECODED_COMMANDS
+
+
+def _transaction_never_decode(get_encoder, commands) -> bool:
     """
     Whether the EXEC reply must be read without decoding.
 
@@ -132,21 +141,22 @@ def _transaction_never_decode(get_encoder, options_list) -> bool:
     per-command ``NEVER_DECODE`` option cannot be applied while parsing it.
     When a queued command needs raw bytes, EXEC is read undecoded and the
     other replies are decoded afterwards with ``decode_transaction_replies``.
-    The encoder is only looked up when a queued command uses ``NEVER_DECODE``.
+    ``commands`` yields ``(args, options)`` pairs. The encoder is only looked
+    up when a queued command keeps its raw reply.
     """
     return (
-        any(NEVER_DECODE in options for options in options_list)
+        any(_keeps_raw_reply(args, options) for args, options in commands)
         and get_encoder().decode_responses
     )
 
 
-def decode_transaction_replies(encoder, response, options_list):
-    """Decode the EXEC replies of the commands that do not use NEVER_DECODE."""
+def decode_transaction_replies(encoder, response, commands):
+    """Decode the EXEC replies of the commands that do not keep raw replies."""
     return [
         r
-        if isinstance(r, Exception) or NEVER_DECODE in options
+        if isinstance(r, Exception) or _keeps_raw_reply(args, options)
         else _decode_nested(encoder, r)
-        for r, options in zip(response, options_list)
+        for r, (args, options) in zip(response, commands)
     ]
 
 
@@ -2152,9 +2162,7 @@ class Pipeline(Redis):
                     errors.append((i, e))
 
         # parse the EXEC.
-        never_decode = _transaction_never_decode(
-            self.get_encoder, (options for _, options in commands)
-        )
+        never_decode = _transaction_never_decode(self.get_encoder, commands)
         try:
             if never_decode:
                 response = self.parse_response(connection, "_", **{NEVER_DECODE: []})
@@ -2183,7 +2191,7 @@ class Pipeline(Redis):
 
         if never_decode:
             response = decode_transaction_replies(
-                self.get_encoder(), response, [options for _, options in commands]
+                self.get_encoder(), response, commands
             )
 
         # find any errors in the response and raise if necessary
