@@ -60,6 +60,8 @@ from redis.client import (
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
+    _transaction_never_decode,
+    decode_transaction_replies,
 )
 from redis.commands import (
     AsyncCoreCommands,
@@ -2111,8 +2113,14 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                     errors.append((i, err))
 
         # parse the EXEC.
+        never_decode = _transaction_never_decode(self.get_encoder, commands)
         try:
-            response = await self.parse_response(connection, "_")
+            if never_decode:
+                response = await self.parse_response(
+                    connection, "_", **{NEVER_DECODE: []}
+                )
+            else:
+                response = await self.parse_response(connection, "_")
         except ExecAbortError as err:
             if errors:
                 raise errors[0][1] from err
@@ -2134,6 +2142,11 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise ResponseError(
                 "Wrong number of response items from pipeline execution"
             ) from None
+
+        if never_decode:
+            response = decode_transaction_replies(
+                self.get_encoder(), response, commands
+            )
 
         # find any errors in the response and raise if necessary
         if raise_on_error:
