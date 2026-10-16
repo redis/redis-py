@@ -18,6 +18,9 @@ def exit_callback(callback, *args):
         callback(*args)
 
 
+_has_fork = "fork" in multiprocessing.get_all_start_methods()
+
+
 @pytest.mark.skipif(
     platform.python_implementation() == "PyPy",
     reason=(
@@ -25,13 +28,21 @@ def exit_callback(callback, *args):
         "Causes processes to hang quite often"
     ),
 )
+@pytest.mark.skipif(
+    not _has_fork,
+    reason="These tests require the fork start method, which is not "
+    "available on this platform (e.g. Windows)",
+)
 class TestMultiprocessing:
     # On macOS and newly non-macOS POSIX systems (since Python 3.14),
     # the default method has been changed to forkserver.
     # The code in this module does not work with it,
     # hence the explicit change to 'fork'
     # See https://github.com/python/cpython/issues/125714
-    if multiprocessing.get_start_method() in ["forkserver", "spawn"]:
+    if not _has_fork:
+        # The class is skipped above; avoid raising at import time.
+        _mp_context = None
+    elif multiprocessing.get_start_method() in ["forkserver", "spawn"]:
         _mp_context = multiprocessing.get_context(method="fork")
     else:
         _mp_context = multiprocessing.get_context()
