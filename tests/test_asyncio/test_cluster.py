@@ -5399,6 +5399,67 @@ class TestClusterPipelineMocked:
         finally:
             await r.aclose()
 
+    async def test_transaction_keeps_held_connection_when_slot_owner_changes(
+        self,
+    ) -> None:
+        """
+        If the slot map changes while a transaction holds a connection, the
+        held (possibly WATCHing) connection must be kept, and reset() must
+        return it to the pool of the node that owns it, not the newly
+        resolved slot owner (#4253).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            original_node = r.get_node(host=default_host, port=7000)
+            new_node = r.get_node(host=default_host, port=7001)
+            assert original_node is not None and new_node is not None
+            assert original_node.name != new_node.name
+
+            def _seed_connection(node: ClusterNode) -> Connection:
+                node._free.clear()
+                conn = mock.AsyncMock(spec=Connection)
+                conn.host = node.host
+                conn.port = node.port
+                conn.should_reconnect.return_value = False
+                node._connections.append(conn)
+                node._free.append(conn)
+                return conn
+
+            original_conn = _seed_connection(original_node)
+            new_conn = _seed_connection(new_node)
+
+            slot = 0
+            r.nodes_manager.slots_cache[slot] = [original_node]
+
+            pipe = r.pipeline(transaction=True)
+            strategy = pipe._execution_strategy
+            # Simulate a mid-WATCH hold without talking to Redis
+            strategy._pipeline_slots = {slot}
+            strategy._watching = True
+            node, conn = strategy._get_client_and_connection_for_transaction()
+            assert node is original_node
+            assert conn is original_conn
+            assert original_conn not in original_node._free
+
+            # A concurrent topology refresh retargets the slot
+            r.nodes_manager.slots_cache[slot] = [new_node]
+
+            node, conn = strategy._get_client_and_connection_for_transaction()
+            assert node is original_node
+            assert conn is original_conn
+            assert strategy._transaction_node is original_node
+            assert strategy._transaction_connection is original_conn
+            assert new_conn in new_node._free
+
+            strategy._watching = False
+            await pipe.reset()
+            assert strategy._transaction_connection is None
+            assert strategy._transaction_node is None
+            assert original_conn in original_node._free
+            assert original_conn not in new_node._free
+        finally:
+            await r.aclose()
+
 
 @pytest.mark.onlycluster
 @pytest.mark.ssl
