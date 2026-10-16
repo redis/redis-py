@@ -110,6 +110,44 @@ EMPTY_RESPONSE = "EMPTY_RESPONSE"
 NEVER_DECODE = "NEVER_DECODE"
 
 
+def _decode_nested(encoder, value):
+    """Decode every bytes value in a parsed reply, as the parser would have."""
+    if isinstance(value, (bytes, memoryview)):
+        return encoder.decode(value)
+    if isinstance(value, list):
+        return [_decode_nested(encoder, item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _decode_nested(encoder, k): _decode_nested(encoder, v)
+            for k, v in value.items()
+        }
+    return value
+
+
+def _transaction_never_decode(encoder, options_list) -> bool:
+    """
+    Whether the EXEC reply must be read without decoding.
+
+    EXEC returns the replies of all queued commands as one array, so the
+    per-command ``NEVER_DECODE`` option cannot be applied while parsing it.
+    When a queued command needs raw bytes, EXEC is read undecoded and the
+    other replies are decoded afterwards with ``decode_transaction_replies``.
+    """
+    return encoder.decode_responses and any(
+        NEVER_DECODE in options for options in options_list
+    )
+
+
+def decode_transaction_replies(encoder, response, options_list):
+    """Decode the EXEC replies of the commands that do not use NEVER_DECODE."""
+    return [
+        r
+        if isinstance(r, Exception) or NEVER_DECODE in options
+        else _decode_nested(encoder, r)
+        for r, options in zip(response, options_list)
+    ]
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -2112,8 +2150,14 @@ class Pipeline(Redis):
                     errors.append((i, e))
 
         # parse the EXEC.
+        never_decode = _transaction_never_decode(
+            connection.encoder, (options for _, options in commands)
+        )
         try:
-            response = self.parse_response(connection, "_")
+            if never_decode:
+                response = self.parse_response(connection, "_", **{NEVER_DECODE: []})
+            else:
+                response = self.parse_response(connection, "_")
         except ExecAbortError:
             if errors:
                 raise errors[0][1]
@@ -2133,6 +2177,11 @@ class Pipeline(Redis):
             self.connection.disconnect()
             raise ResponseError(
                 "Wrong number of response items from pipeline execution"
+            )
+
+        if never_decode:
+            response = decode_transaction_replies(
+                connection.encoder, response, [options for _, options in commands]
             )
 
         # find any errors in the response and raise if necessary

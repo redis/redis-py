@@ -4,7 +4,8 @@ from unittest import mock
 import pytest
 from redis import RedisClusterException
 import redis
-from redis.client import Pipeline
+from redis._parsers import Encoder
+from redis.client import NEVER_DECODE, Pipeline, decode_transaction_replies
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -444,6 +445,28 @@ class TestPipeline:
         resp = pipe.execute()
         assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]
 
+    @pytest.mark.parametrize("transaction", [True, False])
+    def test_pipeline_never_decode_with_decode_responses(self, decoded_r, transaction):
+        # https://github.com/redis/redis-py/issues/1884
+        decoded_r.set("{k}str", "value")
+        decoded_r.rpush("{k}list", "a", "b")
+        decoded_r.hset("{k}hash", mapping={"f": "v"})
+        with decoded_r.pipeline(transaction=transaction) as pipe:
+            pipe.dump("{k}str")
+            pipe.get("{k}str")
+            pipe.lrange("{k}list", 0, -1)
+            pipe.hmget("{k}hash", ["f", "missing"])
+            pipe.lpush("{k}str", "x")
+            dumped, value, items, fields, error = pipe.execute(raise_on_error=False)
+
+        assert isinstance(dumped, bytes)
+        assert value == "value"
+        assert items == ["a", "b"]
+        assert fields == ["v", None]
+        assert isinstance(error, redis.ResponseError)
+        assert decoded_r.restore("{k}copy", 0, dumped)
+        assert decoded_r.get("{k}copy") == "value"
+
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_with_msetex(self, r):
@@ -458,6 +481,21 @@ class TestPipeline:
             p_transaction.msetex(
                 {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
             )
+
+
+def test_decode_transaction_replies():
+    encoder = Encoder("utf-8", "strict", decode_responses=True)
+    error = redis.ResponseError("WRONGTYPE")
+    response = [b"\xff raw", b"v", [b"a", [b"b", 1]], {b"k": [b"v", 1.5]}, error, None]
+    options = [{NEVER_DECODE: []}, {}, {}, {}, {}, {}]
+    assert decode_transaction_replies(encoder, response, options) == [
+        b"\xff raw",
+        "v",
+        ["a", ["b", 1]],
+        {"k": ["v", 1.5]},
+        error,
+        None,
+    ]
 
 
 @pytest.mark.fixed_client

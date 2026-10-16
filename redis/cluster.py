@@ -38,7 +38,15 @@ from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
-from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
+from redis.client import (
+    EMPTY_RESPONSE,
+    NEVER_DECODE,
+    CaseInsensitiveDict,
+    PubSub,
+    Redis,
+    _transaction_never_decode,
+    decode_transaction_replies,
+)
 from redis.commands import RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
 from redis.commands.metadata import (
@@ -5887,8 +5895,16 @@ class TransactionStrategy(AbstractStrategy):
 
         response = None
         # parse the EXEC.
+        never_decode = _transaction_never_decode(
+            connection.encoder, (c.options for c in self._command_queue)
+        )
         try:
-            response = redis_node.parse_response(connection, "EXEC")
+            if never_decode:
+                response = redis_node.parse_response(
+                    connection, "EXEC", **{NEVER_DECODE: []}
+                )
+            else:
+                response = redis_node.parse_response(connection, "EXEC")
         except ExecAbortError:
             if errors:
                 raise errors[0]
@@ -5920,6 +5936,13 @@ class TransactionStrategy(AbstractStrategy):
                 " Command stack was {} but response had length {}".format(
                     [c.args[0] for c in self._command_queue], len(response)
                 )
+            )
+
+        if never_decode:
+            response = decode_transaction_replies(
+                connection.encoder,
+                response,
+                [c.options for c in self._command_queue],
             )
 
         # find any errors in the response and raise if necessary
