@@ -1346,6 +1346,10 @@ class SearchCommands:
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
+            if self.transaction:
+                # Transactional pipelines have always returned decoded search
+                # replies, so they don't request raw bytes.
+                del options[NEVER_DECODE]
 
         res = self.execute_command(SEARCH_CMD, *args, **options)
 
@@ -1404,7 +1408,10 @@ class SearchCommands:
         # Preserve HYBRID result values as bytes by default, matching the
         # legacy RESP2 Search surface; selected LOAD fields can opt into
         # decoding through HybridPostProcessingConfig.load(..., decode_field=True).
-        options[NEVER_DECODE] = True
+        # Transactional pipelines have always returned decoded hybrid
+        # replies, so they don't request raw bytes.
+        if not (isinstance(self, Pipeline) and self.transaction):
+            options[NEVER_DECODE] = True
         options["query"] = query
 
         res = self.execute_command(*pieces, **options)
@@ -1885,6 +1892,10 @@ class AsyncSearchCommands(SearchCommands):
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
+            if self.is_transaction:
+                # Transactional pipelines have always returned decoded search
+                # replies, so they don't request raw bytes.
+                del options[NEVER_DECODE]
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 
@@ -1943,7 +1954,10 @@ class AsyncSearchCommands(SearchCommands):
         # Preserve HYBRID result values as bytes by default, matching the
         # legacy RESP2 Search surface; selected LOAD fields can opt into
         # decoding through HybridPostProcessingConfig.load(..., decode_field=True).
-        options[NEVER_DECODE] = True
+        # Transactional pipelines have always returned decoded hybrid
+        # replies, so they don't request raw bytes.
+        if not (isinstance(self, Pipeline) and self.is_transaction):
+            options[NEVER_DECODE] = True
         options["query"] = query
 
         res = await self.execute_command(*pieces, **options)

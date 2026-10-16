@@ -124,7 +124,7 @@ def _decode_nested(encoder, value):
     return value
 
 
-def _transaction_never_decode(encoder, options_list) -> bool:
+def _transaction_never_decode(get_encoder, options_list) -> bool:
     """
     Whether the EXEC reply must be read without decoding.
 
@@ -132,9 +132,11 @@ def _transaction_never_decode(encoder, options_list) -> bool:
     per-command ``NEVER_DECODE`` option cannot be applied while parsing it.
     When a queued command needs raw bytes, EXEC is read undecoded and the
     other replies are decoded afterwards with ``decode_transaction_replies``.
+    The encoder is only looked up when a queued command uses ``NEVER_DECODE``.
     """
-    return encoder.decode_responses and any(
-        NEVER_DECODE in options for options in options_list
+    return (
+        any(NEVER_DECODE in options for options in options_list)
+        and get_encoder().decode_responses
     )
 
 
@@ -2151,7 +2153,7 @@ class Pipeline(Redis):
 
         # parse the EXEC.
         never_decode = _transaction_never_decode(
-            connection.encoder, (options for _, options in commands)
+            self.get_encoder, (options for _, options in commands)
         )
         try:
             if never_decode:
@@ -2181,7 +2183,7 @@ class Pipeline(Redis):
 
         if never_decode:
             response = decode_transaction_replies(
-                connection.encoder, response, [options for _, options in commands]
+                self.get_encoder(), response, [options for _, options in commands]
             )
 
         # find any errors in the response and raise if necessary

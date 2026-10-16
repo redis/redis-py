@@ -2114,7 +2114,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
         # parse the EXEC.
         never_decode = _transaction_never_decode(
-            connection.encoder, (options for _, options in commands)
+            self.get_encoder, (options for _, options in commands)
         )
         try:
             if never_decode:
@@ -2147,7 +2147,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
         if never_decode:
             response = decode_transaction_replies(
-                connection.encoder, response, [options for _, options in commands]
+                self.get_encoder(), response, [options for _, options in commands]
             )
 
         # find any errors in the response and raise if necessary
