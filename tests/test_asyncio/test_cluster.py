@@ -3873,6 +3873,56 @@ class TestNodesManager:
                 gc.enable()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error_type, raised_type",
+        [
+            (ConnectionError, RedisClusterUnreachableError),
+            (AuthenticationError, RedisClusterException),
+        ],
+    )
+    async def test_initialize_clears_exception_local_when_no_startup_node_answers(
+        self, error_type: Type[Exception], raised_type: Type[Exception]
+    ) -> None:
+        """
+        When no startup node answers, initialize() raises the last error from
+        the local that holds it. The raised error's traceback refers to the
+        initialize() frame, so the frame must not keep that local after the
+        raise: the pair would stay alive until the cyclic GC runs, on every
+        failed refresh.
+        """
+
+        async def mocked_execute_command(self, *args, **kwargs):
+            raise error_type("mock failure")
+
+        nodes_manager = NodesManager(
+            [ClusterNode("127.0.0.1", 7000), ClusterNode("127.0.0.1", 7001)],
+            False,
+            {},
+        )
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            autospec=True,
+            side_effect=mocked_execute_command,
+        ):
+            with pytest.raises(RedisClusterException) as exc_info:
+                await nodes_manager.initialize()
+        assert type(exc_info.value) is raised_type
+
+        # Locate the initialize frame in the propagated traceback and confirm
+        # its exception local was cleared, proving no exception<->frame cycle
+        # survives.
+        initialize_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "initialize":
+                initialize_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert initialize_frame is not None
+        assert initialize_frame.f_locals.get("exception") is None
+
+    @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
         Test that creating a RedisCluster failes if one of the startup nodes

@@ -3108,19 +3108,23 @@ class NodesManager:
                 # AuthorizationError subclass ConnectionError but cannot be
                 # repaired by a failover) must keep surfacing as a plain
                 # RedisClusterException.
-                if isinstance(
-                    exception, (ConnectionError, TimeoutError, OSError)
-                ) and not isinstance(
-                    exception, (AuthenticationError, AuthorizationError)
-                ):
-                    raise RedisClusterUnreachableError(
+                try:
+                    if isinstance(
+                        exception, (ConnectionError, TimeoutError, OSError)
+                    ) and not isinstance(
+                        exception, (AuthenticationError, AuthorizationError)
+                    ):
+                        raise RedisClusterUnreachableError(
+                            f"Redis Cluster cannot be connected. Please provide at least "
+                            f"one reachable node: {str(exception)}"
+                        ) from exception
+                    raise RedisClusterException(
                         f"Redis Cluster cannot be connected. Please provide at least "
                         f"one reachable node: {str(exception)}"
                     ) from exception
-                raise RedisClusterException(
-                    f"Redis Cluster cannot be connected. Please provide at least "
-                    f"one reachable node: {str(exception)}"
-                ) from exception
+                finally:
+                    # Ensure we clear local references to caught exceptions
+                    exception = None
 
             # Create Redis connections to all nodes
             self.create_redis_connections(list(tmp_nodes_cache.values()))

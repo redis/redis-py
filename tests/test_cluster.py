@@ -3884,6 +3884,56 @@ class TestNodesManager:
                 gc.enable()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error_type, raised_type",
+        [
+            (ConnectionError, RedisClusterUnreachableError),
+            (AuthenticationError, RedisClusterException),
+        ],
+    )
+    def test_initialize_clears_exception_local_when_no_startup_node_answers(
+        self, error_type, raised_type
+    ):
+        """
+        When no startup node answers, initialize() raises the last error from
+        the local that holds it. The raised error's traceback refers to the
+        initialize() frame, so the frame must not keep that local after the
+        raise: the pair would stay alive until the cyclic GC runs, on every
+        failed refresh.
+        """
+        connections = [MagicMock(), MagicMock()]
+        # The constructor calls initialize(), so the nodes answer here; the
+        # failure is set up below, once the manager exists.
+        for connection in connections:
+            connection.execute_command.return_value = default_cluster_slots
+        nodes_manager = NodesManager(
+            startup_nodes=[
+                ClusterNode("127.0.0.1", 7000, redis_connection=connections[0]),
+                ClusterNode("127.0.0.1", 7001, redis_connection=connections[1]),
+            ],
+            from_url=False,
+            dynamic_startup_nodes=False,
+        )
+        for connection in connections:
+            connection.execute_command.side_effect = error_type("mock failure")
+
+        with pytest.raises(RedisClusterException) as exc_info:
+            nodes_manager.initialize()
+        assert type(exc_info.value) is raised_type
+
+        # Locate the initialize frame in the propagated traceback and confirm
+        # its exception local was cleared, proving no exception<->frame cycle
+        # survives.
+        initialize_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "initialize":
+                initialize_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert initialize_frame is not None
+        assert initialize_frame.f_locals.get("exception") is None
+
+    @pytest.mark.fixed_client
     def test_init_promote_server_type_for_node_in_cache(self):
         """
         When replica is promoted to master, nodes_cache must change the server type
