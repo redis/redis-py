@@ -4,7 +4,7 @@ from unittest.mock import patch, Mock
 import pybreaker
 import pytest
 
-from redis.client import Pipeline
+from redis.client import NEVER_DECODE, Pipeline
 from redis.exceptions import DataError
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.client import MultiDBClient, Pipeline as MultiDBPipeline
@@ -283,6 +283,57 @@ class TestPipeline:
 
                     # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
                     assert pipe.execute() == ["OK1", "value"]
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_pipeline_slowlog_get_before_first_command(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        decode_responses,
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            pipe = mock_pipe()
+            pipe.execute.return_value = [[]]
+            mock_db1.client.pipeline.return_value = pipe
+            mock_db1.client.get_connection_kwargs.return_value = {
+                "decode_responses": decode_responses
+            }
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert not client.initialized
+                multi_db_pipe = client.pipeline()
+                multi_db_pipe.slowlog_get()
+                assert multi_db_pipe.execute() == [[]]
+
+                expected = {NEVER_DECODE: []} if decode_responses else {}
+                pipe.execute_command.assert_called_once_with("SLOWLOG GET", **expected)
             finally:
                 client.close()
 
