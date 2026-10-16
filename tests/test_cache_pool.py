@@ -7,7 +7,7 @@ import pytest
 
 from redis import Redis
 from redis._parsers import _HiredisParser, _RESP3Parser
-from redis.cache import CacheConfig, TrackingMode
+from redis.cache import CacheConfig, CacheEntryStatus, TrackingMode
 from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.utils import HIREDIS_AVAILABLE
@@ -71,6 +71,55 @@ class TestCachePoolOwnership:
             borrower.send_command("GET", foo, keys=[foo])
             assert borrower.read_response() == (b"new" if invalidate else b"old")
             assert owner.read_response() == b"B"
+        finally:
+            pool.release(owner)
+            pool.release(borrower)
+
+    def test_busy_owner_serves_hits_as_soon_as_reply_is_cached(self, pool, r2):
+        key = str(uuid.uuid4())
+        r2.set(key, "value")
+        owner = pool.get_connection()
+        borrower = pool.get_connection()
+        published = threading.Event()
+        finish_publish = threading.Event()
+        errors = []
+        real_set = pool.cache.set
+
+        def pause_after_publish(entry):
+            result = real_set(entry)
+            if entry.connection_ref is owner and entry.status == CacheEntryStatus.VALID:
+                published.set()
+                assert finish_publish.wait(3)
+            return result
+
+        def read_owner_reply():
+            try:
+                assert owner.read_response() == b"value"
+            except BaseException as exc:
+                errors.append(exc)
+
+        reader = threading.Thread(target=read_owner_reply, daemon=True)
+        try:
+            with patch("redis.connection.time", wraps=time) as clock:
+                clock.monotonic.return_value = time.monotonic()
+                owner.send_command("GET", key, keys=[key])
+                with patch.object(pool.cache, "set", side_effect=pause_after_publish):
+                    reader.start()
+                    try:
+                        assert published.wait(3)
+                        with patch.object(
+                            borrower._conn,
+                            "send_packed_command",
+                            wraps=borrower._conn.send_packed_command,
+                        ) as send:
+                            borrower.send_command("GET", key, keys=[key])
+                            assert borrower.read_response() == b"value"
+                            send.assert_not_called()
+                    finally:
+                        finish_publish.set()
+                        reader.join(5)
+                assert not reader.is_alive()
+                assert not errors
         finally:
             pool.release(owner)
             pool.release(borrower)

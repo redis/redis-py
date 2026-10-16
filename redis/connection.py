@@ -2477,6 +2477,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
             cache_entry = self._cache.get(self._current_command_cache_key)
 
+            # Peers use independent cache locks. Start the sharing window before
+            # making the reply visible as VALID to avoid unnecessary misses.
+            self._busy_cache_deadline = (
+                time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
+            )
+
             # Promote only the placeholder this connection staked. It may have been
             # invalidated in the meantime, or replaced by another connection's placeholder
             # for the same key - promoting that one would bind our reply to its
@@ -2491,9 +2497,6 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._cache.set(cache_entry)
 
             self._current_command_cache_key = None
-            self._busy_cache_deadline = (
-                time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
-            )
 
         return response
 
