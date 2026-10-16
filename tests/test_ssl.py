@@ -472,17 +472,26 @@ class TestOCSPCertificateBinding:
 
     @staticmethod
     def _make_certificate(
-        common_name, serial, signing_key=None, ca=False, ocsp_signing=False
+        common_name,
+        serial,
+        signing_key=None,
+        ca=False,
+        ocsp_signing=False,
+        rsa_key=False,
+        rsa_padding=None,
     ):
         pytest.importorskip("cryptography")
 
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric import ec, rsa
         from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        key = ec.generate_private_key(ec.SECP256R1())
+        if rsa_key:
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        else:
+            key = ec.generate_private_key(ec.SECP256R1())
         builder = (
             x509.CertificateBuilder()
             .subject_name(
@@ -505,7 +514,13 @@ class TestOCSPCertificateBinding:
                 x509.ExtendedKeyUsage([ExtendedKeyUsageOID.OCSP_SIGNING]),
                 critical=False,
             )
-        return builder.sign(signing_key or key, hashes.SHA256()), key
+        if rsa_padding is not None:
+            signed = builder.sign(
+                signing_key or key, hashes.SHA256(), rsa_padding=rsa_padding
+            )
+        else:
+            signed = builder.sign(signing_key or key, hashes.SHA256())
+        return signed, key
 
     @staticmethod
     def _good_response(ca, ca_key, target, this_update, next_update, responder=None):
@@ -587,6 +602,35 @@ class TestOCSPCertificateBinding:
             now - datetime.timedelta(days=1),
             now + datetime.timedelta(days=1),
             responder=responder,
+        )
+
+        assert _check_certificate(ca, cert, response) is True
+
+    def test_check_certificate_accepts_rsa_pss_signed_certificate(self):
+        # An RSA issuer may sign with RSASSA-PSS rather than PKCS1v15; the
+        # issuance check must accept it.
+        pytest.importorskip("cryptography", minversion="41.0.0")
+
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        pss = padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        )
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True, rsa_key=True)
+        cert, _ = self._make_certificate(
+            "node", 111, signing_key=ca_key, rsa_padding=pss
+        )
+        response = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
         )
 
         assert _check_certificate(ca, cert, response) is True

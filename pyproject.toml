@@ -42,7 +42,7 @@ xxhash = [
 ]
 
 ocsp = [
-    "cryptography>=36.0.1",
+    "cryptography>=40.0.0",
     "pyopenssl>=20.0.1",
     "requests>=2.31.0",
 ]
