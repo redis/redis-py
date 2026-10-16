@@ -81,6 +81,11 @@ FUZZY = "FUZZY"
 WITHPAYLOADS = "WITHPAYLOADS"
 
 
+def _runs_in_transaction(pipe, transaction: bool) -> bool:
+    """Whether a command issued on ``pipe`` now is queued inside MULTI/EXEC."""
+    return pipe.explicit_transaction or (transaction and not pipe.watching)
+
+
 class SearchCommands:
     """Search commands."""
 
@@ -1346,7 +1351,7 @@ class SearchCommands:
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
-            if self.transaction:
+            if _runs_in_transaction(self, self.transaction):
                 # Transactional pipelines have always returned decoded search
                 # replies, so they don't request raw bytes.
                 del options[NEVER_DECODE]
@@ -1410,7 +1415,9 @@ class SearchCommands:
         # decoding through HybridPostProcessingConfig.load(..., decode_field=True).
         # Transactional pipelines have always returned decoded hybrid
         # replies, so they don't request raw bytes.
-        if not (isinstance(self, Pipeline) and self.transaction):
+        if not (
+            isinstance(self, Pipeline) and _runs_in_transaction(self, self.transaction)
+        ):
             options[NEVER_DECODE] = True
         options["query"] = query
 
@@ -1892,7 +1899,7 @@ class AsyncSearchCommands(SearchCommands):
         if isinstance(self, Pipeline):
             options["query"] = query
             options["duration"] = 0
-            if self.is_transaction:
+            if _runs_in_transaction(self, self.is_transaction):
                 # Transactional pipelines have always returned decoded search
                 # replies, so they don't request raw bytes.
                 del options[NEVER_DECODE]
@@ -1956,7 +1963,10 @@ class AsyncSearchCommands(SearchCommands):
         # decoding through HybridPostProcessingConfig.load(..., decode_field=True).
         # Transactional pipelines have always returned decoded hybrid
         # replies, so they don't request raw bytes.
-        if not (isinstance(self, Pipeline) and self.is_transaction):
+        if not (
+            isinstance(self, Pipeline)
+            and _runs_in_transaction(self, self.is_transaction)
+        ):
             options[NEVER_DECODE] = True
         options["query"] = query
 
