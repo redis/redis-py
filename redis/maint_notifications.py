@@ -1017,23 +1017,36 @@ class MaintNotificationsPoolHandler:
 
     def _schedule(self, delay: float, callback: Callable[..., Any], *args: Any) -> None:
         def run() -> None:
-            self._scheduled_timers.discard(timer)
-            callback(*args)
+            # Holding the lock through the callback serializes it with
+            # cancel_scheduled_tasks(): a timer cancelled before it gets the
+            # lock does nothing, and one already running finishes before
+            # cancellation proceeds.
+            with self._lock:
+                if timer not in self._scheduled_timers:
+                    return
+                try:
+                    callback(*args)
+                finally:
+                    self._scheduled_timers.discard(timer)
 
         timer = threading.Timer(delay, run)
-        self._scheduled_timers.add(timer)
+        with self._lock:
+            self._scheduled_timers.add(timer)
         timer.start()
 
     def cancel_scheduled_tasks(self) -> None:
-        if not self._scheduled_timers:
-            return
-        # The pool is closing, which ends the relaxation the cancelled cleanups
-        # would have ended: report it so their start events are paired
-        pending_handoffs = tuple(self._pending_handoffs)
-        self._pending_handoffs.clear()
-        for timer in tuple(self._scheduled_timers):
+        with self._lock:
+            if not self._scheduled_timers:
+                return
+            timers = tuple(self._scheduled_timers)
+            self._scheduled_timers.clear()
+            # The pool is closing, which ends the relaxation the cancelled
+            # cleanups would have ended: report it so their start events are
+            # paired
+            pending_handoffs = tuple(self._pending_handoffs)
+            self._pending_handoffs.clear()
+        for timer in timers:
             timer.cancel()
-        self._scheduled_timers.clear()
         for notification in pending_handoffs:
             self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
 

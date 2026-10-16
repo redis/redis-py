@@ -2924,16 +2924,37 @@ def test_pool_close_cancels_moving_notification_timers(new_node_host):
 def test_pool_disconnect_does_not_cancel_moving_notification_timers():
     pool = _moving_pool()
     handler = pool._maint_notifications_pool_handler
-    handler.handle_node_moved_notification = MagicMock()
+    moved = threading.Event()
+    handler.handle_node_moved_notification = MagicMock(
+        side_effect=lambda _: moved.set()
+    )
     notification = NodeMovingNotification(
         id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=0.2
     )
 
     handler.handle_notification(notification)
     pool.disconnect()
-    time.sleep(0.4)
 
+    assert moved.wait(timeout=10)
     handler.handle_node_moved_notification.assert_called_once_with(notification)
+
+
+@pytest.mark.fixed_client
+def test_timer_firing_during_close_does_not_run_its_callback():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    callback = MagicMock()
+
+    with handler._lock:
+        handler._schedule(0.01, callback)
+        (timer,) = handler._scheduled_timers
+        # The timer fires and waits for the lock held here.
+        time.sleep(0.2)
+        pool.close()
+    timer.join(timeout=10)
+
+    callback.assert_not_called()
+    assert handler._scheduled_timers == set()
 
 
 @pytest.mark.fixed_client
