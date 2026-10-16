@@ -519,19 +519,24 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Closes the client and all its resources.
         """
-        # Close health check policy BEFORE stopping the scheduler.
-        # The policy's connection pools were created on the shared health check
-        # event loop, so they must be disconnected on that same loop to avoid
-        # leaking sockets/file descriptors.
+        # Close health check policy and health checks BEFORE stopping the
+        # scheduler. Their connection pools were created on the shared health
+        # check event loop, so they must be disconnected on that same loop to
+        # avoid leaking sockets/file descriptors.
         if self._bg_scheduler:
             try:
                 self._bg_scheduler.run_coro_sync(self._health_check_policy.close)
+                self._bg_scheduler.run_coro_sync(self._close_health_checks)
             except Exception:
                 pass
             self._bg_scheduler.stop()
 
         if self.command_executor.active_database:
             self.command_executor.active_database.client.close()
+
+    async def _close_health_checks(self):
+        for health_check in self._health_checks:
+            await health_check.close()
 
 
 def _half_open_circuit(circuit: CircuitBreaker):
