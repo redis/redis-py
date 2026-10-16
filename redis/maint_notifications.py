@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Literal,
@@ -864,6 +865,9 @@ class MaintNotificationsPoolHandler:
         self.pool = pool
         self.config = config
         self._processed_notifications = set()
+        self._scheduled_timers: set[threading.Timer] = set()
+        # The handoffs whose relaxation the scheduled cleanup is still to end
+        self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = threading.RLock()
         self.connection = None
 
@@ -876,6 +880,8 @@ class MaintNotificationsPoolHandler:
         # since each connection can be in a different state
         copy = MaintNotificationsPoolHandler(self.pool, self.config)
         copy._processed_notifications = self._processed_notifications
+        copy._scheduled_timers = self._scheduled_timers
+        copy._pending_handoffs = self._pending_handoffs
         copy._lock = self._lock
         copy.connection = None
         return copy
@@ -952,11 +958,11 @@ class MaintNotificationsPoolHandler:
                         if notification.new_node_host is not None:
                             self.run_proactive_reconnect(moving_address_src)
                         else:
-                            threading.Timer(
+                            self._schedule(
                                 notification.ttl / 2,
                                 self.run_proactive_reconnect,
-                                args=(moving_address_src,),
-                            ).start()
+                                moving_address_src,
+                            )
 
                     # Update config for new connections:
                     # Set state to MOVING
@@ -969,11 +975,13 @@ class MaintNotificationsPoolHandler:
                     if getattr(self.pool, "set_in_maintenance", False):
                         self.pool.set_in_maintenance(False)
 
-                threading.Timer(
+                self._schedule(
                     notification.ttl,
                     self.handle_node_moved_notification,
-                    args=(notification,),
-                ).start()
+                    notification,
+                )
+                if self.config.is_relaxed_timeouts_enabled():
+                    self._pending_handoffs.add(notification)
             except BaseException:
                 # The relaxation reported above was not applied, or has no
                 # cleanup to end it: close its pair
@@ -1007,6 +1015,28 @@ class MaintNotificationsPoolHandler:
                 ),
             )
 
+    def _schedule(self, delay: float, callback: Callable[..., Any], *args: Any) -> None:
+        def run() -> None:
+            self._scheduled_timers.discard(timer)
+            callback(*args)
+
+        timer = threading.Timer(delay, run)
+        self._scheduled_timers.add(timer)
+        timer.start()
+
+    def cancel_scheduled_tasks(self) -> None:
+        if not self._scheduled_timers:
+            return
+        # The pool is closing, which ends the relaxation the cancelled cleanups
+        # would have ended: report it so their start events are paired
+        pending_handoffs = tuple(self._pending_handoffs)
+        self._pending_handoffs.clear()
+        for timer in tuple(self._scheduled_timers):
+            timer.cancel()
+        self._scheduled_timers.clear()
+        for notification in pending_handoffs:
+            self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """
         Run proactive reconnect for the pool.
@@ -1033,6 +1063,7 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
+            self._pending_handoffs.discard(notification)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     f"Reverting temporary changes related to notification: {notification}, "
