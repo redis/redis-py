@@ -184,6 +184,26 @@ async def test_add_elem_with_attr(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+@pytest.mark.parametrize(
+    "attributes, expected",
+    [
+        ({}, None),
+        ("{}", None),
+        ("", None),
+        (None, {"source": "old"}),
+        ({"source": "new"}, {"source": "new"}),
+    ],
+)
+async def test_add_elem_updates_attributes(d_client, attributes, expected):
+    vset = d_client.vset()
+    await vset.vadd("myset", [1, 0], "elem", attributes={"source": "old"})
+
+    await vset.vadd("myset", [0, 1], "elem", attributes=attributes)
+
+    assert await vset.vgetattr("myset", "elem") == expected
+
+
+@skip_if_server_version_lt("7.9.0")
 async def test_add_elem_with_numlinks(d_client):
     elements_count = 100
     vector_dim = 10

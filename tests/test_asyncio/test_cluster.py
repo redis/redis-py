@@ -4820,6 +4820,26 @@ class TestClusterPipeline:
             pipe.evalsha(sha, 1, "{user}a", 3)
             assert await pipe.execute() == [6]
 
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrank_withscore_decode_responses(self, create_redis) -> None:
+        """
+        A cluster pipeline reads decode_responses from its cluster client, so
+        custom-cast ZRANK/ZREVRANK scores come back as str, as on RESP2.
+        """
+        r = await create_redis(cls=RedisCluster, decode_responses=True)
+        identity = lambda x: x  # noqa: E731
+        await r.zadd("a", {"a1": 1, "a2": 2.5})
+        async with r.pipeline() as pipe:
+            pipe.zrank("a", "a2", withscore=True, score_cast_func=identity)
+            pipe.zrevrank("a", "a2", withscore=True, score_cast_func=identity)
+            result = await pipe.execute()
+        assert_resp_response(
+            r,
+            result,
+            [[1, "2.5"], [0, "2.5"]],
+            [[1, 2.5], [0, 2.5]],
+        )
+
     async def test_evalsha_zero_keys_in_pipeline(self, r: RedisCluster) -> None:
         """
         EVALSHA with numkeys=0 must execute in ClusterPipeline without
