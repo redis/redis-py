@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import warnings
 import pytest
 from redis.exceptions import DataError
+import redis.utils as ru
 from redis.utils import (
     check_protocol_version,
     compare_versions,
@@ -135,6 +136,19 @@ class TestDeprecatedArgs:
             assert issubclass(w[0].category, DeprecationWarning)
             assert "old_param" in str(w[0].message)
 
+    def test_positional_deprecated_arg_warns(self):
+        @deprecated_args(args_to_warn=["old_param"])
+        def func_with_args(new_param=None, old_param=None):
+            return (new_param, old_param)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = func_with_args("new_val", "old_val")
+            assert result == ("new_val", "old_val")
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "old_param" in str(w[0].message)
+
     def test_sync_function_no_warning_on_allowed_arg(self):
         @deprecated_args(args_to_warn=["*"], allowed_args=["allowed_param"])
         def func_with_allowed(allowed_param=None):
@@ -144,6 +158,30 @@ class TestDeprecatedArgs:
             warnings.simplefilter("always")
             result = func_with_allowed(allowed_param="value")
             assert result == "value"
+            assert len(w) == 0
+
+    def test_positional_allowed_arg_no_warning(self):
+        @deprecated_args(args_to_warn=["*"], allowed_args=["allowed_param"])
+        def func_with_allowed(allowed_param=None):
+            return allowed_param
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = func_with_allowed("value")
+            assert result == "value"
+            assert len(w) == 0
+
+    def test_method_self_with_wildcard_no_warning(self):
+        class Dummy:
+            @deprecated_args(args_to_warn=["*"])
+            def method(self, bad_param=None):
+                return "ok"
+
+        dummy = Dummy()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = dummy.method()
+            assert result == "ok"
             assert len(w) == 0
 
     def test_wildcard_warns_all_args(self):
@@ -157,6 +195,75 @@ class TestDeprecatedArgs:
             assert result == ("a", "b")
             assert len(w) == 1
             assert "param1" in str(w[0].message) or "param2" in str(w[0].message)
+
+    async def test_async_function_warns_on_deprecated_arg(self):
+        @deprecated_args(args_to_warn=["old_param"])
+        async def async_func(new_param=None, old_param=None):
+            return (new_param, old_param)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = await async_func("new_val", old_param="old_val")
+            assert result == ("new_val", "old_val")
+            assert len(w) == 1
+            assert "old_param" in str(w[0].message)
+
+    async def test_async_function_no_warning_on_normal_call(self):
+        @deprecated_args(args_to_warn=["old_param"])
+        async def async_func(new_param=None, old_param=None):
+            return new_param
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = await async_func("new_val")
+            assert result == "new_val"
+            assert len(w) == 0
+
+    def test_fast_path_bypasses_filterable_args_construction(self, monkeypatch):
+        called = False
+        orig_get = ru._get_filterable_args
+
+        def counting_get(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_get(*args, **kwargs)
+
+        monkeypatch.setattr(ru, "_get_filterable_args", counting_get)
+
+        @deprecated_args(args_to_warn=["batch_size"])
+        def record_metric(cmd, dur, host=None, port=None, batch_size=None):
+            return (cmd, dur)
+
+        assert record_metric("GET", 0.001, "localhost", 6379) == ("GET", 0.001)
+        assert not called, "_get_filterable_args should not be called on clean hot path"
+
+    def test_mutable_args_input_snapshotting(self):
+        # Mutating the list passed to args_to_warn or allowed_args after decorator
+        # definition should not desynchronize the decorator configuration.
+        warn_list = ["old_param"]
+        allowed_list = ["allowed_param"]
+
+        @deprecated_args(args_to_warn=warn_list, allowed_args=allowed_list)
+        def func(allowed_param=None, old_param=None, new_param=None):
+            return (allowed_param, old_param, new_param)
+
+        warn_list.append("new_param")
+        allowed_list.clear()
+
+        # allowed_param remains allowed because allowed_list was snapshotted
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = func(allowed_param="val")
+            assert res == ("val", None, None)
+            assert len(w) == 0
+
+        # old_param still triggers deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            res = func(old_param="val")
+            assert res == (None, "val", None)
+            assert len(w) == 1
+            assert "old_param" in str(w[0].message)
 
 
 # Tests for experimental_method decorator
@@ -192,6 +299,18 @@ class TestExperimentalArgs:
             assert issubclass(w[0].category, UserWarning)
             assert "beta_param" in str(w[0].message)
 
+    def test_positional_experimental_arg_warns(self):
+        @experimental_args(args_to_warn=["beta_param"])
+        def func_with_experimental(stable_param=None, beta_param=None):
+            return (stable_param, beta_param)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = func_with_experimental("stable_val", "beta_val")
+            assert result == ("stable_val", "beta_val")
+            assert len(w) == 1
+            assert "beta_param" in str(w[0].message)
+
     def test_no_warning_when_no_args_provided(self):
         @experimental_args(args_to_warn=["beta_param"])
         def func_no_args():
@@ -202,6 +321,36 @@ class TestExperimentalArgs:
             result = func_no_args()
             assert result == "no_args"
             assert len(w) == 0
+
+    async def test_async_experimental_args(self):
+        @experimental_args(args_to_warn=["beta_param"])
+        async def async_func(stable=None, beta_param=None):
+            return (stable, beta_param)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = await async_func("s", beta_param="b")
+            assert result == ("s", "b")
+            assert len(w) == 1
+            assert "beta_param" in str(w[0].message)
+
+    def test_experimental_fast_path_bypasses_filterable_args(self, monkeypatch):
+        called = False
+        orig_get = ru._get_filterable_args
+
+        def counting_get(*args, **kwargs):
+            nonlocal called
+            called = True
+            return orig_get(*args, **kwargs)
+
+        monkeypatch.setattr(ru, "_get_filterable_args", counting_get)
+
+        @experimental_args(args_to_warn=["beta_param"])
+        def stable_func(a, b, c=1, beta_param=None):
+            return a + b + c
+
+        assert stable_func(1, 2) == 4
+        assert not called, "_get_filterable_args should not be called on clean hot path"
 
 
 @pytest.mark.fixed_client
