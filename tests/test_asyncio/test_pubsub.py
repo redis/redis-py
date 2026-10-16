@@ -1428,6 +1428,88 @@ class TestPubSubHealthCheckResponse:
         await p.aclose()
         await r.aclose()
 
+    async def test_is_health_check_response_decode_false_list_format(
+        self, r: redis.Redis
+    ):
+        """Test is_health_check_response recognizes list format with decode_responses=False"""
+        p = r.pubsub()
+        # List format: [b"pong", b"redis-py-health-check"]
+        assert p.is_health_check_response([b"pong", b"redis-py-health-check"])
+        await p.aclose()
+
+    async def test_is_health_check_response_decode_false_bytes_format(
+        self, r: redis.Redis
+    ):
+        """Test is_health_check_response recognizes bytes format with decode_responses=False"""
+        p = r.pubsub()
+        # Bytes format: b"redis-py-health-check"
+        assert p.is_health_check_response(b"redis-py-health-check")
+        await p.aclose()
+
+    async def test_is_health_check_response_decode_false_rejects_string(
+        self, r: redis.Redis
+    ):
+        """Test is_health_check_response rejects string format with decode_responses=False"""
+        p = r.pubsub()
+        # String format should NOT be recognized when decode_responses=False
+        assert not p.is_health_check_response("redis-py-health-check")
+        await p.aclose()
+
+    async def test_is_health_check_response_decode_false_rejects_invalid(
+        self, r: redis.Redis
+    ):
+        """Test is_health_check_response rejects invalid responses with decode_responses=False"""
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response(b"invalid-response")
+        assert not p.is_health_check_response([b"pong", b"invalid-response"])
+        assert not p.is_health_check_response(None)
+        await p.aclose()
+
+    async def test_is_health_check_response_decode_true_list_format(self, create_redis):
+        """Test is_health_check_response recognizes list format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # List format: ["pong", "redis-py-health-check"]
+        assert p.is_health_check_response(["pong", "redis-py-health-check"])
+        await p.aclose()
+        await r.aclose()
+
+    async def test_is_health_check_response_decode_true_string_format(
+        self, create_redis
+    ):
+        """Test is_health_check_response recognizes string format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # String format: "redis-py-health-check"
+        assert p.is_health_check_response("redis-py-health-check")
+        await p.aclose()
+        await r.aclose()
+
+    async def test_is_health_check_response_decode_true_rejects_bytes(
+        self, create_redis
+    ):
+        """Test is_health_check_response rejects bytes format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # Bytes format should NOT be recognized when decode_responses=True
+        assert not p.is_health_check_response(b"redis-py-health-check")
+        await p.aclose()
+        await r.aclose()
+
+    async def test_is_health_check_response_decode_true_rejects_invalid(
+        self, create_redis
+    ):
+        """Test is_health_check_response rejects invalid responses with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response("invalid-response")
+        assert not p.is_health_check_response(["pong", "invalid-response"])
+        assert not p.is_health_check_response(None)
+        await p.aclose()
+        await r.aclose()
+
 
 @pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:

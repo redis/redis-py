@@ -1487,10 +1487,18 @@ class PubSub:
             push_request=True,
         )
 
-        if conn.health_check_interval and response in self.health_check_response:
+        if conn.health_check_interval and self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
             return None
         return response
+
+    def is_health_check_response(self, response) -> bool:
+        """
+        Check if the response is a health check response.
+        If there are no subscriptions redis responds to PING command with a
+        bulk response, instead of a multi-bulk with "pong" and the response.
+        """
+        return response in self.health_check_response
 
     async def check_health(self):
         conn = self.connection
