@@ -1,9 +1,12 @@
 import asyncio
 import binascii
 import datetime
+import gc
 import logging
+import platform
 import ssl
 import warnings
+import weakref
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from unittest import mock
 from urllib.parse import urlparse
@@ -3751,6 +3754,173 @@ class TestNodesManager:
             node is first_shuffled_node and args == ("CLUSTER SLOTS",)
             for node, args in executed_nodes
         )
+
+    @pytest.mark.fixed_client
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
+    async def test_initialize_breaks_reference_cycle_when_a_later_startup_node_answers(
+        self,
+    ) -> None:
+        """
+        When a startup node fails but a later one answers, initialize() must
+        not return while still holding the caught exception: its traceback
+        refers to the initialize() frame, so the pair would stay alive, with
+        the slots built by that call, until the cyclic GC runs.
+        """
+        # Raise from the mocked command so the test itself never holds a
+        # strong reference; the weakref is the only handle on the failure.
+        raised_ref = []
+
+        async def mocked_execute_command(self, *args, **kwargs):
+            if self.port == 7000:
+                err = ConnectionError("Connection refused")
+                raised_ref.append(weakref.ref(err))
+                try:
+                    raise err
+                finally:
+                    # Clear this frame's local too, or the traceback keeps the
+                    # exception alive here and the assertion measures the test
+                    # rather than initialize().
+                    err = None
+            return default_cluster_slots
+
+        nodes_manager = NodesManager(
+            [ClusterNode("127.0.0.1", 7000), ClusterNode("127.0.0.1", 7001)],
+            False,
+            {},
+        )
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                # Keep the startup order: the failing node is tried first.
+                mock.patch("redis.asyncio.cluster.random.shuffle"),
+                mock.patch.object(
+                    ClusterNode,
+                    "execute_command",
+                    autospec=True,
+                    side_effect=mocked_execute_command,
+                ),
+            ):
+                await nodes_manager.initialize()
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Immediate reclamation is a refcounting property",
+    )
+    async def test_initialize_breaks_reference_cycle_when_a_later_startup_node_fails_after_a_partial_answer(
+        self,
+    ) -> None:
+        """
+        When a startup node answers with a partial slot map and a later one
+        fails, initialize() must not store the later error: nothing raises it
+        once a node has answered, and its traceback refers to the
+        initialize() frame, so the pair would stay alive, with the slots
+        built by that call, until the cyclic GC runs.
+        """
+        # Raise from the mocked command so the test itself never holds a
+        # strong reference; the weakref is the only handle on the failure.
+        raised_ref = []
+
+        async def mocked_execute_command(self, *args, **kwargs):
+            if self.port == 7001:
+                err = ConnectionError("Connection refused")
+                raised_ref.append(weakref.ref(err))
+                try:
+                    raise err
+                finally:
+                    # Clear this frame's local too, or the traceback keeps the
+                    # exception alive here and the assertion measures the test
+                    # rather than initialize().
+                    err = None
+            return default_cluster_slots[:1]
+
+        nodes_manager = NodesManager(
+            [ClusterNode("127.0.0.1", 7000), ClusterNode("127.0.0.1", 7001)],
+            False,
+            {},
+        )
+
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            with (
+                # Keep the startup order: the partial node is tried first, so
+                # the slots are not fully covered and the failing node is
+                # tried next.
+                mock.patch("redis.asyncio.cluster.random.shuffle"),
+                mock.patch.object(
+                    ClusterNode,
+                    "execute_command",
+                    autospec=True,
+                    side_effect=mocked_execute_command,
+                ),
+            ):
+                await nodes_manager.initialize()
+            (ref,) = raised_ref
+            assert ref() is None
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error_type, raised_type",
+        [
+            (ConnectionError, RedisClusterUnreachableError),
+            (AuthenticationError, RedisClusterException),
+        ],
+    )
+    async def test_initialize_clears_exception_local_when_no_startup_node_answers(
+        self, error_type: Type[Exception], raised_type: Type[Exception]
+    ) -> None:
+        """
+        When no startup node answers, initialize() raises the last error from
+        the local that holds it. The raised error's traceback refers to the
+        initialize() frame, so the frame must not keep that local after the
+        raise: the pair would stay alive until the cyclic GC runs, on every
+        failed refresh.
+        """
+
+        async def mocked_execute_command(self, *args, **kwargs):
+            raise error_type("mock failure")
+
+        nodes_manager = NodesManager(
+            [ClusterNode("127.0.0.1", 7000), ClusterNode("127.0.0.1", 7001)],
+            False,
+            {},
+        )
+
+        with mock.patch.object(
+            ClusterNode,
+            "execute_command",
+            autospec=True,
+            side_effect=mocked_execute_command,
+        ):
+            with pytest.raises(RedisClusterException) as exc_info:
+                await nodes_manager.initialize()
+        assert type(exc_info.value) is raised_type
+
+        # Locate the initialize frame in the propagated traceback and confirm
+        # its exception local was cleared, proving no exception<->frame cycle
+        # survives.
+        initialize_frame = None
+        tb = exc_info.value.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "initialize":
+                initialize_frame = tb.tb_frame
+            tb = tb.tb_next
+        assert initialize_frame is not None
+        assert initialize_frame.f_locals.get("exception") is None
 
     @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
