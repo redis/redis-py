@@ -31,6 +31,9 @@ from redis.cluster import (
     NodesManager,
     RedisCluster,
     get_node_name,
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
 )
 from redis.cache import CacheConfig
 from redis.commands.cluster import ClusterMultiKeyCommands
@@ -1424,6 +1427,19 @@ class TestClusterRedisCommands:
             for node in x[key]:
                 for attribute in node.keys():
                     assert attribute in attributes
+            slots = x["slots"] if "slots" in x else x[b"slots"]
+            if expects_resp2_shape(r) or expects_unified_shape(r):
+                assert all(
+                    isinstance(slot, tuple)
+                    and len(slot) == 2
+                    and all(isinstance(bound, int) for bound in slot)
+                    for slot in slots
+                )
+            else:
+                # protocol=3 with legacy_responses=True keeps the previous RESP3
+                # shape: the server's flat [start, end, ...] integer array.
+                assert len(slots) % 2 == 0
+                assert all(isinstance(bound, int) for bound in slots)
 
     @skip_if_server_version_lt("7.2.0")
     @skip_if_redis_enterprise()
@@ -6190,12 +6206,6 @@ def test_cluster_shards_slots_shape_is_protocol_agnostic():
     arrived as RESP2 (flat shard arrays) or RESP3 (shard maps). The slots value is
     a flat ``[start, end, ...]`` integer array on both protocols; only the outer
     shard container changes, so both parse paths must pair it identically."""
-    from redis.cluster import (
-        parse_cluster_shards,
-        parse_cluster_shards_unified,
-        parse_cluster_shards_with_str_keys,
-    )
-
     resp2 = [
         [
             b"slots",

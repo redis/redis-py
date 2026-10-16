@@ -189,10 +189,7 @@ def _pair_cluster_slots(slots):
 
     CLUSTER SHARDS returns each shard's slots as a flat integer array in both
     RESP2 and RESP3; only the outer shard container differs between protocols.
-    If a response ever nests the pairs as sublists, normalize those to tuples.
     """
-    if slots and isinstance(slots[0], (list, tuple)):
-        return [tuple(s) for s in slots]
     return [(slots[i], slots[i + 1]) for i in range(0, len(slots), 2)]
 
 
