@@ -1,5 +1,6 @@
 import socket
 import threading
+import time
 from typing import List, Union
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
     MaintenanceCompletedEvent,
+    MaintenanceStartedEvent,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
@@ -2887,3 +2889,102 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
             expected_current_peername="any",
         )
         # TODO validate free connections
+
+
+def _moving_pool(**config_kwargs):
+    config_kwargs.setdefault("enabled", True)
+    config_kwargs.setdefault("proactive_reconnect", True)
+    config_kwargs.setdefault("relaxed_timeout", 10)
+    return ConnectionPool(
+        protocol=3, maint_notifications_config=MaintNotificationsConfig(**config_kwargs)
+    )
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_close_cancels_moving_notification_timers(new_node_host):
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_node_moved_notification = MagicMock()
+    handler.run_proactive_reconnect = MagicMock()
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    time.sleep(0.4)
+
+    handler.handle_node_moved_notification.assert_not_called()
+    if new_node_host is None:
+        handler.run_proactive_reconnect.assert_not_called()
+
+
+@pytest.mark.fixed_client
+def test_pool_disconnect_does_not_cancel_moving_notification_timers():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    moved = threading.Event()
+    handler.handle_node_moved_notification = MagicMock(
+        side_effect=lambda _: moved.set()
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.disconnect()
+
+    assert moved.wait(timeout=10)
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+
+
+@pytest.mark.fixed_client
+def test_timer_firing_during_close_does_not_run_its_callback():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    callback = MagicMock()
+
+    with handler._lock:
+        handler._schedule(0.01, callback)
+        (timer,) = handler._scheduled_timers
+        # The timer fires and waits for the lock held here.
+        time.sleep(0.2)
+        pool.close()
+    timer.join(timeout=10)
+
+    callback.assert_not_called()
+    assert handler._scheduled_timers == set()
+
+
+@pytest.mark.fixed_client
+def test_pool_close_completes_pending_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=1
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent]
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    assert events[1].notification is notification
+    assert events[1].connection_pool is pool
