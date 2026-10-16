@@ -559,8 +559,13 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
             event.credential_provider.on_error(self._raise_on_error)
 
     async def _re_auth(self, token: TokenInterface):
-        for key in self._event.nodes:
-            await self._event.nodes[key].re_auth_callback(token)
+        nodes = self._event.nodes
+        # Iterate a snapshot: a topology refresh can add and remove nodes while
+        # a node is being re-authenticated. A node removed in the meantime is
+        # skipped, its connections are being closed.
+        for key, node in tuple(nodes.items()):
+            if nodes.get(key) is node:
+                await node.re_auth_callback(token)
 
     async def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)

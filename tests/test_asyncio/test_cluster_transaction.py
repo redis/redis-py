@@ -310,6 +310,7 @@ class TestClusterTransaction:
                     "Slot rebalancing occurred while watching keys"
                 )
 
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     async def test_retry_transaction_on_connection_error(self, r):
         key = "book"
@@ -343,6 +344,7 @@ class TestClusterTransaction:
                 node_importing._free.remove(mock_connection)
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     async def test_retry_transaction_on_connection_error_with_watched_keys(self, r):
         key = "book"
