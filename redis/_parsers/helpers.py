@@ -1665,6 +1665,55 @@ def parse_function_list_resp3_to_resp2_legacy(response, **options):
     return result
 
 
+def parse_function_stats_unified(response, **options):
+    """FUNCTION STATS → unified nested ``dict`` with bytes keys.
+
+    Accepts either RESP2 wire (a flat ``[k, v, k, v, …]`` list whose
+    ``running_script`` value is a flat list or ``None`` and whose
+    ``engines`` value pairs each engine name with a flat list of its
+    stats) or RESP3 wire (nested maps). Both are normalised to nested
+    dicts.
+    """
+    if response is None or isinstance(response, dict):
+        return response
+    stats = {}
+    for key, value in pairs_to_dict(response).items():
+        if isinstance(value, list):
+            if str_if_bytes(key) == "running_script":
+                value = pairs_to_dict(value)
+            elif str_if_bytes(key) == "engines":
+                value = {
+                    engine: pairs_to_dict(engine_stats)
+                    for engine, engine_stats in pairs_to_dict(value).items()
+                }
+        stats[key] = value
+    return stats
+
+
+def parse_function_stats_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire FUNCTION STATS → today's RESP2 flat ``list`` shape.
+
+    The reply, the running script and the stats of each engine each arrive
+    as a ``dict``; flatten them back to interleaved ``[k, v, k, v, …]``
+    lists so the Python shape matches what RESP2 wire produces natively.
+    """
+    if not isinstance(response, dict):
+        return response
+    flat = []
+    for key, value in response.items():
+        if isinstance(value, dict):
+            if str_if_bytes(key) == "engines":
+                value = {
+                    engine: [item for kv in engine_stats.items() for item in kv]
+                    if isinstance(engine_stats, dict)
+                    else engine_stats
+                    for engine, engine_stats in value.items()
+                }
+            value = [item for kv in value.items() for item in kv]
+        flat.extend([key, value])
+    return flat
+
+
 def parse_cluster_links_unified(response, **options):
     """CLUSTER LINKS → unified ``list[dict]`` with string keys.
 
