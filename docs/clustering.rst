@@ -92,6 +92,53 @@ The ‘target_nodes’ parameter is explained in the following section,
    >>> # target-node: default-node
    >>> rc.ping()
 
+.. _cluster-retries-label:
+
+Retries and Topology Refresh
+----------------------------
+
+When a command fails with a connection error, a timeout, ``CLUSTERDOWN`` or a
+slot that is not covered, the cluster client retries it as many times as the
+``retry`` object allows, waiting before each attempt as long as its backoff
+says (``ExponentialWithJitterBackoff`` by default). A command that failed with
+``CLUSTERDOWN`` or a slot that is not covered first waits a fixed 0.25 seconds,
+to give the cluster time to recover, and then the backoff delay as well.
+Pipelines retry the same way.
+
+The error also asks for a refresh of the cluster topology (``CLUSTER
+SLOTS``), which runs before the next attempt. Refreshes triggered by errors,
+including the one every ``reinitialize_steps`` MOVED errors, run at most once
+per second per client; requests in between are collapsed into one refresh,
+run by the next command once the second has passed. After refreshes that
+failed in a row (no node reachable, or no usable topology), the next one
+waits as long as the ``retry`` backoff gives for that many failures, but at
+least one second.
+Refreshes pushed by the server during maintenance (``SMIGRATED``) and the first
+connect are not limited.
+
+A refresh keeps the connections of every node that stays in the cluster,
+whatever its role; only the connections of nodes that left are closed.
+
+Some connection errors are not node failures, so they are raised at once,
+without a retry and without a refresh:
+
+- ``MaxConnectionsError``: the client's own pool for the node is full.
+- ``MaxClientsReachedError``: the server refused the connection because it
+  reached its ``maxclients`` limit.
+- ``AuthenticationError``: the credentials were rejected or have expired.
+
+.. code:: python
+
+   >>> from redis.backoff import ExponentialWithJitterBackoff
+   >>> from redis.cluster import RedisCluster
+   >>> from redis.retry import Retry
+   >>> # 3 retries, waiting a random 0-20 ms, 0-40 ms, 0-80 ms ... (at most 1 s)
+   >>> rc = RedisCluster(
+   ...     host="localhost",
+   ...     port=16379,
+   ...     retry=Retry(ExponentialWithJitterBackoff(base=0.01, cap=1), 3),
+   ... )
+
 Specifying Target Nodes
 -----------------------
 

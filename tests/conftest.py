@@ -511,6 +511,29 @@ def cluster_teardown(client, flushdb):
 
 
 @pytest.fixture()
+def no_topology_refresh_interval():
+    """
+    Let every error-triggered cluster topology refresh run at once, for tests
+    of the refresh logic itself rather than of its minimum interval.
+    """
+    with mock.patch("redis.cluster._TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS", 0):
+        yield
+
+
+@pytest.fixture()
+def no_cluster_retry_delay():
+    """
+    Skip the backoff sleep between cluster retries, for tests that count
+    retries rather than time them.
+    """
+    with (
+        mock.patch("redis.cluster._retry_backoff_delay", return_value=0),
+        mock.patch("redis.asyncio.cluster._retry_backoff_delay", return_value=0),
+    ):
+        yield
+
+
+@pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
         yield client
