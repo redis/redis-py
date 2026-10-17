@@ -682,7 +682,7 @@ class PubSub:
             "ssubscribe", *args, **kwargs
         )
 
-    async def sunsubscribe(self, *args: ChannelT):
+    async def sunsubscribe(self, *args):
         """
         Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
         all shard_channels
