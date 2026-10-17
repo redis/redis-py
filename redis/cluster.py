@@ -2194,9 +2194,8 @@ class RedisCluster(
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 self.reinitialize_counter += 1
-                if self._should_reinitialized() and self.nodes_manager._refresh_due(
-                    self.retry
-                ):
+                should_reinitialize = self._should_reinitialized()
+                if should_reinitialize and self.nodes_manager._refresh_due(self.retry):
                     # the refresh releases the connections of the nodes that left the
                     # topology; the remaining nodes keep theirs, whatever their role
                     self.nodes_manager.initialize(
@@ -2208,6 +2207,13 @@ class RedisCluster(
                     # Below the threshold, or a refresh ran less than the
                     # minimum interval ago: patch just this slot
                     self.nodes_manager.move_slot(e)
+                    if should_reinitialize:
+                        # The threshold was reached but the refresh is not due:
+                        # ask for it, run before a later command once due,
+                        # instead of dropping it
+                        self.nodes_manager._request_refresh(
+                            additional_startup_nodes_info=[(e.host, e.port)]
+                        )
                 moved = True
                 self._record_command_metric(
                     command_name=command,
@@ -3030,9 +3036,9 @@ class NodesManager:
     @contextmanager
     def _releasing_queried_clients(self, disconnect_startup_nodes_pools: bool):
         """
-        Collect the clients that answer CLUSTER SLOTS during a refresh, and
-        release the ones that serve no node of the topology once the refresh
-        ends, whether it succeeded or raised.
+        Collect the clients queried for CLUSTER SLOTS during a refresh, whether
+        they answered or not, and release the ones that serve no node of the
+        topology once the refresh ends, whether it succeeded or raised.
 
         Yields the two lists to fill: (node name, client) of the startup nodes,
         and the clients built for the additional startup nodes, which exist
@@ -3302,6 +3308,12 @@ class NodesManager:
                             self.startup_nodes[startup_node.name].redis_connection = r
                         else:
                             startup_node.redis_connection = r
+                    # Collected before the query, so a client is released also
+                    # when its CLUSTER SLOTS raises
+                    if startup_node.name in self.startup_nodes:
+                        queried_startup_nodes.append((startup_node.name, r))
+                    else:
+                        queried_additional_clients.append(r)
                     try:
                         if is_debug_log_enabled():
                             logger.debug(
@@ -3310,10 +3322,6 @@ class NodesManager:
                             )
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                        if startup_node.name in self.startup_nodes:
-                            queried_startup_nodes.append((startup_node.name, r))
-                        else:
-                            queried_additional_clients.append(r)
                     except ResponseError:
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"
