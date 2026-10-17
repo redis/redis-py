@@ -1726,6 +1726,9 @@ class RedisCluster(
                     await self._refresh_topology(
                         additional_startup_nodes_info=[(e.host, e.port)]
                     )
+                    # This refresh also answers a pending request, as in
+                    # initialize(), so the next command does not repeat it
+                    self._initialize = False
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:

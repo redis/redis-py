@@ -700,6 +700,42 @@ class TestTopologyRefreshPacing:
             assert r._initialize
 
     @pytest.mark.fixed_client
+    async def test_moved_threshold_refresh_answers_a_pending_request(self) -> None:
+        """
+        A request still pending when the command started (not due yet) is
+        answered by the MOVED-threshold refresh that runs once due, so the next
+        command does not run another CLUSTER SLOTS.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, reinitialize_steps=1
+        )
+        slot = r.keyslot("foo")
+        owner = r.get_node_from_key("foo")
+        execute_command, _ = TestTopologyRefreshKeepsConnections._command_side_effect(
+            [MovedError(f"{slot} {owner.host}:{owner.port}")]
+        )
+        r._initialize = True
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            # Not due when the command starts, due by the time MOVED arrives
+            mock.patch.object(
+                NodesManager, "_refresh_due", side_effect=[False, True, False]
+            ),
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+        ):
+            assert await r.get("foo") == b"value"
+
+        refresh.assert_awaited_once()
+        assert r._initialize is False
+
+    @pytest.mark.fixed_client
     async def test_pipeline_retries_wait_as_long_as_the_retry_backoff_says(
         self,
     ) -> None:
