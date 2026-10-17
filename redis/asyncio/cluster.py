@@ -1715,11 +1715,11 @@ class RedisCluster(
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 self.reinitialize_counter += 1
-                if (
+                should_reinitialize = bool(
                     self.reinitialize_steps
                     and self.reinitialize_counter % self.reinitialize_steps == 0
-                    and self.nodes_manager._refresh_due(self.retry)
-                ):
+                )
+                if should_reinitialize and self.nodes_manager._refresh_due(self.retry):
                     # Refresh the topology in place: the nodes that stay keep
                     # their connections, whatever their role, and the refresh
                     # releases the connections of the nodes that left
@@ -1732,6 +1732,11 @@ class RedisCluster(
                     # Below the threshold, or a refresh ran less than the
                     # minimum interval ago: patch just this slot
                     await self.nodes_manager.move_slot(e)
+                    if should_reinitialize:
+                        # The threshold was reached but the refresh is not due:
+                        # ask for it, run by a later command once due, instead
+                        # of dropping it
+                        self._initialize = True
                 moved = True
                 await self._record_command_metric(
                     command_name=command,
@@ -4767,10 +4772,13 @@ class ClusterPubSub(PubSub):
         read path itself has to ask, or the shard channels pinned to that node
         stay there for the lifetime of the pubsub.
 
-        ``NodesManager.initialize`` serializes concurrent callers, drops nodes
-        that have left the topology and dispatches
+        The refresh is asked for on the cluster client like every other
+        error-triggered one, and ``RedisCluster.initialize`` runs it once due:
+        it serializes concurrent callers, keeps the request when the refresh
+        fails, and clears it when it succeeds. ``NodesManager.initialize`` drops
+        nodes that have left the topology and dispatches
         ``AsyncAfterSlotsCacheRefreshEvent``, which reaches
-        ``on_slots_changed``; run it as a task so a bounded poll does not pay
+        ``on_slots_changed``. Run it as a task so a bounded poll does not pay
         for a ``CLUSTER SLOTS`` round trip, and throttle it because a node that
         is down fails every poll.
         """
@@ -4788,13 +4796,16 @@ class ClusterPubSub(PubSub):
         # counterpart has the same property for free: ``reset()`` retires the
         # reconciliation executor with ``cancel_futures=True``, which drops
         # queued work but lets a running ``initialize`` finish.
+        # Ask for the refresh on the cluster client: a refresh that fails
+        # leaves the request for the next command or repair, as on sync, and
+        # one that succeeds answers it, so no command repeats it
+        self.cluster._initialize = True
         if not self.cluster.nodes_manager._refresh_due(self.cluster.retry):
             # Subject to _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS like every other
-            # error-triggered refresh: ask for it, and the next command, or the
-            # next repair, runs it once it is due
-            self.cluster._initialize = True
+            # error-triggered refresh: the next command, or the next repair,
+            # runs it once it is due
             return
-        task = asyncio.create_task(self.cluster.nodes_manager.initialize())
+        task = asyncio.create_task(self.cluster.initialize())
         self._topology_repair_tasks.add(task)
         task.add_done_callback(self._topology_repair_tasks.discard)
         task.add_done_callback(self._log_reconcile_task_exception)

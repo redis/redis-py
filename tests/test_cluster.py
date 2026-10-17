@@ -3954,7 +3954,8 @@ class TestTopologyRefreshPacing:
     def test_moved_threshold_refreshes_only_when_due(self, due):
         """
         At the reinitialize_steps MOVED threshold the topology is refreshed when
-        due; inside the minimum interval the MOVED slot is patched instead.
+        due; inside the minimum interval the MOVED slot is patched instead and
+        the refresh is asked for, so a later command runs it once due.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -3982,9 +3983,14 @@ class TestTopologyRefreshPacing:
         if due:
             init.assert_called_once()
             move_slot.assert_not_called()
+            assert not rc.nodes_manager._refresh_requested
         else:
             init.assert_not_called()
             move_slot.assert_called_once()
+            assert rc.nodes_manager._refresh_requested
+            assert rc.nodes_manager._requested_additional_startup_nodes == [
+                (owner.host, owner.port)
+            ]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
@@ -4747,6 +4753,35 @@ class TestNodesManager:
                         additional_startup_nodes_info=[("127.0.0.1", 7009)],
                         disconnect_startup_nodes_pools=disconnect_startup_nodes_pools,
                     )
+
+            freed = self._freed_pools(update_mock, disconnect_mock)
+            assert len(freed) == 1
+            assert not freed & current_pools
+            assert self._current_pools(nm) == current_pools
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_refresh_frees_client_of_additional_node_whose_query_raised(self):
+        """
+        The client built for an additional startup node is freed also when its
+        CLUSTER SLOTS raises, not only when it answers.
+        """
+        partial = [[0, 8191, ["127.0.0.1", 7000]]]
+        patcher, nm = self._refresh_with_cluster_slots([partial])
+        try:
+            current_pools = self._current_pools(nm)
+
+            def execute_command(self, *args, **kwargs):
+                if self.connection_pool.connection_kwargs["port"] == 7009:
+                    raise ConnectionError("down")
+                return partial
+
+            # The patcher's mock of Redis.execute_command
+            Redis.execute_command.side_effect = execute_command
+            update_patch, disconnect_patch = self._patch_pool_release()
+            with update_patch as update_mock, disconnect_patch as disconnect_mock:
+                nm.initialize(additional_startup_nodes_info=[("127.0.0.1", 7009)])
 
             freed = self._freed_pools(update_mock, disconnect_mock)
             assert len(freed) == 1

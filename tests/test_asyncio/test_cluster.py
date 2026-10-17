@@ -695,9 +695,12 @@ class TestTopologyRefreshPacing:
         if due:
             refresh.assert_awaited_once()
             move_slot.assert_not_called()
+            assert not r._initialize
         else:
             refresh.assert_not_called()
             move_slot.assert_awaited_once()
+            # The refresh is asked for, so a later command runs it once due
+            assert r._initialize
 
     @pytest.mark.fixed_client
     async def test_pipeline_retries_wait_as_long_as_the_retry_backoff_says(
@@ -841,6 +844,31 @@ class TestTopologyRefreshPacing:
             init.assert_not_called()
             # Asked for, so the next command runs it once due
             assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    async def test_failed_pubsub_topology_repair_keeps_the_request(self) -> None:
+        """
+        A due repair whose refresh fails leaves the request on the client, so
+        the next command (or repair) runs it once the backoff allows, as on
+        sync.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r.nodes_manager._last_refresh_at = None
+        pubsub = r.pubsub()
+        pubsub.shard_channels = {b"channel": None}
+        with mock.patch.object(
+            NodesManager,
+            "initialize",
+            autospec=True,
+            side_effect=RedisClusterUnreachableError("down"),
+        ) as init:
+            pubsub._schedule_topology_repair()
+            await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
+
+        init.assert_awaited_once()
+        assert r._initialize is True
+        # The live topology is kept
+        assert r.nodes_manager.default_node is not None
 
 
 @pytest.mark.usefixtures("no_topology_refresh_interval")
