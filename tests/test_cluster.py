@@ -3998,8 +3998,9 @@ class TestTopologyRefreshPacing:
     def test_transaction_threshold_refreshes_or_asks_for_one(self, due, redirect):
         """
         At the reinitialize_steps threshold a transaction refreshes the topology
-        when due. Inside the minimum interval a MOVED slot is patched, and any
-        other error asks for a refresh instead of dropping it.
+        when due. Inside the minimum interval a MOVED slot is patched, and the
+        refresh is asked for, after a MOVED or any other error, instead of
+        being dropped.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -4027,7 +4028,7 @@ class TestTopologyRefreshPacing:
         else:
             init.assert_not_called()
             assert move_slot.called is redirect
-            assert nm._refresh_requested is not redirect
+            assert nm._refresh_requested is True
 
     @pytest.mark.fixed_client
     def test_pipeline_retries_wait_as_long_as_the_retry_backoff_says(self):

@@ -3872,9 +3872,9 @@ class TransactionStrategy(AbstractStrategy):
                 # MovedError is an AskError, so a MOVED slot is patched too
                 if isinstance(error, AskError):
                     await self._pipe.cluster_client.nodes_manager.move_slot(error)
-                elif should_reinitialize:
-                    # A refresh ran less than the minimum interval ago and there
-                    # is no slot to patch: ask for one, run by the next command
+                if should_reinitialize:
+                    # The threshold was reached but a refresh ran less than the
+                    # minimum interval ago: ask for one, run by the next command
                     # once due, instead of dropping it
                     self._pipe.cluster_client._initialize = True
 
