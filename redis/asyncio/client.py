@@ -1794,6 +1794,11 @@ class PubSub:
         for pattern, handler in self.patterns.items():
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
+        for s_channel, handler in self.shard_channels.items():
+            if handler is None:
+                raise PubSubError(
+                    f"Shard Channel: '{s_channel}' has no handler registered"
+                )
 
         await self.connect()
         while True:
