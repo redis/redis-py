@@ -51,6 +51,21 @@ ClusterNode
 .. autoclass:: redis.cluster.ClusterNode
     :members:
 
+Topology Providers
+==================
+
+Selects the command used to discover which nodes own which slots. See
+`Topology Discovery <clustering.html#topology-discovery>`__.
+
+.. autoclass:: redis.cluster_topology.ClusterTopologyProvider
+    :members:
+
+.. autoclass:: redis.cluster_topology.ClusterSlotsTopologyProvider
+    :members:
+
+.. autoclass:: redis.cluster_topology.ClusterShardsTopologyProvider
+    :members:
+
 
 Async Client
 ************
@@ -83,6 +98,17 @@ ClusterPipeline (Async)
 .. autoclass:: redis.asyncio.cluster.ClusterPipeline
     :members: execute_command, execute
     :member-order: bysource
+
+Topology Providers (Async)
+==========================
+.. autoclass:: redis.cluster_topology.AsyncClusterTopologyProvider
+    :members:
+
+.. autoclass:: redis.cluster_topology.AsyncClusterSlotsTopologyProvider
+    :members:
+
+.. autoclass:: redis.cluster_topology.AsyncClusterShardsTopologyProvider
+    :members:
 
 
 Connection
