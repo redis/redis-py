@@ -5,6 +5,7 @@ import pytest
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
+from redis.exceptions import ConnectionError, ResponseError
 
 pytestmark = pytest.mark.asyncio
 
@@ -60,5 +61,66 @@ async def test_read_response_disconnects_on_base_exception(connect_args):
             with pytest.raises(KeyboardInterrupt):
                 await conn.read_response()
         assert conn._reader is None
+    finally:
+        await conn.disconnect()
+
+
+DEMOTION_ERROR = (
+    "UNBLOCKED force unblock from blocking operation, "
+    "instance state changed (master -> replica?)"
+)
+
+
+async def _demoted_master_connection(connect_args):
+    connection_pool = mock.AsyncMock()
+    connection_pool.get_master_address = mock.AsyncMock(
+        return_value=(connect_args["host"], connect_args["port"])
+    )
+    connection_pool.is_master = True
+    connection_pool.check_connection = False
+    conn = SentinelManagedConnection(connection_pool=connection_pool)
+    await conn.connect()
+    return conn
+
+
+@pytest.mark.fixed_client
+async def test_unblocked_by_demotion_is_a_connection_error(connect_args):
+    """
+    Mirror of the sync test: a master demoted to a replica unblocks blocked
+    clients with UNBLOCKED and closes the connection, which means the same as
+    READONLY for a master connection.
+    """
+    conn = await _demoted_master_connection(connect_args)
+    try:
+        await conn.send_command("PING")
+        with mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=ResponseError(DEMOTION_ERROR),
+        ):
+            with pytest.raises(ConnectionError) as e:
+                await conn.read_response()
+        assert str(e.value) == "The previous master is now a slave"
+        assert not conn.is_connected
+    finally:
+        await conn.disconnect()
+
+
+@pytest.mark.fixed_client
+async def test_unblocked_by_demotion_on_a_replica_connection_is_raised(
+    connect_args,
+):
+    conn = await _demoted_master_connection(connect_args)
+    conn.connection_pool.is_master = False
+    try:
+        await conn.send_command("PING")
+        with mock.patch.object(
+            conn,
+            "_read_response_from_parser",
+            side_effect=ResponseError(DEMOTION_ERROR),
+        ):
+            with pytest.raises(ResponseError) as e:
+                await conn.read_response()
+        assert not isinstance(e.value, ConnectionError)
     finally:
         await conn.disconnect()
