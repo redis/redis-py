@@ -2957,6 +2957,34 @@ def test_pool_reused_after_close_mid_moving_has_reverted_kwargs(new_node_host):
 
 
 @pytest.mark.fixed_client
+def test_moving_redelivered_after_close_is_applied_again():
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    assert pool.connection_kwargs["host"] == "localhost"
+
+    # The server redelivers the still-active MOVING to the reused pool
+    handler.handle_notification(notification)
+
+    assert pool.connection_kwargs["host"] == "1.2.3.4"
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    assert handler._pending_handoffs == {notification}
+    pool.close()
+
+
+@pytest.mark.fixed_client
 def test_pool_disconnect_does_not_cancel_moving_notification_timers():
     pool = _moving_pool()
     handler = pool._maint_notifications_pool_handler

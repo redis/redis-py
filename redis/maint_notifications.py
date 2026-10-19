@@ -1044,9 +1044,11 @@ class MaintNotificationsPoolHandler:
                 timer.cancel()
             # The pool can be reused after close(): run the cancelled MOVING
             # cleanups now so the temporary host and relaxed timeouts do not
-            # stay in its connection kwargs.
+            # stay in its connection kwargs, and forget the handoffs so the
+            # server can redeliver a still-active MOVING to the reused pool.
             for notification in pending_handoffs:
                 self.handle_node_moved_notification(notification)
+                self._processed_notifications.discard(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """

@@ -1754,6 +1754,88 @@ async def test_pool_reused_after_aclose_mid_moving_has_reverted_kwargs(new_node_
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+async def test_moving_redelivered_after_aclose_is_applied_again():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+        await pool.aclose()
+        assert pool.connection_kwargs["host"] == DEFAULT_HOST
+
+        # The server redelivers the still-active MOVING to the reused pool
+        await handler.handle_notification(notification)
+
+    assert pool.connection_kwargs["host"] == MOVED_HOST
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    assert handler._pending_handoffs == {notification}
+    await pool.aclose()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+async def test_pool_aclose_waits_for_moving_being_handled():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+    applying = asyncio.Event()
+    release = asyncio.Event()
+    apply_moving_notification = pool.apply_moving_notification
+
+    async def blocked_apply(**kwargs):
+        applying.set()
+        await release.wait()
+        await apply_moving_notification(**kwargs)
+
+    with (
+        mock.patch(
+            "redis.asyncio.maint_notifications.record_connection_handoff",
+            new=AsyncMock(),
+        ),
+        mock.patch.object(pool, "apply_moving_notification", new=blocked_apply),
+    ):
+        handling = asyncio.create_task(
+            handler.handle_node_moving_notification(notification)
+        )
+        await applying.wait()
+        closing = asyncio.create_task(pool.aclose())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(handling, closing), timeout=5)
+
+    # aclose() waited for the handler and ran the cleanup it scheduled
+    assert handler._scheduled_tasks == set()
+    assert handler._pending_handoffs == set()
+    assert pool.connection_kwargs["host"] == DEFAULT_HOST
+    assert pool.connection_kwargs["socket_timeout"] == 3
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
     pool = ConnectionPool(
         host=DEFAULT_HOST,

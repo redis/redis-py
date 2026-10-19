@@ -303,18 +303,24 @@ class AsyncMaintNotificationsPoolHandler:
         await callback(*args)
 
     async def cancel_scheduled_tasks(self) -> None:
-        if not self._scheduled_tasks:
-            return
-        pending_handoffs = tuple(self._pending_handoffs)
-        tasks = tuple(self._scheduled_tasks)
-        for task in tasks:
-            task.cancel()
+        # Taken under the lock so a MOVING still being handled finishes, and
+        # schedules its cleanup, before the snapshot. The cleanups take the
+        # lock themselves, so they are awaited after it is released.
+        async with self._lock:
+            if not self._scheduled_tasks:
+                return
+            pending_handoffs = tuple(self._pending_handoffs)
+            tasks = tuple(self._scheduled_tasks)
+            for task in tasks:
+                task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         # The pool can be reused after aclose(): run the cancelled MOVING
         # cleanups now so the temporary host and relaxed timeouts do not stay
-        # in its connection kwargs.
+        # in its connection kwargs, and forget the handoffs so the server can
+        # redeliver a still-active MOVING to the reused pool.
         for notification in pending_handoffs:
             await self.handle_node_moved_notification(notification)
+            self._processed_notifications.discard(notification)
 
 
 class AsyncMaintNotificationsConnectionHandler:
