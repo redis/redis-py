@@ -3101,12 +3101,15 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_validate_ocsp": to_bool,
+    "ssl_validate_ocsp_stapled": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "ssl_min_version": int,
     "timeout": float,
     "protocol": int,
     "legacy_responses": to_bool,
+    "decode_responses": to_bool,
 }
 
 
