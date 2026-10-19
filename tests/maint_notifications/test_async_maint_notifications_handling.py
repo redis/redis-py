@@ -1712,6 +1712,48 @@ async def test_pool_aclose_completes_pending_handoff_event():
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+@pytest.mark.parametrize("new_node_host", [MOVED_HOST, None])
+async def test_pool_reused_after_aclose_mid_moving_has_reverted_kwargs(new_node_host):
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        socket_timeout=3,
+        socket_connect_timeout=4,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    original = dict(pool.connection_kwargs)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=MOVED_PORT, ttl=60
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+        assert pool.connection_kwargs["socket_timeout"] == 10
+        if new_node_host is not None:
+            assert pool.connection_kwargs["host"] == new_node_host
+        await pool.aclose()
+
+    for key in ("host", "socket_timeout", "socket_connect_timeout"):
+        assert pool.connection_kwargs[key] == original[key]
+    assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
+    assert pool.connection_kwargs["maintenance_notification_hash"] is None
+    assert handler._pending_handoffs == set()
+    # A connection made after the pool is reused does not inherit the MOVING state
+    connection = pool.make_connection()
+    assert connection.host == DEFAULT_HOST
+    assert connection.socket_timeout == 3
+    assert connection.socket_connect_timeout == 4
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
     pool = ConnectionPool(
         host=DEFAULT_HOST,

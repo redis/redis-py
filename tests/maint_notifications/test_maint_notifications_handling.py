@@ -2913,11 +2913,47 @@ def test_pool_close_cancels_moving_notification_timers(new_node_host):
 
     handler.handle_notification(notification)
     pool.close()
+    # close() runs the cleanup itself; the cancelled timer does not run it again
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
     time.sleep(0.4)
 
-    handler.handle_node_moved_notification.assert_not_called()
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
     if new_node_host is None:
         handler.run_proactive_reconnect.assert_not_called()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_reused_after_close_mid_moving_has_reverted_kwargs(new_node_host):
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        socket_connect_timeout=4,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    original = dict(pool.connection_kwargs)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=60
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    if new_node_host is not None:
+        assert pool.connection_kwargs["host"] == new_node_host
+    pool.close()
+
+    for key in ("host", "socket_timeout", "socket_connect_timeout"):
+        assert pool.connection_kwargs[key] == original[key]
+    assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
+    assert pool.connection_kwargs["maintenance_notification_hash"] is None
+    # A connection made after the pool is reused does not inherit the MOVING state
+    connection = pool.make_connection()
+    assert connection.host == "localhost"
+    assert connection.socket_timeout == 3
+    assert connection.socket_connect_timeout == 4
 
 
 @pytest.mark.fixed_client

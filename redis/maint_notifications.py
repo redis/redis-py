@@ -866,7 +866,7 @@ class MaintNotificationsPoolHandler:
         self.config = config
         self._processed_notifications = set()
         self._scheduled_timers: set[threading.Timer] = set()
-        # The handoffs whose relaxation the scheduled cleanup is still to end
+        # The handoffs whose scheduled cleanup has not run yet
         self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = threading.RLock()
         self.connection = None
@@ -980,8 +980,7 @@ class MaintNotificationsPoolHandler:
                     self.handle_node_moved_notification,
                     notification,
                 )
-                if self.config.is_relaxed_timeouts_enabled():
-                    self._pending_handoffs.add(notification)
+                self._pending_handoffs.add(notification)
             except BaseException:
                 # The relaxation reported above was not applied, or has no
                 # cleanup to end it: close its pair
@@ -1040,15 +1039,14 @@ class MaintNotificationsPoolHandler:
                 return
             timers = tuple(self._scheduled_timers)
             self._scheduled_timers.clear()
-            # The pool is closing, which ends the relaxation the cancelled
-            # cleanups would have ended: report it so their start events are
-            # paired
             pending_handoffs = tuple(self._pending_handoffs)
-            self._pending_handoffs.clear()
-        for timer in timers:
-            timer.cancel()
-        for notification in pending_handoffs:
-            self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            for timer in timers:
+                timer.cancel()
+            # The pool can be reused after close(): run the cancelled MOVING
+            # cleanups now so the temporary host and relaxed timeouts do not
+            # stay in its connection kwargs.
+            for notification in pending_handoffs:
+                self.handle_node_moved_notification(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """

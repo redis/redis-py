@@ -86,7 +86,7 @@ class AsyncMaintNotificationsPoolHandler:
         self.config = config
         self._processed_notifications: set[MaintenanceNotification] = set()
         self._scheduled_tasks: set[asyncio.Task[None]] = set()
-        # The handoffs whose relaxation the scheduled cleanup is still to end
+        # The handoffs whose scheduled cleanup has not finished yet
         self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = asyncio.Lock()
         self.connection: Any | None = None
@@ -187,8 +187,7 @@ class AsyncMaintNotificationsPoolHandler:
                     self.handle_node_moved_notification,
                     notification,
                 )
-                if self.config.is_relaxed_timeouts_enabled():
-                    self._pending_handoffs.add(notification)
+                self._pending_handoffs.add(notification)
             except BaseException:
                 # The relaxation reported above was not applied, or has no
                 # cleanup to end it: close its pair
@@ -247,7 +246,6 @@ class AsyncMaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         async with self._lock:
-            self._pending_handoffs.discard(notification)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     f"Reverting temporary changes related to notification: {notification}, "
@@ -270,6 +268,9 @@ class AsyncMaintNotificationsPoolHandler:
             # kwargs were not reverted: the pool stays relaxed until it expires.
             if reverted:
                 self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            # Discarded only once the cleanup is done, so one cancelled
+            # halfway is still run by cancel_scheduled_tasks()
+            self._pending_handoffs.discard(notification)
 
     def _schedule(
         self,
@@ -304,16 +305,16 @@ class AsyncMaintNotificationsPoolHandler:
     async def cancel_scheduled_tasks(self) -> None:
         if not self._scheduled_tasks:
             return
-        # The pool is closing, which ends the relaxation the cancelled cleanups
-        # would have ended: report it so their start events are paired
         pending_handoffs = tuple(self._pending_handoffs)
-        self._pending_handoffs.clear()
         tasks = tuple(self._scheduled_tasks)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        # The pool can be reused after aclose(): run the cancelled MOVING
+        # cleanups now so the temporary host and relaxed timeouts do not stay
+        # in its connection kwargs.
         for notification in pending_handoffs:
-            self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            await self.handle_node_moved_notification(notification)
 
 
 class AsyncMaintNotificationsConnectionHandler:
