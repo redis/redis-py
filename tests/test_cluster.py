@@ -74,6 +74,7 @@ from redis.exceptions import (
     RedisClusterUnreachableError,
     RedisError,
     ResponseError,
+    SlotNotCoveredError,
     TimeoutError,
 )
 from redis.himport import HIMPORT_SET
@@ -3808,13 +3809,20 @@ class TestTopologyRefreshPacing:
             patcher.stop()
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RedisClusterException("All slots are not covered"),
+            RedisClusterUnreachableError("down"),
+        ],
+    )
     def test_requested_refresh_with_an_unusable_topology_keeps_the_current_one(
-        self,
+        self, error
     ):
         """
-        A requested refresh whose nodes answer with a topology that cannot
-        replace the current one does not fail the command that runs it, and is
-        asked for again with the same arguments.
+        A requested refresh that reaches no node, or whose nodes answer with a
+        topology that cannot replace the current one, does not fail the command
+        that runs it, and is asked for again with the same arguments.
         """
         patcher, nm = self._nodes_manager()
         try:
@@ -3828,7 +3836,7 @@ class TestTopologyRefreshPacing:
                 NodesManager,
                 "initialize",
                 autospec=True,
-                side_effect=RedisClusterException("All slots are not covered"),
+                side_effect=error,
             ) as init:
                 nm._run_requested_refresh()
 
@@ -3837,27 +3845,6 @@ class TestTopologyRefreshPacing:
             assert nm._requested_additional_startup_nodes == [("127.0.0.1", 7001)]
             assert nm._requested_last_failed_node_name == "127.0.0.1:7000"
             assert nm._requested_disconnect_startup_nodes_pools is False
-        finally:
-            patcher.stop()
-
-    @pytest.mark.fixed_client
-    def test_requested_refresh_with_no_reachable_node_raises(self):
-        patcher, nm = self._nodes_manager()
-        try:
-            nm._last_refresh_at = None
-            nm._request_refresh(last_failed_node_name="127.0.0.1:7000")
-            with patch.object(
-                NodesManager,
-                "initialize",
-                autospec=True,
-                side_effect=RedisClusterUnreachableError("down"),
-            ):
-                with pytest.raises(RedisClusterUnreachableError):
-                    nm._run_requested_refresh()
-            # The request survives, with the failed node still tried last, so
-            # the next command runs it once the backoff allows
-            assert nm._refresh_requested
-            assert nm._requested_last_failed_node_name == "127.0.0.1:7000"
         finally:
             patcher.stop()
 
@@ -3930,6 +3917,65 @@ class TestTopologyRefreshPacing:
             rc.nodes_manager._last_refresh_at = None
             assert rc.get("foo") == b"value"
             init.assert_called_once()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
+    def test_cluster_down_refreshes_at_once_and_raises_a_failed_refresh(self, error):
+        """
+        A CLUSTERDOWN or an uncovered slot refreshes the topology at once, also
+        when an error-triggered refresh is not due yet, and the command raises
+        a refresh that fails.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        # The client was just created: an error-triggered refresh is not due
+        assert not nm._refresh_due(rc.retry)
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(Redis, "parse_response", side_effect=error),
+            patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=RedisClusterUnreachableError("down"),
+            ) as init,
+            patch("redis.cluster.time.sleep"),
+        ):
+            with pytest.raises(RedisClusterUnreachableError):
+                rc.get("foo")
+
+        init.assert_called_once()
+        assert nm._refresh_requested is False
+
+    @pytest.mark.fixed_client
+    def test_command_runs_on_the_current_topology_when_no_node_answers_a_refresh(
+        self,
+    ):
+        """
+        A due refresh that reaches no node (e.g. only seeds are queried, with
+        dynamic_startup_nodes=False) is logged and asked for again, and the
+        command that ran it still goes to its node of the current topology.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._request_refresh()
+        nm._last_refresh_at = None
+        checkout, parse, calls = self._checkout_failing_then_ok(0)
+        with (
+            checkout,
+            parse,
+            patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=RedisClusterUnreachableError("down"),
+            ) as init,
+        ):
+            assert rc.get("foo") == b"value"
+
+        init.assert_called_once()
+        assert len(calls) == 1
+        assert nm._refresh_requested is True
 
     @pytest.mark.fixed_client
     def test_retries_wait_as_long_as_the_retry_backoff_says(self):
@@ -4007,12 +4053,13 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
     @pytest.mark.parametrize("redirect", [True, False])
-    def test_transaction_threshold_refreshes_or_asks_for_one(self, due, redirect):
+    def test_transaction_threshold_asks_for_a_refresh(self, due, redirect):
         """
-        At the reinitialize_steps threshold a MOVED in a transaction patches the
-        slot and only asks for a refresh, also when one is due. A connection
-        error refreshes the topology when due, since the retry needs it to leave
-        the failed node, and asks for the refresh otherwise.
+        At the reinitialize_steps threshold an error in a transaction only asks
+        for a refresh, also when one is due: the next attempt runs it through
+        _run_requested_refresh, which keeps the current topology if the refresh
+        fails. A MOVED patches the slot; a connection error asks for the failed
+        node to be tried last.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -4031,16 +4078,14 @@ class TestTopologyRefreshPacing:
             patch.object(NodesManager, "initialize", autospec=True) as init,
             patch.object(NodesManager, "move_slot", autospec=True) as move_slot,
         ):
+            strategy._pipeline_slots.add(rc.keyslot("foo"))
             strategy._reinitialize_on_error(error, 1)
 
         assert move_slot.called is redirect
-        if due and not redirect:
-            init.assert_called_once()
-            assert nm._refresh_requested is False
-            assert rc.reinitialize_counter == 0
-        else:
-            init.assert_not_called()
-            assert nm._refresh_requested is True
+        init.assert_not_called()
+        assert nm._refresh_requested is True
+        assert rc.reinitialize_counter == 0
+        assert nm._requested_last_failed_node_name == (None if redirect else owner.name)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("watch", [False, True])

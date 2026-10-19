@@ -461,6 +461,7 @@ class RedisCluster(
     __slots__ = (
         "_initialize",
         "_lock",
+        "_topology_ready",
         "maint_notifications_config",
         "_oss_cluster_maint_notifications_handler",
         "_himport_registry",
@@ -783,6 +784,10 @@ class RedisCluster(
 
         self._initialize = True
         self._lock: Optional[asyncio.Lock] = None
+        # Set once a refresh has finished, commands parser included, and cleared
+        # by aclose(): the default node is published before the first refresh
+        # finishes, so it does not tell whether the topology can serve yet
+        self._topology_ready = False
 
         # When used as an async context manager, we need to increment and decrement
         # a usage counter so that we can close the connection pool when no one is
@@ -806,13 +811,13 @@ class RedisCluster(
         It also returns at once while another task runs the refresh: only the
         first initialize, which has no topology to serve yet, makes the other
         callers wait for it.
-        A refresh whose nodes answered with a topology that cannot replace the
-        current one (slots not covered, or nodes that disagree on them) is
-        logged and asked for again instead of raised; the current topology keeps
-        serving.
+        A refresh that reached no node, or whose nodes answered with a topology
+        that cannot replace the current one (slots not covered, or nodes that
+        disagree on them), is logged and asked for again instead of raised; the
+        current topology keeps serving until a refresh succeeds.
         """
         if self._initialize:
-            if self.nodes_manager.default_node is not None and (
+            if self._topology_ready and (
                 not self.nodes_manager._refresh_due(self.retry)
                 or (self._lock is not None and self._lock.locked())
             ):
@@ -825,8 +830,8 @@ class RedisCluster(
             async with self._lock:
                 if self._initialize:
                     # A client that never initialized (or was closed since)
-                    # has no default node yet
-                    first_initialize = self.nodes_manager.default_node is None
+                    # has no topology to serve yet
+                    first_initialize = not self._topology_ready
                     if not first_initialize and not self.nodes_manager._refresh_due(
                         self.retry
                     ):
@@ -840,6 +845,7 @@ class RedisCluster(
                             last_failed_node_name=last_failed_node_name,
                         )
                         self._initialize = False
+                        self._topology_ready = True
                     except BaseException as e:
                         # Only a client that never initialized is torn down. A
                         # failed or cancelled refresh keeps the connections of
@@ -849,15 +855,18 @@ class RedisCluster(
                             await self.nodes_manager.aclose()
                             await self.nodes_manager.aclose("startup_nodes")
                             raise
-                        if isinstance(e, RedisClusterException) and not isinstance(
-                            e, RedisClusterUnreachableError
-                        ):
-                            # Nodes answered, but with a topology that cannot
-                            # replace the current one. This may be a command for
-                            # a healthy shard, which must not fail for a refresh
-                            # another error asked for. The failure is counted,
-                            # so the next refresh runs once the backoff allows.
-                            logger.warning(
+                        if isinstance(e, RedisClusterException):
+                            # No node answered, or nodes answered with a
+                            # topology that cannot replace the current one. The
+                            # current topology keeps serving until a refresh
+                            # succeeds: this may be a command for a healthy
+                            # shard, which must not fail for a refresh another
+                            # error asked for, and the nodes queried may be only
+                            # seeds (dynamic_startup_nodes=False) while the
+                            # nodes of the current topology still answer. The
+                            # failure is counted, so the next refresh runs once
+                            # the backoff allows.
+                            logger.error(
                                 f"Topology refresh failed, keeping the current one: {e}"
                             )
                             return self
@@ -897,6 +906,7 @@ class RedisCluster(
             async with self._lock:
                 if self.nodes_manager.default_node is not None:
                     self._initialize = True
+                    self._topology_ready = False
                     if self._oss_cluster_maint_notifications_handler:
                         tasks = list(
                             self._oss_cluster_maint_notifications_handler._background_tasks
@@ -1710,9 +1720,11 @@ class RedisCluster(
                 # and retry executing the command
 
                 await asyncio.sleep(0.25)
-                # Signal that reinitialization is needed, without closing the
-                # connections: the retry loop refreshes the topology in place
-                self._initialize = True
+                # Refreshed here, in place and without closing the connections,
+                # not paced or asked for: this command raises the refresh error
+                # if it fails
+                await self._refresh_topology()
+                self._initialize = False
                 e.connection = target_node
                 await self._record_command_metric(
                     command_name=command,
@@ -3783,6 +3795,11 @@ class TransactionStrategy(AbstractStrategy):
         )
 
     async def _get_connection_and_send_command(self, *args, **options):
+        # Run a topology refresh an earlier error asked for, once due. This runs
+        # on the caller's loop, before every attempt: execute_command returns
+        # this coroutine from its private loop unawaited.
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
         redis_node, connection = self._get_client_and_connection_for_transaction()
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
@@ -3896,18 +3913,17 @@ class TransactionStrategy(AbstractStrategy):
                     self._pipe.cluster_client._initialize = True
                     self._pipe.cluster_client.reinitialize_counter = 0
             elif should_request_refresh:
-                # A connection error: the retry needs the refreshed topology to
-                # leave the failed node, so the refresh runs here when due
-                if self._pipe.cluster_client.nodes_manager._refresh_due(
-                    self._pipe.cluster_client.retry
-                ):
-                    await self._pipe.cluster_client.nodes_manager.initialize()
-                    self._pipe.cluster_client.reinitialize_counter = 0
-                else:
-                    # A refresh ran less than the minimum interval ago: ask for
-                    # one, run by the next command once due, instead of
-                    # dropping it
-                    self._pipe.cluster_client._initialize = True
+                # A connection error: ask for a refresh that tries the failed
+                # node last. The next attempt runs it once due, through
+                # initialize(), which keeps the current topology if the refresh
+                # fails.
+                if self._transaction_node is not None:
+                    nodes_manager = self._pipe.cluster_client.nodes_manager
+                    failed_node_name = self._transaction_node.name
+                    nodes_manager.move_node_to_end_of_cached_nodes(failed_node_name)
+                    nodes_manager._requested_last_failed_node_name = failed_node_name
+                self._pipe.cluster_client._initialize = True
+                self._pipe.cluster_client.reinitialize_counter = 0
 
         self._executing = False
 
@@ -3967,9 +3983,7 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = True
 
         # Run a topology refresh an earlier error asked for, once due. This runs
-        # on the caller's loop, before every attempt; the WATCH path
-        # (execute_command) runs on a private loop and leaves it to the next
-        # command.
+        # on the caller's loop, before every attempt.
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
 

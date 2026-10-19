@@ -423,14 +423,14 @@ class MaintNotificationsAbstractRedisCluster:
         )
 
 
-# Topology refreshes triggered by errors (connection errors, cluster down, the
-# MOVED threshold, pipeline failures, pubsub repair) run at most once per this
-# many seconds per client. Requests in between are collapsed into one refresh,
-# run by the next command once the interval has passed. After refreshes that
-# failed in a row, the next one waits as long as the client's retry backoff
-# says for that many failures, but never less than this. Server-pushed
-# refreshes (SMIGRATED), the first initialize and direct
-# ``NodesManager.initialize()`` calls are not limited.
+# Topology refreshes triggered by errors (connection errors, the MOVED
+# threshold, pipeline failures, pubsub repair) run at most once per this many
+# seconds per client. Requests in between are collapsed into one refresh, run by
+# the next command once the interval has passed. After refreshes that failed in
+# a row, the next one waits as long as the client's retry backoff says for that
+# many failures, but never less than this. Server-pushed refreshes (SMIGRATED),
+# the first initialize and direct ``NodesManager.initialize()`` calls, such as
+# the one a CLUSTERDOWN or an uncovered slot runs, are not limited.
 _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS = 1.0
 
 
@@ -2313,7 +2313,9 @@ class RedisCluster(
                 # and retry executing the command
 
                 time.sleep(0.25)
-                self.nodes_manager._request_refresh()
+                # Refreshed here, not paced or asked for: this command raises the
+                # refresh error if it fails
+                self.nodes_manager.initialize()
 
                 # if we have a connection, use it, otherwise use the target node
                 # object which contains the host and port info
@@ -3142,6 +3144,9 @@ class NodesManager:
         The command and pipeline loops check ``_refresh_requested`` themselves
         before calling this, to keep the attempts that have nothing to run free
         of a call.
+
+        A refresh that fails is logged and asked for again; the current
+        topology keeps serving.
         """
         if not self._refresh_requested or not self._refresh_due(retry):
             return
@@ -3172,16 +3177,14 @@ class NodesManager:
                 last_failed_node_name=last_failed_node_name,
                 disconnect_startup_nodes_pools=disconnect_startup_nodes_pools,
             )
-            if isinstance(e, RedisClusterUnreachableError):
-                # No node answered: the command that runs this would fail on
-                # the current topology as well
-                raise
-            # Nodes answered, but with a topology that cannot replace the
-            # current one (slots not covered, or nodes that disagree on them).
-            # The current topology keeps serving: this may be a command for a
-            # healthy shard, which must not fail for a refresh another error
-            # asked for.
-            logger.warning(f"Topology refresh failed, keeping the current one: {e}")
+            # No node answered, or nodes answered with a topology that cannot
+            # replace the current one (slots not covered, or nodes that
+            # disagree on them). The current topology keeps serving until a
+            # refresh succeeds: this may be a command for a healthy shard, which
+            # must not fail for a refresh another error asked for, and the
+            # nodes queried may be only seeds (dynamic_startup_nodes=False)
+            # while the nodes of the current topology still answer.
+            logger.error(f"Topology refresh failed, keeping the current one: {e}")
 
     def initialize(
         self,
@@ -6149,6 +6152,7 @@ class TransactionStrategy(AbstractStrategy):
             type(error) in self.SLOT_REDIRECT_ERRORS
             or type(error) in self.CONNECTION_ERRORS
         ):
+            node = None
             if self._transaction_connection:
                 if is_debug_log_enabled():
                     logger.debug(
@@ -6180,16 +6184,27 @@ class TransactionStrategy(AbstractStrategy):
                     self._nodes_manager._request_refresh()
                     self._pipe.reinitialize_counter = 0
             elif should_request_refresh:
-                # A connection error: the retry needs the refreshed topology to
-                # leave the failed node, so the refresh runs here when due
-                if self._nodes_manager._refresh_due(self._pipe.retry):
-                    self._nodes_manager.initialize()
-                    self._pipe.reinitialize_counter = 0
-                else:
-                    # A refresh ran less than the minimum interval ago: ask for
-                    # one, run by the next command once due, instead of
-                    # dropping it
-                    self._nodes_manager._request_refresh()
+                # A connection error: ask for a refresh that tries the failed
+                # node last. The next attempt runs it once due, through
+                # _run_requested_refresh, which keeps the current topology if
+                # the refresh fails.
+                if node is None and self._pipeline_slots:
+                    # Connecting failed, so no connection names the node: it is
+                    # the one that owns the slot the attempt targeted
+                    slot_nodes = self._nodes_manager.slots_cache.get(
+                        list(self._pipeline_slots)[0]
+                    )
+                    if slot_nodes:
+                        node = slot_nodes[0]
+                failed_node_name = node.name if node is not None else None
+                if failed_node_name is not None:
+                    self._nodes_manager.move_node_to_end_of_cached_nodes(
+                        failed_node_name
+                    )
+                self._nodes_manager._request_refresh(
+                    last_failed_node_name=failed_node_name
+                )
+                self._pipe.reinitialize_counter = 0
 
         self._executing = False
 

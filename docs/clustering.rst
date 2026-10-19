@@ -105,13 +105,20 @@ says (``ExponentialWithJitterBackoff`` by default). A command that failed with
 to give the cluster time to recover, and then the backoff delay as well.
 Pipelines retry the same way.
 
-The error also asks for a refresh of the cluster topology (``CLUSTER
-SLOTS``), which is run by the first command attempt that starts once it is
-due, whichever command that is. Refreshes triggered by errors,
-including the one every ``reinitialize_steps`` MOVED errors, run at most once
-per second per client; requests in between are collapsed into one refresh,
-run by the next command once the second has passed. After refreshes that
-failed in a row (no node reachable, or no usable topology), the next one
+``CLUSTERDOWN`` or a slot that is not covered refreshes the cluster topology
+(``CLUSTER SLOTS``) at once, before the retry; if that refresh fails, the
+command raises its error.
+
+A connection error or a timeout only asks for a refresh, which is run by the
+first command attempt that starts once it is due, whichever command that is.
+Refreshes asked for by errors, including the one every ``reinitialize_steps``
+MOVED errors, run at most once per second per client; requests in between are
+collapsed into one refresh, run by the next command once the second has passed.
+A refresh asked for this way that fails (no node reachable, or no usable
+topology) is logged and asked for again, and the command that ran it goes on
+with the slot map the client already has: the nodes it routes to may still
+answer, for example when ``dynamic_startup_nodes=False`` and only the startup
+nodes are unreachable. After refreshes that failed in a row, the next one
 waits as long as the ``retry`` backoff gives for that many failures, but at
 least one second.
 Refreshes pushed by the server during maintenance (``SMIGRATED``) and the first

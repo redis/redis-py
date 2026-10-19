@@ -502,19 +502,19 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize(
-        ("error", "raised"),
+        "error",
         [
-            (RedisClusterException("All slots are not covered"), False),
-            (RedisClusterUnreachableError("down"), True),
+            RedisClusterException("All slots are not covered"),
+            RedisClusterUnreachableError("down"),
         ],
     )
     async def test_requested_refresh_with_an_unusable_topology_keeps_the_current_one(
-        self, error, raised
+        self, error
     ) -> None:
         """
-        A requested refresh whose nodes answer with a topology that cannot
-        replace the current one does not fail the command that runs it, and
-        stays asked for. One that reaches no node is raised.
+        A requested refresh that reaches no node, or whose nodes answer with a
+        topology that cannot replace the current one, does not fail the command
+        that runs it, and stays asked for.
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         r.nodes_manager._last_refresh_at = None
@@ -522,11 +522,7 @@ class TestTopologyRefreshPacing:
         with mock.patch.object(
             NodesManager, "initialize", autospec=True, side_effect=error
         ):
-            if raised:
-                with pytest.raises(type(error)):
-                    await r.initialize()
-            else:
-                assert await r.initialize() is r
+            assert await r.initialize() is r
 
         assert r._initialize is True
         assert r.nodes_manager.default_node is not None
@@ -655,6 +651,36 @@ class TestTopologyRefreshPacing:
         assert nodes_manager._failed_refreshes == 0
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
+    async def test_cluster_down_refreshes_at_once_and_raises_a_failed_refresh(
+        self, error
+    ) -> None:
+        """
+        A CLUSTERDOWN or an uncovered slot refreshes the topology at once, also
+        when an error-triggered refresh is not due yet, and the command raises
+        a refresh that fails.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        # The client was just created: an error-triggered refresh is not due
+        assert not r.nodes_manager._refresh_due(r.retry)
+        with (
+            mock.patch.object(
+                ClusterNode, "execute_command", autospec=True, side_effect=error
+            ),
+            mock.patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=RedisClusterUnreachableError("down"),
+            ) as init,
+            mock.patch("redis.asyncio.cluster.asyncio.sleep"),
+        ):
+            with pytest.raises(RedisClusterUnreachableError):
+                await r.get("foo")
+
+        init.assert_awaited_once()
+
+    @pytest.mark.fixed_client
     async def test_failed_refresh_is_not_repeated_by_queued_tasks(self) -> None:
         """
         Tasks that queue behind a refresh that fails do not each run their own:
@@ -685,10 +711,8 @@ class TestTopologyRefreshPacing:
             )
 
         assert init.await_count == 1
-        errors = [res for res in results if isinstance(res, BaseException)]
-        assert len(errors) == 1
-        assert isinstance(errors[0], RedisClusterException)
-        assert all(res is r for res in results if not isinstance(res, BaseException))
+        # The task that ran the refresh keeps the current topology too
+        assert all(res is r for res in results)
         assert r.nodes_manager.nodes_cache == nodes
         assert r._initialize is True
 
@@ -810,6 +834,44 @@ class TestTopologyRefreshPacing:
         assert r._initialize is False
 
     @pytest.mark.fixed_client
+    async def test_first_initialize_is_waited_for(self) -> None:
+        """
+        The default node is published before the first initialize finishes
+        (the commands parser is set up after it), so a caller that arrives
+        while it runs waits for it instead of serving a half-built client.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        node = r.get_default_node()
+        # Closed, the client initializes again from scratch
+        await r.aclose()
+        refresh_started = asyncio.Event()
+        finish_refresh = asyncio.Event()
+
+        async def refresh_topology(self, **kwargs):
+            self.nodes_manager.default_node = node
+            refresh_started.set()
+            await finish_refresh.wait()
+
+        with mock.patch.object(
+            RedisCluster,
+            "_refresh_topology",
+            autospec=True,
+            side_effect=refresh_topology,
+        ) as refresh:
+            first = asyncio.create_task(r.initialize())
+            await refresh_started.wait()
+            second = asyncio.create_task(r.initialize())
+            await asyncio.sleep(0)
+            assert not second.done()
+
+            finish_refresh.set()
+            assert await first is r
+            assert await second is r
+
+        refresh.assert_awaited_once()
+        assert r._initialize is False
+
+    @pytest.mark.fixed_client
     async def test_pipeline_retries_wait_as_long_as_the_retry_backoff_says(
         self,
     ) -> None:
@@ -897,14 +959,15 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
     @pytest.mark.parametrize("redirect", [True, False])
-    async def test_transaction_threshold_refreshes_or_asks_for_one(
+    async def test_transaction_threshold_asks_for_a_refresh(
         self, due, redirect
     ) -> None:
         """
-        At the reinitialize_steps threshold a MOVED in a transaction patches the
-        slot and only asks for a refresh, also when one is due. A connection
-        error refreshes the topology when due, since the retry needs it to leave
-        the failed node, and asks for the refresh otherwise.
+        At the reinitialize_steps threshold an error in a transaction only asks
+        for a refresh, also when one is due: the next attempt runs it through
+        initialize(), which keeps the current topology if the refresh fails. A
+        MOVED patches the slot; a connection error asks for the failed node to
+        be tried last.
         """
         r = await get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -922,19 +985,20 @@ class TestTopologyRefreshPacing:
             mock.patch.object(NodesManager, "initialize", autospec=True) as init,
             mock.patch.object(NodesManager, "move_slot", autospec=True) as move_slot,
         ):
+            strategy._transaction_node = owner
             await strategy._reinitialize_on_error(error, 1)
 
         assert move_slot.called is redirect
-        if due and not redirect:
-            init.assert_awaited_once()
-            assert r._initialize is False
-            assert r.reinitialize_counter == 0
-        else:
-            init.assert_not_called()
-            assert r._initialize is True
+        init.assert_not_called()
+        assert r._initialize is True
+        assert r.reinitialize_counter == 0
+        assert r.nodes_manager._requested_last_failed_node_name == (
+            None if redirect else owner.name
+        )
 
     @pytest.mark.fixed_client
-    async def test_transaction_attempt_runs_a_requested_refresh(self) -> None:
+    @pytest.mark.parametrize("watch", [False, True])
+    async def test_transaction_attempt_runs_a_requested_refresh(self, watch) -> None:
         """
         A refresh an earlier error asked for runs when a transaction attempt
         starts, once due, so the retries do not keep hitting the stale owner.
@@ -955,7 +1019,10 @@ class TestTopologyRefreshPacing:
             ),
         ):
             with pytest.raises(RuntimeError, match="stop"):
-                await strategy._execute_transaction([], raise_on_error=True)
+                if watch:
+                    await strategy._get_connection_and_send_command("WATCH", "foo")
+                else:
+                    await strategy._execute_transaction([], raise_on_error=True)
 
         refresh.assert_awaited_once()
         assert r._initialize is False
@@ -1346,6 +1413,36 @@ class TestTopologyRefreshKeepsConnections:
 
         assert self._disconnected(disconnect, nodes.values()) == []
         assert r.nodes_manager.nodes_cache == nodes
+        assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    async def test_command_runs_on_the_current_topology_when_no_node_answers_a_refresh(
+        self,
+    ) -> None:
+        """
+        A due refresh that reaches no node (e.g. only seeds are queried, with
+        dynamic_startup_nodes=False) is logged and asked for again, and the
+        command that ran it still goes to its node of the current topology.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        owner = r.get_node_from_key("foo")
+        r._initialize = True
+        r.nodes_manager._last_refresh_at = None
+        with (
+            mock.patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=RedisClusterUnreachableError("down"),
+            ) as init,
+            mock.patch.object(
+                ClusterNode, "execute_command", autospec=True, return_value=b"value"
+            ) as execute_command,
+        ):
+            assert await r.get("foo") == b"value"
+
+        init.assert_awaited_once()
+        assert [c.args[0] for c in execute_command.await_args_list] == [owner]
         assert r._initialize is True
 
     @pytest.mark.fixed_client
@@ -7075,9 +7172,10 @@ class TestSSL:
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
         ) as rc:
-            with pytest.raises(RedisClusterException) as e:
+            # The refresh the connection error asked for reaches no node either;
+            # it is logged, and the command raises its own connection error
+            with pytest.raises(ConnectionError, match="No cipher can be selected"):
                 assert await rc.ping()
-            assert "Redis Cluster cannot be connected" in str(e.value)
 
     async def test_ssl_connection_tls13_custom_ciphers(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
@@ -7091,9 +7189,10 @@ class TestSSL:
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
         ) as rc:
-            with pytest.raises(RedisClusterException) as e:
+            # The refresh the connection error asked for reaches no node either;
+            # it is logged, and the command raises its own connection error
+            with pytest.raises(ConnectionError, match="No cipher can be selected"):
                 assert await rc.ping()
-            assert "Redis Cluster cannot be connected" in str(e.value)
 
     async def test_validating_self_signed_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
