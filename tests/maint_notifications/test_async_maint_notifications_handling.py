@@ -1836,6 +1836,55 @@ async def test_pool_aclose_waits_for_moving_being_handled():
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+async def test_pool_aclose_retried_after_cancellation_reverts_moving():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+    cleaning = asyncio.Event()
+    release = asyncio.Event()
+    cleanup_moving_notification = pool.cleanup_moving_notification
+
+    async def blocked_cleanup(**kwargs):
+        cleaning.set()
+        await release.wait()
+        return await cleanup_moving_notification(**kwargs)
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+
+    with mock.patch.object(pool, "cleanup_moving_notification", new=blocked_cleanup):
+        # aclose() is cancelled after cancelling the timer tasks, while the
+        # MOVING cleanup it runs is still waiting
+        closing = asyncio.create_task(pool.aclose())
+        await asyncio.wait_for(cleaning.wait(), timeout=5)
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        release.set()
+
+    assert handler._scheduled_tasks == set()
+    await pool.aclose()
+
+    assert pool.connection_kwargs["host"] == DEFAULT_HOST
+    assert pool.connection_kwargs["socket_timeout"] == 3
+    assert handler._pending_handoffs == set()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 async def test_pool_disconnect_does_not_cancel_scheduled_tasks():
     pool = ConnectionPool(
         host=DEFAULT_HOST,

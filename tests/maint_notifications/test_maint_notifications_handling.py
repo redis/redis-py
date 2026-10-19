@@ -3009,11 +3009,28 @@ def test_timer_firing_during_close_does_not_run_its_callback():
     handler = pool._maint_notifications_pool_handler
     callback = MagicMock()
 
+    test_thread = threading.current_thread()
+    timer_waiting = threading.Event()
+
+    class SignallingLock:
+        def __init__(self, lock):
+            self._lock = lock
+
+        def __enter__(self):
+            if threading.current_thread() is not test_thread:
+                timer_waiting.set()
+            return self._lock.__enter__()
+
+        def __exit__(self, *exc_info):
+            return self._lock.__exit__(*exc_info)
+
+    handler._lock = SignallingLock(handler._lock)
+
     with handler._lock:
         handler._schedule(0.01, callback)
         (timer,) = handler._scheduled_timers
         # The timer fires and waits for the lock held here.
-        time.sleep(0.2)
+        assert timer_waiting.wait(timeout=10)
         pool.close()
     timer.join(timeout=10)
 

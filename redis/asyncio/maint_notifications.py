@@ -307,7 +307,9 @@ class AsyncMaintNotificationsPoolHandler:
         # schedules its cleanup, before the snapshot. The cleanups take the
         # lock themselves, so they are awaited after it is released.
         async with self._lock:
-            if not self._scheduled_tasks:
+            # A cancelled aclose() can leave handoffs whose tasks are already
+            # gone: a retry still has to run their cleanups
+            if not self._scheduled_tasks and not self._pending_handoffs:
                 return
             pending_handoffs = tuple(self._pending_handoffs)
             tasks = tuple(self._scheduled_tasks)

@@ -1035,7 +1035,7 @@ class MaintNotificationsPoolHandler:
 
     def cancel_scheduled_tasks(self) -> None:
         with self._lock:
-            if not self._scheduled_timers:
+            if not self._scheduled_timers and not self._pending_handoffs:
                 return
             timers = tuple(self._scheduled_timers)
             self._scheduled_timers.clear()
