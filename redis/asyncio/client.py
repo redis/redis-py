@@ -1548,7 +1548,7 @@ class PubSub:
         """
         patterns: Iterable[ChannelT]
         if args:
-            parsed_args = list_or_args((args[0],), args[1:])
+            parsed_args = list_or_args(args[0], args[1:])
             patterns = self._normalize_keys(dict.fromkeys(parsed_args)).keys()
         else:
             parsed_args = []
