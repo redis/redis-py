@@ -1361,6 +1361,40 @@ class TestTopologyRefreshKeepsConnections:
         # The ones not used yet stay marked: they reconnect when acquired
         assert all(c.reconnect for c in connections[2:])
 
+    @pytest.mark.fixed_client
+    async def test_watch_reconnects_free_connections_the_server_closed(self) -> None:
+        """
+        A transaction's connection error marks the free connections for
+        reconnect too, and WATCH reconnects a marked connection it has just
+        acquired: only a connection already holding WATCH state is kept as is.
+        """
+
+        class Connection(self._ServerClosedConnection):
+            host, port, db = default_host, default_port, 0
+
+            async def send_command(self, *args, **kwargs) -> None:
+                pass
+
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        node = r.get_node_from_key("foo")
+        connections = [Connection() for _ in range(r.retry.get_retries() + 3)]
+        node._connections = list(connections)
+        node._free.extend(connections)
+
+        with (
+            mock.patch.object(NodesManager, "initialize", new=mock.AsyncMock()),
+            mock.patch("redis.asyncio.retry.sleep", new=mock.AsyncMock()),
+            mock.patch.object(
+                r, "_determine_slot", new=mock.AsyncMock(return_value=r.keyslot("foo"))
+            ),
+        ):
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch("foo")
+
+        # WATCH failed on one dead connection; the retry reconnected the next
+        assert sum(c.failed_reads for c in connections) == 1
+        assert sum(c.reconnect for c in connections) == len(connections) - 2
+
     @pytest.mark.parametrize(
         "error, marks",
         [
@@ -1388,6 +1422,36 @@ class TestTopologyRefreshKeepsConnections:
         assert free.mark_for_reconnect.call_count == int(marks)
         in_use.mark_for_reconnect.assert_not_called()
         free.disconnect.assert_not_called()
+
+    async def test_himport_prepare_connection_error_marks_free_connections(
+        self,
+    ) -> None:
+        """
+        The HIMPORT PREPARE pre-flight of a pipeline is the first I/O on the
+        connection, so a connection error there marks the free connections for
+        reconnect like one on the batched write.
+        """
+        node = ClusterNode(default_host, 7000)
+        in_use, free = mock.Mock(), mock.Mock()
+        node._connections = [in_use, free]
+        node._free.append(free)
+
+        with (
+            mock.patch.object(ClusterNode, "acquire_connection", return_value=in_use),
+            mock.patch.object(
+                ClusterNode, "disconnect_if_needed", new=mock.AsyncMock()
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "_himport_prepare_pipeline",
+                new=mock.AsyncMock(side_effect=ConnectionError("closed")),
+            ),
+        ):
+            with pytest.raises(ConnectionError, match="closed"):
+                await node.execute_pipeline([PipelineCommand(0, "GET", "key")])
+
+        free.mark_for_reconnect.assert_called_once()
+        in_use.mark_for_reconnect.assert_not_called()
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize(

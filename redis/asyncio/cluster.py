@@ -2360,12 +2360,12 @@ class ClusterNode:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
 
-            # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
-            # batched write (it bypasses the per-command lazy prepare path).
-            await self._himport_prepare_pipeline(connection, commands)
-
-            # Execute command
             try:
+                # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
+                # batched write (it bypasses the per-command lazy prepare path).
+                await self._himport_prepare_pipeline(connection, commands)
+
+                # Execute command
                 await connection.send_packed_command(
                     connection.pack_commands(cmd.args for cmd in commands)
                 )
@@ -3800,9 +3800,12 @@ class TransactionStrategy(AbstractStrategy):
         # this coroutine from its private loop unawaited.
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
+        held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state
-        if not self._watching:
+        # Only disconnect if not watching - disconnecting would lose WATCH state.
+        # A connection acquired just now holds no WATCH state yet, so it is
+        # reconnected if an earlier connection error marked it.
+        if not self._watching or connection is not held_connection:
             await redis_node.disconnect_if_needed(connection)
 
         # Start timing for observability
@@ -3893,6 +3896,13 @@ class TransactionStrategy(AbstractStrategy):
             type(error) in self.SLOT_REDIRECT_ERRORS
             or type(error) in self.CONNECTION_ERRORS
         ):
+            if self._transaction_node is not None:
+                # As on the command path: after a connection error the server
+                # may have closed the node's free connections too, and the
+                # retries would take them one by one
+                self._transaction_node._mark_free_connections_for_reconnect_on_error(
+                    error
+                )
             if self._transaction_connection and self._transaction_node:
                 # Disconnect and release back to pool
                 await self._transaction_connection.disconnect()
@@ -3987,9 +3997,12 @@ class TransactionStrategy(AbstractStrategy):
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
 
+        held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state
-        if not self._watching:
+        # Only disconnect if not watching - disconnecting would lose WATCH state.
+        # A connection acquired just now holds no WATCH state yet, so it is
+        # reconnected if an earlier connection error marked it.
+        if not self._watching or connection is not held_connection:
             await redis_node.disconnect_if_needed(connection)
 
         # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this

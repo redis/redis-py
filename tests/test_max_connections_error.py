@@ -148,6 +148,7 @@ def test_cluster_does_not_treat_capacity_or_auth_errors_as_node_failure(error):
     node = mock.MagicMock()
     redis_conn = mock.MagicMock()
     cluster.get_redis_connection.return_value = redis_conn
+    node.redis_connection = redis_conn
 
     # Raised while opening the connection, as the server sends the refusal
     # right after accepting it
@@ -181,6 +182,7 @@ def test_cluster_node_error_closes_only_the_failed_connection(error):
     node = mock.MagicMock()
     redis_conn = mock.MagicMock()
     cluster.get_redis_connection.return_value = redis_conn
+    node.redis_connection = redis_conn
     connection = mock.MagicMock()
     connection.send_command.side_effect = error
 

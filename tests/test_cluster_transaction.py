@@ -269,6 +269,54 @@ class TestClusterTransaction:
                     "Slot rebalancing occurred while watching keys"
                 )
 
+    @pytest.mark.onlycluster
+    def test_watch_connection_stays_with_its_node_after_slot_move(self, r):
+        """
+        A requested refresh that moves the slot while keys are watched does not
+        pair the held connection with the new owner: commands keep using the
+        node the connection belongs to, and the connection goes back to that
+        node's pool.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        node_owning, node_other = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
+        def move_slot(retry=None):
+            # As a refresh that moves the slot to another node would
+            r.nodes_manager._refresh_requested = False
+            r.nodes_manager.slots_cache[slot] = [node_other]
+
+        try:
+            with patch.object(
+                r.nodes_manager, "_run_requested_refresh", side_effect=move_slot
+            ):
+                with r.pipeline(transaction=True) as pipe:
+                    pipe.watch(key)
+                    strategy = pipe._execution_strategy
+                    connection = strategy._transaction_connection
+                    r.nodes_manager._refresh_requested = True
+                    pipe.get(key)
+                    assert strategy._get_client_and_connection_for_transaction() == (
+                        node_owning.redis_connection,
+                        connection,
+                    )
+
+                    pipe.multi()
+                    pipe.set(key, "val")
+                    assert len(pipe.execute()) == 1
+
+            owning_pool = node_owning.redis_connection.connection_pool
+            assert connection in owning_pool._available_connections
+            assert (
+                connection
+                not in node_other.redis_connection.connection_pool._available_connections
+            )
+        finally:
+            r.nodes_manager._refresh_requested = False
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
+        assert r.get(key) == b"val"
+
     @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     def test_retry_transaction_on_connection_error(self, r, mock_connection):

@@ -100,10 +100,10 @@ Retries and Topology Refresh
 When a command fails with a connection error, a timeout, ``CLUSTERDOWN`` or a
 slot that is not covered, the cluster client retries it as many times as the
 ``retry`` object allows, waiting before each attempt as long as its backoff
-says (``ExponentialWithJitterBackoff`` by default). A command that failed with
-``CLUSTERDOWN`` or a slot that is not covered first waits a fixed 0.25 seconds,
-to give the cluster time to recover, and then the backoff delay as well.
-Pipelines retry the same way.
+says (``ExponentialWithJitterBackoff`` by default). Pipelines retry the same
+way. A single command that failed with ``CLUSTERDOWN`` or a slot that is not
+covered first waits a fixed 0.25 seconds, to give the cluster time to recover,
+and then the backoff delay as well.
 
 ``CLUSTERDOWN`` or a slot that is not covered refreshes the cluster topology
 (``CLUSTER SLOTS``) at once, before the retry; if that refresh fails, the

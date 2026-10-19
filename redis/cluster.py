@@ -443,8 +443,10 @@ def _topology_refresh_delay(
     refreshes in a row, whichever is longer.
     """
     delay = _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS
-    if failed_refreshes and retry is not None:
-        delay = max(delay, retry._backoff.compute(failed_refreshes))
+    # A duck-typed retry policy may have no backoff to compute a delay from
+    backoff = getattr(retry, "_backoff", None)
+    if failed_refreshes and backoff is not None:
+        delay = max(delay, backoff.compute(failed_refreshes))
     return delay
 
 
@@ -705,9 +707,12 @@ class AbstractRedisCluster:
     def _retry_backoff_delay(retry: AbstractRetry, failures: int) -> float:
         """
         The delay before the next attempt of a cluster retry loop, after
-        ``failures`` failed attempts, as computed by the retry's backoff.
+        ``failures`` failed attempts, as computed by the retry's backoff. A
+        duck-typed retry policy with no backoff gives no delay.
         """
-        backoff = retry._backoff
+        backoff = getattr(retry, "_backoff", None)
+        if backoff is None:
+            return 0
         if failures == 1:
             # A new run of failures starts, as in Retry.call_with_retry
             backoff.reset()
@@ -5956,6 +5961,7 @@ class TransactionStrategy(AbstractStrategy):
         # True once a keyed (non-slot-agnostic) command has fixed the slot
         self._transaction_has_keyed_slot = False
         self._transaction_connection: Optional[Connection] = None
+        self._transaction_node: Optional[ClusterNode] = None
         self._executing = False
         self._retry = copy(self._pipe.retry)
         self._retry.update_supported_errors(
@@ -6005,22 +6011,21 @@ class TransactionStrategy(AbstractStrategy):
                 "At least a command with a key is needed to identify a node"
             )
 
+        if self._transaction_connection:
+            # Keep the node the held connection belongs to, even if a refresh
+            # moved the slot: the server reports the move (MOVED), and the error
+            # path releases the connection to its own node before retargeting
+            return (
+                self._pipe.get_redis_connection(self._transaction_node),
+                self._transaction_connection,
+            )
+
         node: ClusterNode = self._nodes_manager.get_node_from_slot(
             list(self._pipeline_slots)[0], False
         )
         redis_node: Redis = self._pipe.get_redis_connection(node)
-        if self._transaction_connection:
-            if not redis_node.connection_pool.owns_connection(
-                self._transaction_connection
-            ):
-                previous_node = self._nodes_manager.find_connection_owner(
-                    self._transaction_connection
-                )
-                previous_node.connection_pool.release(self._transaction_connection)
-                self._transaction_connection = None
-
-        if not self._transaction_connection:
-            self._transaction_connection = get_connection(redis_node)
+        self._transaction_connection = get_connection(redis_node)
+        self._transaction_node = node
 
         return redis_node, self._transaction_connection
 
@@ -6411,6 +6416,7 @@ class TransactionStrategy(AbstractStrategy):
                     self._transaction_connection = None
 
         # clean up the other instance attributes
+        self._transaction_node = None
         self._watching = False
         self._explicit_transaction = False
         self._pipeline_slots = set()

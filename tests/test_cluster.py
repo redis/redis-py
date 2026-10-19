@@ -3713,11 +3713,14 @@ class TestTopologyRefreshPacing:
             # give a new delay on every check
             assert backoff.computed == [3]
 
-            # The minimum interval is the floor
+            # The minimum interval is the floor for a shorter backoff
+            short_retry = Retry(RecordingBackoff(step=0.1), 3)
             nm._failed_refreshes = 1
             nm._refresh_delay = None
             with patch("redis.cluster.time.monotonic", return_value=100.9):
-                assert nm._refresh_due(retry) is False
+                assert nm._refresh_due(short_retry) is False
+            with patch("redis.cluster.time.monotonic", return_value=101.0):
+                assert nm._refresh_due(short_retry) is True
         finally:
             patcher.stop()
 
@@ -3734,6 +3737,37 @@ class TestTopologyRefreshPacing:
             nm._last_refresh_at = 100.0
             nm._failed_refreshes = 0
             nm._refresh_delay = (3, 30.0)
+            with patch("redis.cluster.time.monotonic", return_value=101.0):
+                assert nm._refresh_due(retry) is True
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_retry_policy_without_a_backoff_gives_no_delay(self):
+        """
+        A duck-typed retry policy, such as an async-shaped one the async client
+        keeps as is, may have no backoff: retries are not delayed, and failed
+        refreshes wait only the minimum interval.
+        """
+
+        class DuckTypedRetry:
+            async def call_with_retry(self, do, fail):
+                return await do()
+
+            def get_retries(self):
+                return 3
+
+        retry = DuckTypedRetry()
+        assert RedisCluster._retry_backoff_delay(retry, 1) == 0
+        assert RedisCluster._retry_backoff_delay(retry, 2) == 0
+
+        patcher, nm = self._nodes_manager()
+        try:
+            nm._last_refresh_at = 100.0
+            nm._failed_refreshes = 3
+            nm._refresh_delay = None
+            with patch("redis.cluster.time.monotonic", return_value=100.9):
+                assert nm._refresh_due(retry) is False
             with patch("redis.cluster.time.monotonic", return_value=101.0):
                 assert nm._refresh_due(retry) is True
         finally:
