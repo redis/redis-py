@@ -354,7 +354,7 @@ async def moved_redirection_helper(
 class TestMovedReinitialization:
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("reinitialize_steps", [0, 1, 3])
-    async def test_moved_refreshes_topology_before_retry(self, reinitialize_steps):
+    async def test_moved_asks_for_refresh_run_by_next_command(self, reinitialize_steps):
         r = await get_mocked_redis_client(
             host=default_host,
             port=default_port,
@@ -385,7 +385,9 @@ class TestMovedReinitialization:
                 ),
                 mock.patch.object(AsyncCommandsParser, "initialize", autospec=True),
             ):
-                # Move the key back and forth, crossing the refresh threshold twice.
+                expected_refreshes = 0
+                expected_counter = 0
+                # Move the key back and forth, crossing the refresh threshold.
                 for moved_count in range(1, 7):
                     owner_port = 7000 if moved_count % 2 else 7001
                     other_port = 7001 if owner_port == 7000 else 7000
@@ -393,21 +395,70 @@ class TestMovedReinitialization:
                         [0, 8191, [default_host, other_port, "other"]],
                         [8192, 16383, [default_host, owner_port, "owner"]],
                     ]
+                    refresh_requested = r._initialize
+                    sent_before = len(command_nodes)
 
                     assert await r.get(key) == b"value"
-                    assert command_nodes[-2:] == [other_port, owner_port]
-                    assert len(command_nodes) == moved_count * 2
+                    if refresh_requested:
+                        # The command runs the refresh a MOVED asked for before
+                        # it is sent, so it goes straight to the new owner
+                        expected_refreshes += 1
+                        assert command_nodes[sent_before:] == [owner_port]
+                        assert r.nodes_manager._requested_additional_startup_nodes == ()
+                    else:
+                        # The MOVED patches the slot and the redirect follows
+                        # it; the refresh is only asked for
+                        assert command_nodes[sent_before:] == [other_port, owner_port]
+                        expected_counter += 1
+                    threshold_reached = bool(
+                        reinitialize_steps
+                        and not refresh_requested
+                        and expected_counter % reinitialize_steps == 0
+                    )
+                    if threshold_reached:
+                        expected_counter = 0
+                        assert r.nodes_manager._requested_additional_startup_nodes == (
+                            (default_host, owner_port),
+                        )
                     assert r.get_node_from_key(key).port == owner_port
-                    assert r._initialize is False
-                    expected_refreshes = (
-                        moved_count // reinitialize_steps if reinitialize_steps else 0
-                    )
+                    assert r._initialize is threshold_reached
                     assert len(refreshes) == expected_refreshes
-                    assert r.reinitialize_counter == (
-                        moved_count % reinitialize_steps
-                        if reinitialize_steps
-                        else moved_count
-                    )
+                    assert r.reinitialize_counter == expected_counter
+                if reinitialize_steps:
+                    assert expected_refreshes > 0
+
+    @pytest.mark.fixed_client
+    async def test_refresh_queries_the_node_a_moved_pointed_to(self):
+        """
+        The node a MOVED pointed to is kept with the refresh request, so the
+        refresh also queries it when no startup node answers.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        moved_to = (default_host, 7006)
+        queried = []
+
+        async def execute_command(node, command, *args, **kwargs):
+            assert command == "CLUSTER SLOTS"
+            queried.append((node.host, node.port))
+            if (node.host, node.port) != moved_to:
+                raise ConnectionError("unreachable")
+            return default_cluster_slots
+
+        r.nodes_manager._requested_additional_startup_nodes = (moved_to,)
+        r._initialize = True
+        r.nodes_manager._last_refresh_at = None
+        async with aclosing(r):
+            with mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ):
+                await r.initialize()
+
+            assert queried[-1] == moved_to
+            assert r._initialize is False
+            assert r.nodes_manager._requested_additional_startup_nodes == ()
 
 
 class RecordingBackoff(AbstractBackoff):
@@ -667,7 +718,11 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
-    async def test_moved_threshold_refreshes_only_when_due(self, due) -> None:
+    async def test_moved_threshold_asks_for_refresh_run_once_due(self, due) -> None:
+        """
+        The MOVED threshold patches the slot and only asks for a refresh, also
+        when one is due: the next command runs it, once due.
+        """
         r = await get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
         )
@@ -692,32 +747,42 @@ class TestTopologyRefreshPacing:
         ):
             assert await r.get("foo") == b"value"
 
+            refresh.assert_not_called()
+            move_slot.assert_awaited_once()
+            assert r._initialize
+            assert r.nodes_manager._requested_additional_startup_nodes == (
+                (owner.host, owner.port),
+            )
+
+            assert await r.get("foo") == b"value"
+
         if due:
             refresh.assert_awaited_once()
-            move_slot.assert_not_called()
             assert not r._initialize
         else:
             refresh.assert_not_called()
-            move_slot.assert_awaited_once()
-            # The refresh is asked for, so a later command runs it once due
+            # Still asked for, so a later command runs it once due
             assert r._initialize
 
     @pytest.mark.fixed_client
-    async def test_moved_threshold_refresh_answers_a_pending_request(self) -> None:
+    async def test_refresh_running_in_another_task_is_not_waited_for(self) -> None:
         """
-        A request still pending when the command started (not due yet) is
-        answered by the MOVED-threshold refresh that runs once due, so the next
-        command does not run another CLUSTER SLOTS.
+        Once the client has a topology, a command does not wait for a refresh
+        another task is running: it runs on the current topology.
         """
-        r = await get_mocked_redis_client(
-            host=default_host, port=default_port, reinitialize_steps=1
-        )
-        slot = r.keyslot("foo")
-        owner = r.get_node_from_key("foo")
-        execute_command, _ = TestTopologyRefreshKeepsConnections._command_side_effect(
-            [MovedError(f"{slot} {owner.host}:{owner.port}")]
-        )
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
         r._initialize = True
+        r.nodes_manager._last_refresh_at = None
+        refresh_started = asyncio.Event()
+        finish_refresh = asyncio.Event()
+
+        async def refresh_topology(self, **kwargs):
+            refresh_started.set()
+            await finish_refresh.wait()
+
+        async def execute_command(node, *args, **kwargs):
+            return b"value"
+
         with (
             mock.patch.object(
                 ClusterNode,
@@ -725,15 +790,21 @@ class TestTopologyRefreshPacing:
                 autospec=True,
                 side_effect=execute_command,
             ),
-            # Not due when the command starts, due by the time MOVED arrives
             mock.patch.object(
-                NodesManager, "_refresh_due", side_effect=[False, True, False]
-            ),
-            mock.patch.object(
-                RedisCluster, "_refresh_topology", autospec=True
+                RedisCluster,
+                "_refresh_topology",
+                autospec=True,
+                side_effect=refresh_topology,
             ) as refresh,
         ):
-            assert await r.get("foo") == b"value"
+            refreshing = asyncio.create_task(r.initialize())
+            await refresh_started.wait()
+
+            assert await asyncio.wait_for(r.get("foo"), timeout=1) == b"value"
+            assert not refreshing.done()
+
+            finish_refresh.set()
+            await refreshing
 
         refresh.assert_awaited_once()
         assert r._initialize is False
@@ -830,10 +901,10 @@ class TestTopologyRefreshPacing:
         self, due, redirect
     ) -> None:
         """
-        At the reinitialize_steps threshold a transaction refreshes the topology
-        when due. Inside the minimum interval a MOVED slot is patched, and the
-        refresh is asked for, after a MOVED or any other error, instead of
-        being dropped.
+        At the reinitialize_steps threshold a MOVED in a transaction patches the
+        slot and only asks for a refresh, also when one is due. A connection
+        error refreshes the topology when due, since the retry needs it to leave
+        the failed node, and asks for the refresh otherwise.
         """
         r = await get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -853,14 +924,41 @@ class TestTopologyRefreshPacing:
         ):
             await strategy._reinitialize_on_error(error, 1)
 
-        if due:
+        assert move_slot.called is redirect
+        if due and not redirect:
             init.assert_awaited_once()
-            move_slot.assert_not_called()
             assert r._initialize is False
+            assert r.reinitialize_counter == 0
         else:
             init.assert_not_called()
-            assert move_slot.called is redirect
             assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    async def test_transaction_attempt_runs_a_requested_refresh(self) -> None:
+        """
+        A refresh an earlier error asked for runs when a transaction attempt
+        starts, once due, so the retries do not keep hitting the stale owner.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r._initialize = True
+        r.nodes_manager._last_refresh_at = None
+        strategy = r.pipeline(transaction=True)._execution_strategy
+        with (
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+            # Stop the attempt right after its refresh check
+            mock.patch.object(
+                type(strategy),
+                "_get_client_and_connection_for_transaction",
+                side_effect=RuntimeError("stop"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="stop"):
+                await strategy._execute_transaction([], raise_on_error=True)
+
+        refresh.assert_awaited_once()
+        assert r._initialize is False
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
@@ -962,6 +1060,9 @@ class TestTopologyRefreshKeepsConnections:
                 AsyncCommandsParser, "initialize", autospec=True
             ) as parser_initialize,
         ):
+            assert await r.get("foo") == b"value"
+            # The MOVED only asks for the refresh; the next command runs it
+            assert not refreshes
             assert await r.get("foo") == b"value"
 
         assert refreshes

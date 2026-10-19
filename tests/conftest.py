@@ -526,9 +526,9 @@ def no_cluster_retry_delay():
     Skip the backoff sleep between cluster retries, for tests that count
     retries rather than time them.
     """
-    with (
-        mock.patch("redis.cluster._retry_backoff_delay", return_value=0),
-        mock.patch("redis.asyncio.cluster._retry_backoff_delay", return_value=0),
+    # The async clients inherit it from the same class
+    with mock.patch.object(
+        redis.cluster.AbstractRedisCluster, "_retry_backoff_delay", return_value=0
     ):
         yield
 

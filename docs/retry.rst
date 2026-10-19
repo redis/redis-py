@@ -94,5 +94,10 @@ Let's consider the following example:
 #. the client library calculates the hash slot for key 'foo'.
 #. given the hash slot, it then determines which node to connect to, in order to execute the command.
 #. during the connection, a :class:`~.ConnectionError` is raised.
-#. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the cluster client asks for a refresh of the cluster topology, which tries the failed node last. The refresh runs before the next attempt, at most once per second.
+#. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the cluster client asks for
+   a refresh of the cluster topology, which tries the failed node last. The request is
+   shared by the whole client: the first command attempt that starts once the refresh
+   is due runs it, whether that is the retry of this command or another command.
+   Refreshes run at most once per second, so a retry inside that second still uses the
+   current topology.
 #. the cluster client waits as long as the backoff says and retries the command, until it either succeeds or the max number of retries is reached.

@@ -106,7 +106,8 @@ to give the cluster time to recover, and then the backoff delay as well.
 Pipelines retry the same way.
 
 The error also asks for a refresh of the cluster topology (``CLUSTER
-SLOTS``), which runs before the next attempt. Refreshes triggered by errors,
+SLOTS``), which is run by the first command attempt that starts once it is
+due, whichever command that is. Refreshes triggered by errors,
 including the one every ``reinitialize_steps`` MOVED errors, run at most once
 per second per client; requests in between are collapsed into one refresh,
 run by the next command once the second has passed. After refreshes that

@@ -561,8 +561,10 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
     async def _re_auth(self, token: TokenInterface):
         nodes = self._event.nodes
         # Iterate a snapshot: a topology refresh can add and remove nodes while
-        # a node is being re-authenticated. A node removed in the meantime is
-        # skipped, its connections are being closed.
+        # a node is being re-authenticated. A node that is no longer the one cached
+        # under its key is skipped: it is being closed, even if a later refresh
+        # re-added its address as a new node. Nodes added in the meantime connect
+        # with the current credentials and need no AUTH.
         for key, node in tuple(nodes.items()):
             if nodes.get(key) is node:
                 await node.re_auth_callback(token)

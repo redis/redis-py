@@ -3951,11 +3951,11 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
-    def test_moved_threshold_refreshes_only_when_due(self, due):
+    def test_moved_threshold_asks_for_refresh_run_once_due(self, due):
         """
-        At the reinitialize_steps MOVED threshold the topology is refreshed when
-        due; inside the minimum interval the MOVED slot is patched instead and
-        the refresh is asked for, so a later command runs it once due.
+        At the reinitialize_steps MOVED threshold the MOVED slot is patched and
+        the refresh is only asked for, also when one is due: the next command
+        runs it, once due.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -3964,7 +3964,11 @@ class TestTopologyRefreshPacing:
             rc.nodes_manager._last_refresh_at = None
         slot = rc.keyslot("foo")
         owner = rc.get_node_from_key("foo")
-        responses = [MovedError(f"{slot} {owner.host}:{owner.port}"), b"value"]
+        responses = [
+            MovedError(f"{slot} {owner.host}:{owner.port}"),
+            b"value",
+            b"value",
+        ]
 
         def parse_response(connection, command, **kwargs):
             response = responses.pop(0)
@@ -3980,11 +3984,6 @@ class TestTopologyRefreshPacing:
         ):
             assert rc.get("foo") == b"value"
 
-        if due:
-            init.assert_called_once()
-            move_slot.assert_not_called()
-            assert not rc.nodes_manager._refresh_requested
-        else:
             init.assert_not_called()
             move_slot.assert_called_once()
             assert rc.nodes_manager._refresh_requested
@@ -3992,15 +3991,28 @@ class TestTopologyRefreshPacing:
                 (owner.host, owner.port)
             ]
 
+            assert rc.get("foo") == b"value"
+
+        if due:
+            init.assert_called_once()
+            assert init.call_args.kwargs["additional_startup_nodes_info"] == [
+                (owner.host, owner.port)
+            ]
+            assert not rc.nodes_manager._refresh_requested
+        else:
+            init.assert_not_called()
+            # Still asked for, so a later command runs it once due
+            assert rc.nodes_manager._refresh_requested
+
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
     @pytest.mark.parametrize("redirect", [True, False])
     def test_transaction_threshold_refreshes_or_asks_for_one(self, due, redirect):
         """
-        At the reinitialize_steps threshold a transaction refreshes the topology
-        when due. Inside the minimum interval a MOVED slot is patched, and the
-        refresh is asked for, after a MOVED or any other error, instead of
-        being dropped.
+        At the reinitialize_steps threshold a MOVED in a transaction patches the
+        slot and only asks for a refresh, also when one is due. A connection
+        error refreshes the topology when due, since the retry needs it to leave
+        the failed node, and asks for the refresh otherwise.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, reinitialize_steps=1
@@ -4021,14 +4033,44 @@ class TestTopologyRefreshPacing:
         ):
             strategy._reinitialize_on_error(error, 1)
 
-        if due:
+        assert move_slot.called is redirect
+        if due and not redirect:
             init.assert_called_once()
-            move_slot.assert_not_called()
             assert nm._refresh_requested is False
+            assert rc.reinitialize_counter == 0
         else:
             init.assert_not_called()
-            assert move_slot.called is redirect
             assert nm._refresh_requested is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("watch", [False, True])
+    def test_transaction_attempt_runs_a_requested_refresh(self, watch):
+        """
+        A refresh an earlier error asked for runs when a transaction attempt
+        starts, once due, so the retries do not keep hitting the stale owner.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._request_refresh()
+        nm._last_refresh_at = None
+        strategy = rc.pipeline(transaction=True)._execution_strategy
+        with (
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+            # Stop the attempt right after its refresh check
+            patch.object(
+                type(strategy),
+                "_get_client_and_connection_for_transaction",
+                side_effect=RuntimeError("stop"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="stop"):
+                if watch:
+                    strategy._get_connection_and_send_command("WATCH", "foo")
+                else:
+                    strategy._execute_transaction([], raise_on_error=True)
+
+        init.assert_called_once()
+        assert nm._refresh_requested is False
 
     @pytest.mark.fixed_client
     def test_pipeline_retries_wait_as_long_as_the_retry_backoff_says(self):
@@ -4054,6 +4096,41 @@ class TestTopologyRefreshPacing:
 
         assert len(attempts) == 3
         assert [c.args[0] for c in sleep.call_args_list] == [0.001, 0.002]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("due", [True, False])
+    def test_pipeline_fallback_threshold_runs_or_asks_for_refresh(self, due):
+        """
+        At the reinitialize_steps threshold the pipeline asks for a refresh and
+        runs it before resending the failed commands, once due; when it is not
+        due it stays asked for instead of being dropped.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host, port=default_port, reinitialize_steps=1
+        )
+        nm = rc.nodes_manager
+        if due:
+            nm._last_refresh_at = None
+        owner = rc.get_node_from_key("foo")
+        moved = MovedError(f"{rc.keyslot('foo')} {owner.host}:{owner.port}")
+        pipe = rc.pipeline()
+        with (
+            patch("redis.cluster.get_connection"),
+            patch.object(Redis, "parse_response", side_effect=moved),
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+            patch.object(
+                pipe, "parent_execute_command", return_value=b"value"
+            ) as resend,
+        ):
+            assert pipe.get("foo").execute() == [b"value"]
+
+        resend.assert_called_once()
+        if due:
+            init.assert_called_once()
+            assert nm._refresh_requested is False
+        else:
+            init.assert_not_called()
+            assert nm._refresh_requested is True
 
     @pytest.mark.fixed_client
     def test_pubsub_topology_repair_is_a_paced_request(self):

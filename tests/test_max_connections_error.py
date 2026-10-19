@@ -107,7 +107,7 @@ def test_cluster_handles_max_connections_error():
         cluster.nodes_manager._request_refresh.assert_not_called()
 
         # Now test with regular ConnectionError to ensure it DOES ask for a
-        # refresh; it runs before the next attempt once due
+        # refresh; it is run by the next attempt, of any command, once due
         connection.send_command.side_effect = redis.ConnectionError("Connection lost")
 
         with pytest.raises(redis.ConnectionError):

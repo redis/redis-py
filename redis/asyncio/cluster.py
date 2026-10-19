@@ -69,7 +69,6 @@ from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
-    _NOT_NODE_FAILURE_ERRORS,
     _REPLICAS_ONLY_STRATEGIES,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
@@ -78,8 +77,7 @@ from redis.cluster import (
     AbstractRedisCluster,
     LoadBalancer,
     LoadBalancingStrategy,
-    _is_retryable_cluster_error,
-    _retry_backoff_delay,
+    _should_request_refresh,
     _topology_refresh_delay,
     block_pipeline_command,
     get_node_name,
@@ -361,9 +359,12 @@ class RedisCluster(
           will be patched with the redirected node.
           To reinitialize the cluster on every MOVED error, set reinitialize_steps to 1.
           To avoid reinitializing the cluster on moved errors, set reinitialize_steps to
-          0.
-          Like every refresh triggered by an error, it runs at most once per second;
-          inside that interval the MOVED slot is patched instead.
+          0. A negative value is not the same as 0: it works like its absolute value
+          (-3 is the same as 3).
+          Every MOVED error patches its slot, so the redirect goes to the new owner;
+          the refresh is only asked for, and like every refresh triggered by an
+          error, it is run by the next command attempt once due, at most once per
+          second.
     :param cluster_error_retry_attempts:
         | @deprecated - Please configure the 'retry' object instead
           In case 'retry' object is set - this argument is ignored!
@@ -378,9 +379,15 @@ class RedisCluster(
           :class:`~.ClusterDownError` or :class:`~.SlotNotCoveredError` also
           waits a fixed 0.25 seconds before it. A topology refresh triggered by an
           error (connection errors, cluster down, the ``reinitialize_steps`` MOVED
-          threshold) runs before the next attempt, at most once per second; after
-          refreshes that failed in a row, the next one waits as long as the
-          backoff gives for that many failures, but at least one second.
+          threshold) is run by the first command attempt to start once it is due,
+          at most once per second; after refreshes that failed in a row, the next
+          one waits as long as the backoff gives for that many failures, but at
+          least one second.
+          Backoffs that keep state between calls
+          (:class:`~.DecorrelatedJitterBackoff`) are not fully supported: the
+          retry object is shared by every command and pipeline of the client, so
+          concurrent retries reset and advance each other's backoff, and the
+          delays can come out shorter or longer than configured.
     :param max_connections:
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
@@ -796,6 +803,9 @@ class RedisCluster(
         ``_TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS`` after the previous refresh,
         or longer after refreshes that failed (see ``_topology_refresh_delay``).
         Until then it returns at once and the current topology keeps serving.
+        It also returns at once while another task runs the refresh: only the
+        first initialize, which has no topology to serve yet, makes the other
+        callers wait for it.
         A refresh whose nodes answered with a topology that cannot replace the
         current one (slots not covered, or nodes that disagree on them) is
         logged and asked for again instead of raised; the current topology keeps
@@ -804,9 +814,11 @@ class RedisCluster(
         if self._initialize:
             if self.nodes_manager.default_node is not None and (
                 not self.nodes_manager._refresh_due(self.retry)
+                or (self._lock is not None and self._lock.locked())
             ):
-                # A refresh was asked for but is not due yet; the flag stays,
-                # so the first call after it is due runs it
+                # A refresh was asked for but is not due yet, or another task
+                # is running it; the current topology keeps serving. The flag
+                # stays until a refresh succeeds, so a later call runs it
                 return self
             if not self._lock:
                 self._lock = asyncio.Lock()
@@ -1542,7 +1554,7 @@ class RedisCluster(
                         )
                     # Space the attempts out as the retry backoff says; the
                     # refresh the error asked for runs after this delay
-                    delay = _retry_backoff_delay(self.retry, failure_count)
+                    delay = self._retry_backoff_delay(self.retry, failure_count)
                     if delay > 0:
                         await asyncio.sleep(delay)
                     continue
@@ -1644,8 +1656,9 @@ class RedisCluster(
                 # maxclients limit: server-side capacity, not a node failure.
                 # Recycling the node's working connections or refreshing the
                 # topology would only open more connections the server refuses,
-                # so re-raise without either. The connection whose handshake
-                # failed has already disconnected itself.
+                # so re-raise without either. The connection that read the error
+                # has already disconnected itself: read_response drops the
+                # connection on any error it raises.
                 e.connection = target_node
                 await self._record_command_metric(
                     command_name=command,
@@ -1664,8 +1677,11 @@ class RedisCluster(
                 # have closed them all and the retries would take them one by one.
                 target_node._mark_free_connections_for_reconnect_on_error(e)
 
-                # Move the failed node to the end of the cached nodes list
-                # so it's tried last during reinitialization
+                # Move the failed node to the end of the cached nodes. The
+                # refresh keeps that order, so it does not pick this node as the
+                # default node while it is still a primary. The order the
+                # refresh queries nodes in comes from last_failed_node_name
+                # below: it shuffles the startup nodes and tries this one last.
                 self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
                 e.last_failed_node_name = target_node.name
                 # Kept until a refresh succeeds, so the refresh tries this node
@@ -1706,40 +1722,31 @@ class RedisCluster(
                 )
                 raise
             except MovedError as e:
-                # First, we will try to patch the slots/nodes cache with the
-                # redirected node output and try again. If MovedError exceeds
-                # 'reinitialize_steps' number of times, we will force
-                # reinitializing the tables, and then try again.
+                # Patch the slots/nodes cache with the redirected node and try
+                # again. Every 'reinitialize_steps' MOVED errors, also ask for a
+                # refresh of the whole topology, run by the next attempt of any
+                # command once due: the redirect needs only this slot, which the
+                # patch already points to the node that owns it.
                 # 'reinitialize_steps' counter will increase faster when
-                # the same client object is shared between multiple threads. To
+                # the same client object is shared between multiple tasks. To
                 # reduce the frequency you can set this variable in the
                 # RedisCluster constructor.
                 self.reinitialize_counter += 1
-                should_reinitialize = bool(
-                    self.reinitialize_steps
-                    and self.reinitialize_counter % self.reinitialize_steps == 0
-                )
-                if should_reinitialize and self.nodes_manager._refresh_due(self.retry):
-                    # Refresh the topology in place: the nodes that stay keep
-                    # their connections, whatever their role, and the refresh
-                    # releases the connections of the nodes that left
-                    await self._refresh_topology(
-                        additional_startup_nodes_info=[(e.host, e.port)]
-                    )
-                    # This refresh also answers a pending request, as in
-                    # initialize(), so the next command does not repeat it
-                    self._initialize = False
+                await self.nodes_manager.move_slot(e)
+                if _should_request_refresh(
+                    self.reinitialize_steps, self.reinitialize_counter
+                ):
+                    # The refresh also queries the node the error pointed to
+                    node_info = (e.host, e.port)
+                    requested = self.nodes_manager._requested_additional_startup_nodes
+                    if node_info not in requested:
+                        self.nodes_manager._requested_additional_startup_nodes = (
+                            *requested,
+                            node_info,
+                        )
+                    self._initialize = True
                     # Reset the counter
                     self.reinitialize_counter = 0
-                else:
-                    # Below the threshold, or a refresh ran less than the
-                    # minimum interval ago: patch just this slot
-                    await self.nodes_manager.move_slot(e)
-                    if should_reinitialize:
-                        # The threshold was reached but the refresh is not due:
-                        # ask for it, run by a later command once due, instead
-                        # of dropping it
-                        self._initialize = True
                 moved = True
                 await self._record_command_metric(
                     command_name=command,
@@ -2217,7 +2224,7 @@ class ClusterNode:
         Returns whether the error was one that marks them.
         """
         if isinstance(error, ConnectionError) and not isinstance(
-            error, _NOT_NODE_FAILURE_ERRORS
+            error, RedisCluster.NOT_NODE_FAILURE_ERRORS
         ):
             for connection in self._free:
                 connection.mark_for_reconnect()
@@ -2434,6 +2441,7 @@ class NodesManager:
         "_failed_refreshes",
         "_refresh_delay",
         "_requested_last_failed_node_name",
+        "_requested_additional_startup_nodes",
     )
 
     def __init__(
@@ -2466,6 +2474,9 @@ class NodesManager:
         # The node whose connection error asked for the pending refresh: the
         # refresh tries it last when no other name is passed in
         self._requested_last_failed_node_name: Optional[str] = None
+        # The nodes a MOVED error that asked for the pending refresh pointed
+        # to: the refresh also queries them, after the startup nodes
+        self._requested_additional_startup_nodes: Tuple[Tuple[str, int], ...] = ()
 
         self._background_tasks: Set[asyncio.Task] = set()
         self._dynamic_startup_nodes: bool = dynamic_startup_nodes
@@ -2734,6 +2745,16 @@ class NodesManager:
             requested_last_failed_node_name = self._requested_last_failed_node_name
             if last_failed_node_name is None:
                 last_failed_node_name = requested_last_failed_node_name
+            requested_additional_startup_nodes = (
+                self._requested_additional_startup_nodes
+            )
+            if requested_additional_startup_nodes:
+                # A new list: the one passed in belongs to the caller
+                additional_startup_nodes_info = additional_startup_nodes_info + [
+                    node_info
+                    for node_info in requested_additional_startup_nodes
+                    if node_info not in additional_startup_nodes_info
+                ]
 
             # Copy to a list to prevent RuntimeError if self.startup_nodes
             # is modified during iteration, then shuffle the iteration order.
@@ -2953,6 +2974,11 @@ class NodesManager:
                 # Answered by this refresh; another node that failed while it
                 # ran stays for the next one
                 self._requested_last_failed_node_name = None
+            if (
+                self._requested_additional_startup_nodes
+                == requested_additional_startup_nodes
+            ):
+                self._requested_additional_startup_nodes = ()
             self._refresh_delay = None
             self._epoch += 1
         # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
@@ -3429,7 +3455,7 @@ class PipelineStrategy(AbstractStrategy):
                         allow_redirections=allow_redirections,
                     )
 
-                except _NOT_NODE_FAILURE_ERRORS:
+                except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                     raise
                 except RedisCluster.ERRORS_ALLOW_RETRY as e:
                     if retry_attempts > 0:
@@ -3441,7 +3467,7 @@ class PipelineStrategy(AbstractStrategy):
                         self._pipe.cluster_client._initialize = True
                         failure_count += 1
                         # Space the attempts out as the retry backoff says
-                        delay = _retry_backoff_delay(
+                        delay = self._pipe.cluster_client._retry_backoff_delay(
                             self._pipe.cluster_client.retry, failure_count
                         )
                         if delay > 0:
@@ -3752,7 +3778,7 @@ class TransactionStrategy(AbstractStrategy):
         return await self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
             self._reinitialize_on_error,
-            is_retryable=_is_retryable_cluster_error,
+            is_retryable=RedisCluster._is_retryable_cluster_error,
             with_failure_count=True,
         )
 
@@ -3857,28 +3883,30 @@ class TransactionStrategy(AbstractStrategy):
                 self._transaction_connection = None
 
             self._pipe.cluster_client.reinitialize_counter += 1
-            should_reinitialize = bool(
-                self._pipe.cluster_client.reinitialize_steps
-                and self._pipe.cluster_client.reinitialize_counter
-                % self._pipe.cluster_client.reinitialize_steps
-                == 0
+            should_request_refresh = _should_request_refresh(
+                self._pipe.cluster_client.reinitialize_steps,
+                self._pipe.cluster_client.reinitialize_counter,
             )
-            if (
-                should_reinitialize
-                and self._pipe.cluster_client.nodes_manager._refresh_due(
+            if isinstance(error, AskError):
+                # MovedError is an AskError, so a MOVED slot is patched too, and
+                # the retry goes to the node that owns it now. The refresh is
+                # only asked for, run by the next command once due.
+                await self._pipe.cluster_client.nodes_manager.move_slot(error)
+                if should_request_refresh:
+                    self._pipe.cluster_client._initialize = True
+                    self._pipe.cluster_client.reinitialize_counter = 0
+            elif should_request_refresh:
+                # A connection error: the retry needs the refreshed topology to
+                # leave the failed node, so the refresh runs here when due
+                if self._pipe.cluster_client.nodes_manager._refresh_due(
                     self._pipe.cluster_client.retry
-                )
-            ):
-                await self._pipe.cluster_client.nodes_manager.initialize()
-                self.reinitialize_counter = 0
-            else:
-                # MovedError is an AskError, so a MOVED slot is patched too
-                if isinstance(error, AskError):
-                    await self._pipe.cluster_client.nodes_manager.move_slot(error)
-                if should_reinitialize:
-                    # The threshold was reached but a refresh ran less than the
-                    # minimum interval ago: ask for one, run by the next command
-                    # once due, instead of dropping it
+                ):
+                    await self._pipe.cluster_client.nodes_manager.initialize()
+                    self._pipe.cluster_client.reinitialize_counter = 0
+                else:
+                    # A refresh ran less than the minimum interval ago: ask for
+                    # one, run by the next command once due, instead of
+                    # dropping it
                     self._pipe.cluster_client._initialize = True
 
         self._executing = False
@@ -3924,7 +3952,7 @@ class TransactionStrategy(AbstractStrategy):
             lambda error, failure_count: self._reinitialize_on_error(
                 error, failure_count
             ),
-            is_retryable=_is_retryable_cluster_error,
+            is_retryable=RedisCluster._is_retryable_cluster_error,
             with_failure_count=True,
         )
 
@@ -3937,6 +3965,13 @@ class TransactionStrategy(AbstractStrategy):
             )
 
         self._executing = True
+
+        # Run a topology refresh an earlier error asked for, once due. This runs
+        # on the caller's loop, before every attempt; the WATCH path
+        # (execute_command) runs on a private loop and leaves it to the next
+        # command.
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
         # Only disconnect if not watching - disconnecting would lose WATCH state
