@@ -382,6 +382,36 @@ class TestClusterTransaction:
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
+    async def test_watch_connection_stays_with_its_node_after_slot_move(self, r):
+        """
+        A slot moved by a refresh while keys are watched does not pair the held
+        connection with the new owner: commands keep using the node the
+        connection belongs to, and the connection goes back to that node's pool.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        node_owning, node_other = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
+        try:
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch(key)
+                # As a refresh that moves the slot to another node would
+                r.nodes_manager.slots_cache[slot] = [node_other]
+                await pipe.get(key)
+
+                pipe.multi()
+                pipe.set(key, "val")
+                assert await pipe.execute() == [True]
+
+            assert not any(
+                (conn.host, conn.port) == (node_owning.host, node_owning.port)
+                for conn in node_other._free
+            )
+        finally:
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
+
+    @pytest.mark.onlycluster
     async def test_exec_error_raised(self, r):
         hashkey = "{key}"
         await r.set(f"{hashkey}:c", "a")

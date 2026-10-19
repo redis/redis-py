@@ -4913,6 +4913,59 @@ class TestNodesManager:
         finally:
             patcher.stop()
 
+    @pytest.mark.fixed_client
+    def test_additional_startup_node_that_is_a_startup_node_keeps_its_client(self):
+        """
+        An additional startup node that is already a startup node is queried
+        through that node's client, and not again through a new client that
+        would replace the live node's one.
+        """
+        partial = [[0, 8191, ["127.0.0.1", 7000]]]
+        patcher, nm = self._refresh_with_cluster_slots([partial, partial])
+        try:
+            old_client = nm.nodes_cache["127.0.0.1:7000"].redis_connection
+            update_patch, disconnect_patch = self._patch_pool_release()
+            with (
+                patch.object(
+                    nm, "create_redis_node", wraps=nm.create_redis_node
+                ) as create_mock,
+                update_patch as update_mock,
+                disconnect_patch as disconnect_mock,
+            ):
+                nm.initialize(additional_startup_nodes_info=[("127.0.0.1", 7000)])
+
+            create_mock.assert_not_called()
+            assert self._freed_pools(update_mock, disconnect_mock) == set()
+            assert nm.nodes_cache["127.0.0.1:7000"].redis_connection is old_client
+            assert nm.startup_nodes["127.0.0.1:7000"].redis_connection is old_client
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_refresh_without_full_coverage_builds_no_node_clients(self):
+        """
+        A refresh that fails the full-coverage check raises before it builds
+        clients for the nodes it discovered.
+        """
+        full = [[0, 16383, ["127.0.0.1", 7000]]]
+        partial = [[0, 8191, ["127.0.0.1", 7001]]]
+        patcher, nm = self._refresh_with_cluster_slots(
+            [full, partial], require_full_coverage=True
+        )
+        try:
+            current_pools = self._current_pools(nm)
+            with patch.object(
+                nm, "create_redis_node", wraps=nm.create_redis_node
+            ) as create_mock:
+                with pytest.raises(RedisClusterException):
+                    nm.initialize()
+
+            create_mock.assert_not_called()
+            assert "127.0.0.1:7001" not in nm.nodes_cache
+            assert self._current_pools(nm) == current_pools
+        finally:
+            patcher.stop()
+
     @staticmethod
     def _streaming_credential_provider():
         class FakeStreamingCredentialProvider(StreamingCredentialProvider):

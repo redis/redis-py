@@ -3268,6 +3268,7 @@ class NodesManager:
 
             with self._lock:
                 startup_nodes = list(self.startup_nodes.values())
+            startup_node_names = {node.name for node in startup_nodes}
             deferred_failed_nodes = []
             if last_failed_node_name is not None:
                 for index, node in enumerate(startup_nodes):
@@ -3279,8 +3280,12 @@ class NodesManager:
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
 
+            # An address that is already a startup node is queried through that
+            # node's client, so a second client never replaces a live node's one
             additional_startup_nodes = [
-                ClusterNode(host, port) for host, port in additional_startup_nodes_info
+                ClusterNode(host, port)
+                for host, port in additional_startup_nodes_info
+                if get_node_name(host, port) not in startup_node_names
             ]
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
@@ -3468,10 +3473,6 @@ class NodesManager:
                     # Ensure we clear local references to caught exceptions
                     exception = None
 
-            # Create Redis connections to all new nodes. They are registered for
-            # re-authentication once they replace the current nodes below.
-            self._create_redis_connections(tmp_nodes_cache.values())
-
             # Check if the slots are not fully covered
             if not fully_covered and self._require_full_coverage:
                 # Despite the requirement that the slots be covered, there
@@ -3481,6 +3482,10 @@ class NodesManager:
                     f"{len(tmp_slots)} of {REDIS_CLUSTER_HASH_SLOTS} "
                     f"covered..."
                 )
+
+            # Create Redis connections to all new nodes. They are registered for
+            # re-authentication once they replace the current nodes below.
+            self._create_redis_connections(tmp_nodes_cache.values())
 
             # Set the tmp variables to the real variables
             with self._lock:
