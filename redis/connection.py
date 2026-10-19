@@ -3001,6 +3001,17 @@ class SSLConnection(Connection):
             con.connect((self.host, self.port))
             con.do_handshake()
             con.shutdown()
+
+            # The staple was validated on a second connection, so it only
+            # vouches for sslsock if both presented the same certificate.
+            staple_cert = OpenSSL.crypto.dump_certificate(
+                OpenSSL.crypto.FILETYPE_ASN1, con.get_peer_certificate()
+            )
+            if staple_cert != sslsock.getpeercert(True):
+                sslsock.close()
+                raise ConnectionError(
+                    "ocsp stapled certificate does not match the connection certificate"
+                )
             return sslsock
 
         # pure ocsp validation

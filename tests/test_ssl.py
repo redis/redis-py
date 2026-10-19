@@ -2,6 +2,7 @@ import datetime
 import os
 import socket
 import ssl
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -715,3 +716,92 @@ class TestOCSPCertificateBinding:
             else:
                 os.environ["TZ"] = original_tz
             time.tzset()
+
+    @staticmethod
+    def _serve_tls(handshakes):
+        """Accept one loopback TLS connection per (certificate, key, issuer,
+        staple) entry, in order, and return the listening port."""
+        OpenSSL = pytest.importorskip("OpenSSL")
+
+        listener = socket.create_server(("127.0.0.1", 0))
+
+        def serve():
+            accepted = []
+            with listener:
+                for cert, key, issuer, staple in handshakes:
+                    raw, _ = listener.accept()
+                    accepted.append(raw)
+                    ctx = OpenSSL.SSL.Context(OpenSSL.SSL.TLS_SERVER_METHOD)
+                    ctx.use_certificate(OpenSSL.crypto.X509.from_cryptography(cert))
+                    ctx.use_privatekey(OpenSSL.crypto.PKey.from_cryptography_key(key))
+                    ctx.add_extra_chain_cert(
+                        OpenSSL.crypto.X509.from_cryptography(issuer)
+                    )
+                    if staple is not None:
+                        ctx.set_ocsp_server_callback(lambda *_, s=staple: s)
+                    con = OpenSSL.SSL.Connection(ctx, raw)
+                    con.set_accept_state()
+                    try:
+                        con.do_handshake()
+                    except OpenSSL.SSL.Error:
+                        pass
+            for raw in accepted:
+                raw.close()
+
+        threading.Thread(target=serve, daemon=True).start()
+        return listener.getsockname()[1]
+
+    def _stapled_connection(self, port, ca):
+        import OpenSSL
+        from cryptography.hazmat.primitives import serialization
+
+        return redis.SSLConnection(
+            host="127.0.0.1",
+            port=port,
+            ssl_ca_data=ca.public_bytes(serialization.Encoding.PEM).decode(),
+            ssl_check_hostname=False,
+            ssl_exclude_verify_flags=[ssl.VERIFY_X509_STRICT],
+            ssl_validate_ocsp_stapled=True,
+            ssl_ocsp_context=OpenSSL.SSL.Context(OpenSSL.SSL.TLS_CLIENT_METHOD),
+        )
+
+    def _stapled_handshake_material(self):
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, key = self._make_certificate("node", 111, signing_key=ca_key)
+        other, other_key = self._make_certificate("other", 999, signing_key=ca_key)
+        staples = {
+            serial: self._good_response(
+                ca,
+                ca_key,
+                target,
+                now - datetime.timedelta(days=1),
+                now + datetime.timedelta(days=1),
+            )
+            for serial, target in ((111, cert), (999, other))
+        }
+        return ca, (cert, key, staples[111]), (other, other_key, staples[999])
+
+    def test_stapled_ocsp_accepts_staple_for_connection_certificate(self):
+        pytest.importorskip("OpenSSL")
+        ca, (cert, key, staple), _ = self._stapled_handshake_material()
+        port = self._serve_tls([(cert, key, ca, None), (cert, key, ca, staple)])
+
+        sock = self._stapled_connection(port, ca)._connect()
+        sock.close()
+
+    def test_stapled_ocsp_rejects_staple_for_other_certificate(self):
+        # The staple is fetched over a second connection. A GOOD staple for
+        # whatever certificate that connection presents says nothing about the
+        # certificate on the socket being returned, which may be revoked.
+        pytest.importorskip("OpenSSL")
+        ca, (cert, key, _), (other, other_key, other_staple) = (
+            self._stapled_handshake_material()
+        )
+        port = self._serve_tls(
+            [(cert, key, ca, None), (other, other_key, ca, other_staple)]
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            self._stapled_connection(port, ca)._connect()
+        assert "does not match" in str(e.value)
