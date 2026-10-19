@@ -1679,9 +1679,10 @@ def parse_function_stats_unified(response, **options):
     stats = {}
     for key, value in pairs_to_dict(response).items():
         if isinstance(value, list):
-            if str_if_bytes(key) == "running_script":
+            name = str_if_bytes(key)
+            if name == "running_script":
                 value = pairs_to_dict(value)
-            elif str_if_bytes(key) == "engines":
+            elif name == "engines":
                 value = {
                     engine: pairs_to_dict(engine_stats)
                     for engine, engine_stats in pairs_to_dict(value).items()
@@ -1703,13 +1704,16 @@ def parse_function_stats_resp3_to_resp2_legacy(response, **options):
     for key, value in response.items():
         if isinstance(value, dict):
             if str_if_bytes(key) == "engines":
-                value = {
-                    engine: [item for kv in engine_stats.items() for item in kv]
-                    if isinstance(engine_stats, dict)
-                    else engine_stats
-                    for engine, engine_stats in value.items()
-                }
-            value = [item for kv in value.items() for item in kv]
+                engines = []
+                for engine, engine_stats in value.items():
+                    if isinstance(engine_stats, dict):
+                        engine_stats = [
+                            item for kv in engine_stats.items() for item in kv
+                        ]
+                    engines.extend([engine, engine_stats])
+                value = engines
+            else:
+                value = [item for kv in value.items() for item in kv]
         flat.extend([key, value])
     return flat
 
