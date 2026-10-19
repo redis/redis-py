@@ -1518,6 +1518,17 @@ class TestPubSubReconnect:
             await task
 
 
+@pytest.mark.fixed_client
+async def test_run_requires_a_handler_for_every_shard_channel():
+    p = PubSub(MagicMock(), ignore_subscribe_messages=True)
+    p.shard_channels = {b"foo": None}
+
+    with pytest.raises(
+        redis.PubSubError, match="Shard Channel: 'b'foo'' has no handler registered"
+    ):
+        await p.run()
+
+
 @pytest.mark.onlynoncluster
 class TestPubSubRun:
     async def _subscribe(self, p, *args, **kwargs):
