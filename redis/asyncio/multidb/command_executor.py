@@ -1,6 +1,6 @@
 from abc import abstractmethod
-from asyncio import iscoroutinefunction
 from datetime import datetime
+from inspect import isawaitable
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
 from redis.asyncio import RedisCluster
@@ -272,10 +272,12 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
     async def execute_pubsub_method(self, method_name: str, *args, **kwargs):
         async def callback():
             method = getattr(self.active_pubsub, method_name)
-            if iscoroutinefunction(method):
-                response = await method(*args, **kwargs)
-            else:
-                response = method(*args, **kwargs)
+            response = method(*args, **kwargs)
+            # Some PubSub methods (e.g. unsubscribe/sunsubscribe) are plain
+            # methods that return an awaitable, so await by result, not by
+            # whether the method is a coroutine function.
+            if isawaitable(response):
+                response = await response
 
             await self._register_command_execution(args)
             return response
