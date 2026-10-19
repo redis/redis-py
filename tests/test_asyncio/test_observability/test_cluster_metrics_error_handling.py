@@ -296,6 +296,7 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
             cluster._policy_resolver = MagicMock()
             cluster._policy_resolver.resolve = AsyncMock(return_value=None)
             cluster.command_flags = {}
+            cluster._refresh_topology = AsyncMock()
 
             with patch.object(
                 ClusterNode,
@@ -312,6 +313,8 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
                             await cluster.execute_command(
                                 "GET", "key", target_nodes=target_node
                             )
+
+                    cluster._refresh_topology.assert_awaited_once_with()
 
                     mock_record.assert_called_once()
                     call_kwargs = mock_record.call_args.kwargs
@@ -338,6 +341,7 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
             cluster._policy_resolver = MagicMock()
             cluster._policy_resolver.resolve = AsyncMock(return_value=None)
             cluster.command_flags = {}
+            cluster._refresh_topology = AsyncMock()
 
             with patch.object(
                 ClusterNode,
@@ -354,6 +358,8 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
                             await cluster.execute_command(
                                 "GET", "key", target_nodes=target_node
                             )
+
+                    cluster._refresh_topology.assert_awaited_once_with()
 
                     mock_record.assert_called_once()
                     call_kwargs = mock_record.call_args.kwargs
