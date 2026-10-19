@@ -187,7 +187,8 @@ class TimeSeriesCommands:
                 all.
             labels:
                 A dictionary of label-value pairs that represent metadata labels of the
-                key.
+                key. Pass an empty dictionary to remove all labels. ``None`` leaves
+                the existing labels unchanged.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
                 of 8 in the range `[48..1048576]`. In earlier versions of the module the
@@ -1969,8 +1970,13 @@ class TimeSeriesCommands:
 
     @staticmethod
     def _append_labels(params: list[EncodableT], labels: dict[str, str] | None):
-        """Append LABELS property to params."""
-        if labels:
+        """Append LABELS property to params.
+
+        An empty dictionary still emits ``LABELS`` with no pairs, which
+        ``TS.ALTER`` treats as "remove all labels". ``None`` omits the
+        argument so existing labels are left unchanged.
+        """
+        if labels is not None:
             params.append("LABELS")
             for k, v in labels.items():
                 params.extend([k, v])

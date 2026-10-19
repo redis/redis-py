@@ -84,6 +84,8 @@ def test_alter(client):
     assert_resp_response(
         client, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    assert client.ts().alter(1, labels={})
+    assert {} == client.ts().info(1)["labels"]
 
 
 @pytest.mark.redismod
@@ -2139,6 +2141,28 @@ def test_nrange_aggregator_count_mismatch_raises(client):
             aggregators=["min"],
             bucket_size_msec=10,
         )
+
+
+@pytest.mark.fixed_client
+def test_append_labels_empty_dict_emits_labels_keyword():
+    # Server-free: empty labels must still send LABELS so TS.ALTER can clear them.
+    params = []
+    TimeSeriesCommands._append_labels(params, {})
+    assert params == ["LABELS"]
+
+
+@pytest.mark.fixed_client
+def test_append_labels_none_omits_labels_keyword():
+    params = []
+    TimeSeriesCommands._append_labels(params, None)
+    assert params == []
+
+
+@pytest.mark.fixed_client
+def test_append_labels_pairs():
+    params = []
+    TimeSeriesCommands._append_labels(params, {"Time": "Series"})
+    assert params == ["LABELS", "Time", "Series"]
 
 
 @pytest.mark.fixed_client

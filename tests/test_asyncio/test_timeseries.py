@@ -83,6 +83,8 @@ async def test_alter(decoded_r: redis.Redis):
     assert_resp_response(
         decoded_r, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    assert await decoded_r.ts().alter(KEY1, labels={})
+    assert {} == (await decoded_r.ts().info(KEY1))["labels"]
 
 
 @pytest.mark.redismod
