@@ -372,11 +372,14 @@ class TestSentinelManagedConnectionDemotedMaster:
         try:
             conn.send_command("CLIENT", "ID")
             client_id = conn.read_response()
-            conn.send_command("BLPOP", "redis-py:unblocked-test", 0)
+            conn.send_command("BLPOP", "redis-py:unblocked-test", 5)
+            unblocked = False
             for _ in range(50):
                 if admin.client_unblock(client_id, error=True):
+                    unblocked = True
                     break
                 time.sleep(0.01)
+            assert unblocked
             with pytest.raises(redis.ResponseError) as e:
                 conn.read_response()
             assert str(e.value).startswith("UNBLOCKED client unblocked")
