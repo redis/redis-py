@@ -84,6 +84,8 @@ def test_alter(client):
     assert_resp_response(
         client, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    assert client.ts().alter(1, labels={})
+    assert {} == client.ts().info(1)["labels"]
 
 
 @pytest.mark.redismod
