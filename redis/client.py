@@ -133,24 +133,23 @@ def _keeps_raw_reply(args, options) -> bool:
     return NEVER_DECODE in options and args[0] not in _TRANSACTION_DECODED_COMMANDS
 
 
-def _transaction_never_decode(get_encoder, commands) -> bool:
+def _transaction_never_decode(connection_kwargs, commands) -> bool:
     """
     Whether the EXEC reply must be read without decoding.
 
     EXEC returns the replies of all queued commands as one array, so the
     per-command ``NEVER_DECODE`` option cannot be applied while parsing it.
     When a queued command needs raw bytes, EXEC is read undecoded and the
-    other replies are decoded afterwards with ``decode_transaction_replies``.
-    ``commands`` yields ``(args, options)`` pairs. The encoder is only looked
-    up when a queued command keeps its raw reply.
+    other replies are decoded afterwards with ``_decode_transaction_replies``.
+    ``commands`` yields ``(args, options)`` pairs. They are only scanned when
+    the client decodes responses.
     """
-    return (
-        any(_keeps_raw_reply(args, options) for args, options in commands)
-        and get_encoder().decode_responses
+    return bool(connection_kwargs.get("decode_responses", False)) and any(
+        _keeps_raw_reply(args, options) for args, options in commands
     )
 
 
-def decode_transaction_replies(encoder, response, commands):
+def _decode_transaction_replies(encoder, response, commands):
     """Decode the EXEC replies of the commands that do not keep raw replies."""
     return [
         r
@@ -2162,7 +2161,7 @@ class Pipeline(Redis):
                     errors.append((i, e))
 
         # parse the EXEC.
-        never_decode = _transaction_never_decode(self.get_encoder, commands)
+        never_decode = _transaction_never_decode(self.get_connection_kwargs(), commands)
         try:
             if never_decode:
                 response = self.parse_response(connection, "_", **{NEVER_DECODE: []})
@@ -2190,7 +2189,7 @@ class Pipeline(Redis):
             )
 
         if never_decode:
-            response = decode_transaction_replies(
+            response = _decode_transaction_replies(
                 self.get_encoder(), response, commands
             )
 

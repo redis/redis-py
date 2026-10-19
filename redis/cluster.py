@@ -44,8 +44,8 @@ from redis.client import (
     CaseInsensitiveDict,
     PubSub,
     Redis,
+    _decode_transaction_replies,
     _transaction_never_decode,
-    decode_transaction_replies,
 )
 from redis.commands import RedisClusterCommands
 from redis.commands.helpers import list_or_args, parse_pubsub_subscriptions
@@ -5896,7 +5896,8 @@ class TransactionStrategy(AbstractStrategy):
         response = None
         # parse the EXEC.
         never_decode = _transaction_never_decode(
-            redis_node.get_encoder, ((c.args, c.options) for c in self._command_queue)
+            redis_node.get_connection_kwargs(),
+            ((c.args, c.options) for c in self._command_queue),
         )
         try:
             if never_decode:
@@ -5939,7 +5940,7 @@ class TransactionStrategy(AbstractStrategy):
             )
 
         if never_decode:
-            response = decode_transaction_replies(
+            response = _decode_transaction_replies(
                 redis_node.get_encoder(),
                 response,
                 [(c.args, c.options) for c in self._command_queue],

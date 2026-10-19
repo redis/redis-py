@@ -60,8 +60,8 @@ from redis.client import (
     NEVER_DECODE,
     AbstractRedis,
     CaseInsensitiveDict,
+    _decode_transaction_replies,
     _transaction_never_decode,
-    decode_transaction_replies,
 )
 from redis.commands import (
     AsyncCoreCommands,
@@ -2113,7 +2113,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                     errors.append((i, err))
 
         # parse the EXEC.
-        never_decode = _transaction_never_decode(self.get_encoder, commands)
+        never_decode = _transaction_never_decode(self.get_connection_kwargs(), commands)
         try:
             if never_decode:
                 response = await self.parse_response(
@@ -2144,7 +2144,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             ) from None
 
         if never_decode:
-            response = decode_transaction_replies(
+            response = _decode_transaction_replies(
                 self.get_encoder(), response, commands
             )
 

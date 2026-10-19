@@ -5,7 +5,12 @@ import pytest
 from redis import RedisClusterException
 import redis
 from redis._parsers import Encoder
-from redis.client import NEVER_DECODE, Pipeline, decode_transaction_replies
+from redis.client import (
+    NEVER_DECODE,
+    Pipeline,
+    _decode_transaction_replies,
+    _transaction_never_decode,
+)
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -495,7 +500,7 @@ def test_decode_transaction_replies():
         (("LPUSH", "k", "x"), {}),
         (("GET", "missing"), {}),
     ]
-    assert decode_transaction_replies(encoder, response, commands) == [
+    assert _decode_transaction_replies(encoder, response, commands) == [
         b"\xff raw",
         "v",
         ["a", ["b", 1]],
@@ -503,6 +508,18 @@ def test_decode_transaction_replies():
         error,
         None,
     ]
+
+
+def test_transaction_never_decode_checks_decode_responses_first():
+    def queue():
+        raise AssertionError("queue scanned without decode_responses")
+        yield
+
+    assert not _transaction_never_decode({}, queue())
+    assert not _transaction_never_decode({"decode_responses": False}, queue())
+    commands = [(("GET", "k"), {}), (("DUMP", "k"), {NEVER_DECODE: []})]
+    assert _transaction_never_decode({"decode_responses": True}, commands)
+    assert not _transaction_never_decode({"decode_responses": True}, commands[:1])
 
 
 @pytest.mark.fixed_client
