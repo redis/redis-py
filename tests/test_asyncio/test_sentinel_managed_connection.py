@@ -1,7 +1,9 @@
+import asyncio
 import socket
 from unittest import mock
 
 import pytest
+import redis.asyncio
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
@@ -123,4 +125,33 @@ async def test_unblocked_by_demotion_on_a_replica_connection_is_raised(
                 await conn.read_response()
         assert not isinstance(e.value, ConnectionError)
     finally:
+        await conn.disconnect()
+
+
+@pytest.mark.fixed_client
+async def test_client_unblock_error_is_not_a_demotion(connect_args):
+    """
+    Mirror of the sync test: CLIENT UNBLOCK ... ERROR also answers UNBLOCKED,
+    with another message. The server did not change role, so the error must
+    reach the caller.
+    """
+    conn = await _demoted_master_connection(connect_args)
+    admin = redis.asyncio.Redis(host=connect_args["host"], port=connect_args["port"])
+    try:
+        await conn.send_command("CLIENT", "ID")
+        client_id = await conn.read_response()
+        await conn.send_command("BLPOP", "redis-py:unblocked-test", 5)
+        unblocked = False
+        for _ in range(50):
+            if await admin.client_unblock(client_id, error=True):
+                unblocked = True
+                break
+            await asyncio.sleep(0.01)
+        assert unblocked
+        with pytest.raises(ResponseError) as e:
+            await conn.read_response()
+        assert str(e.value).startswith("UNBLOCKED client unblocked")
+        assert not isinstance(e.value, ConnectionError)
+    finally:
+        await admin.aclose()
         await conn.disconnect()
