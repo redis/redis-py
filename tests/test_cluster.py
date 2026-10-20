@@ -3,6 +3,7 @@ import datetime
 import select
 import socket
 import socketserver
+import ssl
 import threading
 from typing import List
 import warnings
@@ -31,6 +32,9 @@ from redis.cluster import (
     NodesManager,
     RedisCluster,
     get_node_name,
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
 )
 from redis.cache import CacheConfig
 from redis.commands.cluster import ClusterMultiKeyCommands
@@ -1028,6 +1032,29 @@ class TestRedisClusterObjMocked:
             == f"{default_host}:{default_port}"
         )
 
+    def test_ssl_options_reach_node_connections(self):
+        """
+        TLS options accepted by Redis must not be dropped by cleanup_kwargs
+        before they reach the per-node connection pools
+        """
+        cluster = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            ssl=True,
+            ssl_min_version=ssl.TLSVersion.TLSv1_3,
+            ssl_ciphers="ECDHE-RSA-AES256-GCM-SHA384",
+            ssl_validate_ocsp=True,
+            ssl_validate_ocsp_stapled=True,
+            ssl_ocsp_expected_cert="expected-cert",
+        )
+        node = cluster.get_node(host=default_host, port=default_port)
+        connection = node.redis_connection.connection_pool.make_connection()
+        assert connection.ssl_min_version == ssl.TLSVersion.TLSv1_3
+        assert connection.ssl_ciphers == "ECDHE-RSA-AES256-GCM-SHA384"
+        assert connection.ssl_validate_ocsp is True
+        assert connection.ssl_validate_ocsp_stapled is True
+        assert connection.ssl_ocsp_expected_cert == "expected-cert"
+
     def test_host_port_startup_node(self):
         """
         Test that it is possible to use host & port arguments as startup node
@@ -1424,6 +1451,19 @@ class TestClusterRedisCommands:
             for node in x[key]:
                 for attribute in node.keys():
                     assert attribute in attributes
+            slots = x["slots"] if "slots" in x else x[b"slots"]
+            if expects_resp2_shape(r) or expects_unified_shape(r):
+                assert all(
+                    isinstance(slot, tuple)
+                    and len(slot) == 2
+                    and all(isinstance(bound, int) for bound in slot)
+                    for slot in slots
+                )
+            else:
+                # protocol=3 with legacy_responses=True keeps the previous RESP3
+                # shape: the server's flat [start, end, ...] integer array.
+                assert len(slots) % 2 == 0
+                assert all(isinstance(bound, int) for bound in slots)
 
     @skip_if_server_version_lt("7.2.0")
     @skip_if_redis_enterprise()
@@ -6183,3 +6223,35 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
+
+
+def test_cluster_shards_slots_shape_is_protocol_agnostic():
+    """CLUSTER SHARDS slots must be the same (start, end) tuples whether the reply
+    arrived as RESP2 (flat shard arrays) or RESP3 (shard maps). The slots value is
+    a flat ``[start, end, ...]`` integer array on both protocols; only the outer
+    shard container changes, so both parse paths must pair it identically."""
+    resp2 = [
+        [
+            b"slots",
+            [0, 5460, 10000, 11000],
+            b"nodes",
+            [[b"id", b"abc", b"role", b"master"]],
+        ]
+    ]
+    resp3 = [
+        {
+            b"slots": [0, 5460, 10000, 11000],
+            b"nodes": [{b"id": b"abc", b"role": b"master"}],
+        }
+    ]
+    expected = [(0, 5460), (10000, 11000)]
+
+    for parser in (parse_cluster_shards_unified, parse_cluster_shards_with_str_keys):
+        assert parser(resp2)[0]["slots"] == expected
+        assert parser(resp3)[0]["slots"] == expected
+        assert parser(resp2)[0]["slots"] == parser(resp3)[0]["slots"]
+
+    # An empty CLUSTER SHARDS reply (node with no slots assigned) must not raise.
+    assert parse_cluster_shards([]) == []
+    assert parse_cluster_shards_unified([]) == []
+    assert parse_cluster_shards_with_str_keys([]) == []
