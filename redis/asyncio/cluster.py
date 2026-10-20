@@ -3564,17 +3564,18 @@ class PipelineStrategy(AbstractStrategy):
             asyncio.create_task(node[0].execute_pipeline(node[1]))
             for node in nodes.values()
         ]
-        try:
-            errors = await asyncio.gather(*tasks)
-        except (ConnectionError, TimeoutError) as e:
-            # The write failed (the connection connects lazily on it): the
-            # error carries no node, so find the node whose task raised it
-            if not isinstance(e, RedisCluster.NOT_NODE_FAILURE_ERRORS):
-                for (node, _), task in zip(nodes.values(), tasks):
-                    if task.done() and not task.cancelled() and task.exception() is e:
-                        self._try_failed_node_last(client, node)
-                        break
-            raise
+        # Let every node task settle before raising, so a retry never resends
+        # commands that a sibling task is still executing
+        errors = await asyncio.gather(*tasks, return_exceptions=True)
+        for (node, _), e in zip(nodes.values(), errors):
+            if isinstance(e, BaseException):
+                # The write failed (the connection connects lazily on it): the
+                # error carries no node, so take it from the task that raised it
+                if isinstance(e, (ConnectionError, TimeoutError)) and not isinstance(
+                    e, RedisCluster.NOT_NODE_FAILURE_ERRORS
+                ):
+                    self._try_failed_node_last(client, node)
+                raise e
 
         # Record operation duration for each node
         for (node, commands), failed in zip(nodes.values(), errors):

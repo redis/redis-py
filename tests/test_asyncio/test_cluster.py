@@ -1452,6 +1452,53 @@ class TestTopologyRefreshKeepsConnections:
         assert list(nm.nodes_cache)[-1] == failed.name
         assert nm._requested_last_failed_node_name is None
 
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_pipeline_retry_waits_for_sibling_node_tasks(self) -> None:
+        """
+        When one node's pipeline write fails while another node's pipeline is
+        still in flight, the retry starts only after the sibling settles, so
+        the sibling's commands are not sent twice.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        failed = r.get_node_from_key("foo")
+        sibling = r.get_node_from_key("bar")
+        assert failed.name != sibling.name
+        attempts = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            attempts.append(node.name)
+            if node.name == failed.name and attempts.count(node.name) == 1:
+                raise ConnectionError("down")
+            if node.name == sibling.name:
+                # Still reading after the failed node's write has raised
+                for _ in range(5):
+                    await asyncio.sleep(0)
+            for command in commands:
+                command.result = command.args[1].encode()
+            return False
+
+        execute_command, _ = self._command_side_effect([])
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+        ):
+            async with r.pipeline() as pipe:
+                assert await pipe.get("foo").get("bar").execute() == [b"foo", b"bar"]
+
+        assert attempts.count(failed.name) == 2
+        assert attempts.count(sibling.name) == 1
+
     class _ServerClosedConnection:
         """
         A free connection the server closed (a restart, an idle ``timeout``):
