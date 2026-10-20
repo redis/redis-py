@@ -337,7 +337,7 @@ class TestSentinelManagedConnectionDemotedMaster:
             with mock.patch.object(
                 conn._parser,
                 "read_response",
-                side_effect=redis.ResponseError(DEMOTION_ERROR),
+                return_value=redis.ResponseError(DEMOTION_ERROR),
             ):
                 with pytest.raises(redis.ConnectionError) as e:
                     conn.read_response()
@@ -354,11 +354,12 @@ class TestSentinelManagedConnectionDemotedMaster:
             with mock.patch.object(
                 conn._parser,
                 "read_response",
-                side_effect=redis.ResponseError(DEMOTION_ERROR),
+                return_value=redis.ResponseError(DEMOTION_ERROR),
             ):
                 with pytest.raises(redis.ResponseError) as e:
                     conn.read_response()
             assert not isinstance(e.value, redis.ConnectionError)
+            assert conn._sock is not None
         finally:
             conn.disconnect()
 

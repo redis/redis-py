@@ -98,7 +98,7 @@ async def test_unblocked_by_demotion_is_a_connection_error(connect_args):
         with mock.patch.object(
             conn,
             "_read_response_from_parser",
-            side_effect=ResponseError(DEMOTION_ERROR),
+            return_value=ResponseError(DEMOTION_ERROR),
         ):
             with pytest.raises(ConnectionError) as e:
                 await conn.read_response()
@@ -119,11 +119,12 @@ async def test_unblocked_by_demotion_on_a_replica_connection_is_raised(
         with mock.patch.object(
             conn,
             "_read_response_from_parser",
-            side_effect=ResponseError(DEMOTION_ERROR),
+            return_value=ResponseError(DEMOTION_ERROR),
         ):
             with pytest.raises(ResponseError) as e:
                 await conn.read_response()
         assert not isinstance(e.value, ConnectionError)
+        assert conn.is_connected
     finally:
         await conn.disconnect()
 
