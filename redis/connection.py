@@ -2041,6 +2041,17 @@ def _cache_owned_command(args) -> str | None:
     return None
 
 
+_IMMUTABLE_TYPES = (bytes, str, int, float, bool, type(None))
+
+
+def _clone_cache_value(value: Any) -> Any:
+    # Restrict fast path to exact built-in types so subclasses with mutable
+    # instance attributes are safely deep-copied.
+    if type(value) in _IMMUTABLE_TYPES:
+        return value
+    return copy.deepcopy(value)
+
+
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
@@ -2307,20 +2318,25 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # serve, so it is not a hit: fall through and send. Returning without sending
             # would leave ``read_response`` reading a reply that was never requested.
             if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                self._pending_cache_hit = copy.deepcopy(entry.cache_value)
+                cached_value = entry.cache_value
                 self._current_command_cache_key = None
-                return
-
-            # Set temporary entry value to prevent
-            # race condition from another connection.
-            self._cache.set(
-                CacheEntry(
-                    cache_key=self._current_command_cache_key,
-                    cache_value=self.DUMMY_CACHE_VALUE,
-                    status=CacheEntryStatus.IN_PROGRESS,
-                    connection_ref=self._conn,
+                is_hit = True
+            else:
+                is_hit = False
+                # Set temporary entry value to prevent
+                # race condition from another connection.
+                self._cache.set(
+                    CacheEntry(
+                        cache_key=self._current_command_cache_key,
+                        cache_value=self.DUMMY_CACHE_VALUE,
+                        status=CacheEntryStatus.IN_PROGRESS,
+                        connection_ref=self._conn,
+                    )
                 )
-            )
+
+        if is_hit:
+            self._pending_cache_hit = _clone_cache_value(cached_value)
+            return
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached. Under optin the server remembers nothing
@@ -2409,6 +2425,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 disconnect_on_error=disconnect_on_error,
                 push_request=push_request,
             )
+            if self._current_command_cache_key is not None:
+                cloned_response = _clone_cache_value(response)
         except BaseException:
             # The placeholder ``send_command`` staked is resolved only by the read that just
             # failed, so it has to go with it. Left behind, it sits in the pool-wide cache
@@ -2440,8 +2458,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 and cache_entry.status == CacheEntryStatus.IN_PROGRESS
                 and cache_entry.connection_ref is self._conn
             ):
+                cache_entry.cache_value = cloned_response
                 cache_entry.status = CacheEntryStatus.VALID
-                cache_entry.cache_value = response
                 self._cache.set(cache_entry)
 
             self._current_command_cache_key = None

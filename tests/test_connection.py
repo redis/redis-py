@@ -2089,6 +2089,100 @@ class TestUnitCacheProxyConnection:
             push_request=True,
         )
 
+    def test_mutable_list_response_on_cache_miss_does_not_corrupt_cache(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Mutating a mutable response (e.g. from MGET or LRANGE) returned on a cache miss
+        must not mutate the cached entry, and subsequent hits must return original data.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = [b"val1", b"val2"]
+
+        # 1. Cache miss
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        miss_res = proxy.read_response()
+        assert miss_res == [b"val1", b"val2"]
+
+        # Mutate the miss response in-place
+        miss_res.append(b"corrupted")
+        miss_res[0] = b"mutated"
+
+        # 2. Cache hit
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        hit_res = proxy.read_response()
+        assert hit_res == [b"val1", b"val2"]
+        assert hit_res is not miss_res
+
+        # Mutating the hit response must also not affect subsequent hits
+        hit_res.append(b"hit_mutation")
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        hit_res_2 = proxy.read_response()
+        assert hit_res_2 == [b"val1", b"val2"]
+
+    def test_mutable_dict_response_on_cache_miss_does_not_corrupt_cache(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Mutating a dict response (e.g. from JSON.GET) on a miss must not corrupt the cache.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = {"a": 1, "nested": [1, 2]}
+
+        # 1. Miss
+        proxy.send_command("JSON.GET", "doc", keys=("doc",))
+        miss_res = proxy.read_response()
+        assert miss_res == {"a": 1, "nested": [1, 2]}
+
+        # In-place mutations
+        miss_res["a"] = 999
+        miss_res["nested"].append(3)
+
+        # 2. Hit
+        proxy.send_command("JSON.GET", "doc", keys=("doc",))
+        hit_res = proxy.read_response()
+        assert hit_res == {"a": 1, "nested": [1, 2]}
+
+    def test_immutable_response_identity_preserved(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Immutable responses (e.g. bytes, str, int, None) avoid unnecessary deepcopying.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        raw_val = b"hello_world"
+        mock_connection.read_response.return_value = raw_val
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        miss_res = proxy.read_response()
+        assert miss_res is raw_val
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        hit_res = proxy.read_response()
+        assert hit_res is raw_val
+
+    def test_interrupted_clone_drops_placeholder_and_reraises(
+        self, proxy_factory, mock_connection, monkeypatch
+    ):
+        """
+        When cloning is interrupted by BaseException (e.g. KeyboardInterrupt),
+        read_response must drop the placeholder and re-raise the exception.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = [b"large", b"list"]
+
+        def mock_clone(_val):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("redis.connection._clone_cache_value", mock_clone)
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        with pytest.raises(KeyboardInterrupt):
+            proxy.read_response()
+
+        assert proxy._current_command_cache_key is None
+        assert len(cache.collection) == 0
+
 
 @pytest.fixture()
 def proxy_factory(mock_connection):

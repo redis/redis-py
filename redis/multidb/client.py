@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, Iterable, List, Literal, Optional
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional
 
+from redis._parsers import Encoder
 from redis.asyncio.multidb.healthcheck import (
     HealthCheck,
     HealthCheckPolicy,
@@ -146,6 +147,28 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             )
 
         self.initialized = True
+
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """
+        Get the connection keyword arguments of the active database's client.
+        """
+        return self._underlying_client().get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """
+        Get the encoder of the active database's client.
+        """
+        return self._underlying_client().get_encoder()
+
+    def _underlying_client(self):
+        active_database = self.command_executor.active_database
+        if active_database is not None:
+            return active_database.client
+
+        # Before initialization there is no active database yet, so use the
+        # first configured one (databases are kept in descending weight order).
+        database, _ = self._databases.get_top_n(1)[0]
+        return database.client
 
     def get_databases(self) -> Databases:
         """
@@ -548,6 +571,14 @@ class Pipeline(RedisModuleCommands, CoreCommands):
     def __init__(self, client: MultiDBClient):
         self._command_stack = []
         self._client = client
+
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """Get the connection keyword arguments of the parent client."""
+        return self._client.get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """Get the encoder of the parent client."""
+        return self._client.get_encoder()
 
     def __enter__(self) -> "Pipeline":
         return self

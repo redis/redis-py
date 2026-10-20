@@ -3,6 +3,7 @@ import datetime
 import select
 import socket
 import socketserver
+import ssl
 import threading
 from typing import List
 import warnings
@@ -1030,6 +1031,29 @@ class TestRedisClusterObjMocked:
             get_node_name(default_host, default_port)
             == f"{default_host}:{default_port}"
         )
+
+    def test_ssl_options_reach_node_connections(self):
+        """
+        TLS options accepted by Redis must not be dropped by cleanup_kwargs
+        before they reach the per-node connection pools
+        """
+        cluster = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            ssl=True,
+            ssl_min_version=ssl.TLSVersion.TLSv1_3,
+            ssl_ciphers="ECDHE-RSA-AES256-GCM-SHA384",
+            ssl_validate_ocsp=True,
+            ssl_validate_ocsp_stapled=True,
+            ssl_ocsp_expected_cert="expected-cert",
+        )
+        node = cluster.get_node(host=default_host, port=default_port)
+        connection = node.redis_connection.connection_pool.make_connection()
+        assert connection.ssl_min_version == ssl.TLSVersion.TLSv1_3
+        assert connection.ssl_ciphers == "ECDHE-RSA-AES256-GCM-SHA384"
+        assert connection.ssl_validate_ocsp is True
+        assert connection.ssl_validate_ocsp_stapled is True
+        assert connection.ssl_ocsp_expected_cert == "expected-cert"
 
     def test_host_port_startup_node(self):
         """
