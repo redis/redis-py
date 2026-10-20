@@ -32,6 +32,9 @@ from redis.cluster import (
     NodesManager,
     RedisCluster,
     get_node_name,
+    parse_cluster_shards,
+    parse_cluster_shards_unified,
+    parse_cluster_shards_with_str_keys,
 )
 from redis.cache import CacheConfig
 from redis.commands.cluster import ClusterMultiKeyCommands
@@ -1448,6 +1451,19 @@ class TestClusterRedisCommands:
             for node in x[key]:
                 for attribute in node.keys():
                     assert attribute in attributes
+            slots = x["slots"] if "slots" in x else x[b"slots"]
+            if expects_resp2_shape(r) or expects_unified_shape(r):
+                assert all(
+                    isinstance(slot, tuple)
+                    and len(slot) == 2
+                    and all(isinstance(bound, int) for bound in slot)
+                    for slot in slots
+                )
+            else:
+                # protocol=3 with legacy_responses=True keeps the previous RESP3
+                # shape: the server's flat [start, end, ...] integer array.
+                assert len(slots) % 2 == 0
+                assert all(isinstance(bound, int) for bound in slots)
 
     @skip_if_server_version_lt("7.2.0")
     @skip_if_redis_enterprise()
@@ -6207,3 +6223,35 @@ class TestClusterPipelineMetricsRecording:
             duration = call_obj[0][0]
             assert isinstance(duration, float)
             assert duration >= 0
+
+
+def test_cluster_shards_slots_shape_is_protocol_agnostic():
+    """CLUSTER SHARDS slots must be the same (start, end) tuples whether the reply
+    arrived as RESP2 (flat shard arrays) or RESP3 (shard maps). The slots value is
+    a flat ``[start, end, ...]`` integer array on both protocols; only the outer
+    shard container changes, so both parse paths must pair it identically."""
+    resp2 = [
+        [
+            b"slots",
+            [0, 5460, 10000, 11000],
+            b"nodes",
+            [[b"id", b"abc", b"role", b"master"]],
+        ]
+    ]
+    resp3 = [
+        {
+            b"slots": [0, 5460, 10000, 11000],
+            b"nodes": [{b"id": b"abc", b"role": b"master"}],
+        }
+    ]
+    expected = [(0, 5460), (10000, 11000)]
+
+    for parser in (parse_cluster_shards_unified, parse_cluster_shards_with_str_keys):
+        assert parser(resp2)[0]["slots"] == expected
+        assert parser(resp3)[0]["slots"] == expected
+        assert parser(resp2)[0]["slots"] == parser(resp3)[0]["slots"]
+
+    # An empty CLUSTER SHARDS reply (node with no slots assigned) must not raise.
+    assert parse_cluster_shards([]) == []
+    assert parse_cluster_shards_unified([]) == []
+    assert parse_cluster_shards_with_str_keys([]) == []
