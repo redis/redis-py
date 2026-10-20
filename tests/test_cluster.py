@@ -4212,6 +4212,28 @@ class TestTopologyRefreshPacing:
             assert nm._refresh_requested is True
 
     @pytest.mark.fixed_client
+    def test_pipeline_connection_error_tries_the_failed_node_last(self):
+        """
+        A node the pipeline cannot connect to moves to the end of the cached
+        nodes, and the refresh asked for tries it last.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 0)
+        )
+        nm = rc.nodes_manager
+        failed = rc.get_node_from_key("foo")
+        assert list(nm.nodes_cache)[-1] != failed.name
+        with (
+            patch("redis.cluster.get_connection", side_effect=ConnectionError("down")),
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            with pytest.raises(ConnectionError):
+                rc.pipeline().get("foo").execute()
+
+        assert list(nm.nodes_cache)[-1] == failed.name
+        assert nm._requested_last_failed_node_name == failed.name
+
+    @pytest.mark.fixed_client
     def test_pubsub_topology_repair_is_a_paced_request(self):
         rc = get_mocked_redis_client(host=default_host, port=default_port)
         pubsub = rc.pubsub()

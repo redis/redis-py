@@ -3629,7 +3629,7 @@ class TestClusterPubSubSlotMigration:
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
         assert pubsub.cluster.initialize.await_count == 1
         # Asked for on the client, so a failed refresh stays asked for
-        assert pubsub.cluster._initialize is True
+        pubsub.cluster._request_refresh.assert_called_once_with()
         assert pubsub._unreachable_nodes == {"127.0.0.1:7000"}
 
         # Second failure inside the throttle window must not refresh again.

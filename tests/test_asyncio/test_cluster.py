@@ -569,6 +569,38 @@ class TestTopologyRefreshPacing:
         assert r.nodes_manager._requested_last_failed_node_name is None
 
     @pytest.mark.fixed_client
+    async def test_requests_are_merged_until_a_refresh_answers_them(self) -> None:
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        r._request_refresh(
+            additional_startup_nodes_info=[("127.0.0.1", 7001)],
+            last_failed_node_name="127.0.0.1:7000",
+        )
+        r._request_refresh(
+            additional_startup_nodes_info=[("127.0.0.1", 7001), ("127.0.0.1", 7002)]
+        )
+
+        assert r._initialize is True
+        assert nm._requested_additional_startup_nodes == (
+            ("127.0.0.1", 7001),
+            ("127.0.0.1", 7002),
+        )
+        assert nm._requested_last_failed_node_name == "127.0.0.1:7000"
+
+        async def execute_command(node, *args, **kwargs):
+            return default_cluster_slots
+
+        nm._last_refresh_at = None
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            await r.initialize()
+
+        assert r._initialize is False
+        assert nm._requested_additional_startup_nodes == ()
+        assert nm._requested_last_failed_node_name is None
+
+    @pytest.mark.fixed_client
     async def test_failed_node_name_outlives_refreshes_that_do_not_answer_it(
         self,
     ) -> None:
@@ -1162,6 +1194,79 @@ class TestTopologyRefreshKeepsConnections:
         assert r._initialize is False
 
     @pytest.mark.fixed_client
+    async def test_aclose_waits_for_a_cluster_down_refresh(self) -> None:
+        """
+        aclose() waits for the refresh a CLUSTERDOWN runs, so a refresh that
+        finishes after aclose() was called does not reopen the closed client.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 0)
+        )
+        execute_command, _ = self._command_side_effect([ClusterDownError("down")])
+        started = asyncio.Event()
+        release = asyncio.Event()
+        initialize = NodesManager.initialize
+
+        async def paused(nodes_manager, *args, **kwargs):
+            started.set()
+            await release.wait()
+            await initialize(nodes_manager, *args, **kwargs)
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                NodesManager, "initialize", autospec=True, side_effect=paused
+            ),
+        ):
+            command = asyncio.create_task(r.get("foo"))
+            await started.wait()
+            close = asyncio.create_task(r.aclose())
+            await asyncio.sleep(0)
+            assert not close.done()
+            release.set()
+            with pytest.raises(ClusterDownError):
+                await command
+            await close
+
+        assert r.nodes_manager.default_node is None
+        assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    async def test_concurrent_cluster_down_errors_run_one_refresh(self) -> None:
+        """
+        Tasks that hit CLUSTERDOWN while another task's refresh runs wait for
+        it and do not each refresh again.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        failures = [ClusterDownError("down"), ClusterDownError("down")]
+        refreshes = []
+
+        async def execute_command(node, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                refreshes.append(node.name)
+                # Slow enough for the other task to hit its error meanwhile
+                await asyncio.sleep(0.05)
+                return default_cluster_slots
+            if failures:
+                raise failures.pop(0)
+            return b"value"
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            assert await asyncio.gather(r.get("foo"), r.get("bar")) == [
+                b"value",
+                b"value",
+            ]
+
+        assert len(refreshes) == 1
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "error",
         [
@@ -1283,6 +1388,69 @@ class TestTopologyRefreshKeepsConnections:
         assert len(attempts) == 2
         assert refreshes
         assert self._disconnected(disconnect, nodes) == []
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("on_read", [False, True], ids=["write", "read"])
+    async def test_pipeline_connection_error_tries_the_failed_node_last(
+        self, on_read
+    ) -> None:
+        """
+        A connection error in a pipeline, on the write or on a read, moves the
+        failed node to the end of the cached nodes, and the refresh the retry
+        runs queries it last, even when the shuffle puts it first.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        failed = r.get_node_from_key("foo")
+        assert list(nm.nodes_cache)[-1] != failed.name
+        attempts = []
+        queried = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            attempts.append(node.name)
+            if len(attempts) > 1:
+                for command in commands:
+                    command.result = b"value"
+                return False
+            if not on_read:
+                raise ConnectionError("down")
+            for command in commands:
+                command.result = ConnectionError("down")
+            return True
+
+        async def execute_command(node, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                queried.append(node.name)
+                return default_cluster_slots
+            return b"value"
+
+        def shuffle(nodes) -> None:
+            nodes.sort(key=lambda node: node.name != failed.name)
+
+        nm._last_refresh_at = None
+        with (
+            mock.patch("redis.asyncio.cluster.random.shuffle", side_effect=shuffle),
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+        ):
+            async with r.pipeline() as pipe:
+                assert await pipe.get("foo").execute() == [b"value"]
+
+        assert len(attempts) == 2
+        assert queried and failed.name not in queried
+        assert list(nm.nodes_cache)[-1] == failed.name
+        assert nm._requested_last_failed_node_name is None
 
     class _ServerClosedConnection:
         """

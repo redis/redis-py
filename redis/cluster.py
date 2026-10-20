@@ -5685,7 +5685,12 @@ class PipelineStrategy(AbstractStrategy):
                             # Connection retries are being handled in the node's
                             # Retry object. Ask for a refresh of the node -> slot
                             # table, run by the next attempt, of any command,
-                            # once due.
+                            # once due. The failed node moves to the end of the
+                            # cached nodes, so the refresh does not pick it as
+                            # the default node while it is still a primary.
+                            self._nodes_manager.move_node_to_end_of_cached_nodes(
+                                node.name
+                            )
                             self._nodes_manager._request_refresh(
                                 last_failed_node_name=node.name
                             )
