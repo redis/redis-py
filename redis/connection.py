@@ -4385,7 +4385,7 @@ class BlockingConnectionPool(ConnectionPool):
     """
     Thread-safe blocking connection pool::
 
-        >>> from redis.client import Redis
+        >>> from redis import Redis, BlockingConnectionPool
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default

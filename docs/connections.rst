@@ -118,12 +118,16 @@ There are two ways to handle bursts of concurrent requests:
 
   .. code-block:: python
 
+     import redis
+
      r = redis.Redis(host="localhost", port=6379, max_connections=500)
 
 * Use a ``BlockingConnectionPool``. When all of its connections are in use, a caller waits for one
   to be released, for up to ``timeout`` seconds, and only then raises ``ConnectionError``:
 
   .. code-block:: python
+
+     import redis
 
      pool = redis.BlockingConnectionPool(
          host="localhost", port=6379, max_connections=100, timeout=10
@@ -133,6 +137,8 @@ There are two ways to handle bursts of concurrent requests:
   The asyncio client has the same pool:
 
   .. code-block:: python
+
+     import redis.asyncio
 
      pool = redis.asyncio.BlockingConnectionPool.from_url(
          "redis://localhost:6379", max_connections=100, timeout=10
