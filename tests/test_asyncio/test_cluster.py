@@ -4820,6 +4820,26 @@ class TestClusterPipeline:
             pipe.evalsha(sha, 1, "{user}a", 3)
             assert await pipe.execute() == [6]
 
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrank_withscore_decode_responses(self, create_redis) -> None:
+        """
+        A cluster pipeline reads decode_responses from its cluster client, so
+        custom-cast ZRANK/ZREVRANK scores come back as str, as on RESP2.
+        """
+        r = await create_redis(cls=RedisCluster, decode_responses=True)
+        identity = lambda x: x  # noqa: E731
+        await r.zadd("a", {"a1": 1, "a2": 2.5})
+        async with r.pipeline() as pipe:
+            pipe.zrank("a", "a2", withscore=True, score_cast_func=identity)
+            pipe.zrevrank("a", "a2", withscore=True, score_cast_func=identity)
+            result = await pipe.execute()
+        assert_resp_response(
+            r,
+            result,
+            [[1, "2.5"], [0, "2.5"]],
+            [[1, 2.5], [0, 2.5]],
+        )
+
     async def test_evalsha_zero_keys_in_pipeline(self, r: RedisCluster) -> None:
         """
         EVALSHA with numkeys=0 must execute in ClusterPipeline without
@@ -5376,6 +5396,67 @@ class TestClusterPipelineMocked:
                     pipe.set("foo", "bar")
                 assert pipe._execution_strategy._pipeline_slots == {keyed_slot}
                 assert pipe._execution_strategy._transaction_has_keyed_slot is True
+        finally:
+            await r.aclose()
+
+    async def test_transaction_keeps_held_connection_when_slot_owner_changes(
+        self,
+    ) -> None:
+        """
+        If the slot map changes while a transaction holds a connection, the
+        held (possibly WATCHing) connection must be kept, and reset() must
+        return it to the pool of the node that owns it, not the newly
+        resolved slot owner (#4253).
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        try:
+            original_node = r.get_node(host=default_host, port=7000)
+            new_node = r.get_node(host=default_host, port=7001)
+            assert original_node is not None and new_node is not None
+            assert original_node.name != new_node.name
+
+            def _seed_connection(node: ClusterNode) -> Connection:
+                node._free.clear()
+                conn = mock.AsyncMock(spec=Connection)
+                conn.host = node.host
+                conn.port = node.port
+                conn.should_reconnect.return_value = False
+                node._connections.append(conn)
+                node._free.append(conn)
+                return conn
+
+            original_conn = _seed_connection(original_node)
+            new_conn = _seed_connection(new_node)
+
+            slot = 0
+            r.nodes_manager.slots_cache[slot] = [original_node]
+
+            pipe = r.pipeline(transaction=True)
+            strategy = pipe._execution_strategy
+            # Simulate a mid-WATCH hold without talking to Redis
+            strategy._pipeline_slots = {slot}
+            strategy._watching = True
+            node, conn = strategy._get_client_and_connection_for_transaction()
+            assert node is original_node
+            assert conn is original_conn
+            assert original_conn not in original_node._free
+
+            # A concurrent topology refresh retargets the slot
+            r.nodes_manager.slots_cache[slot] = [new_node]
+
+            node, conn = strategy._get_client_and_connection_for_transaction()
+            assert node is original_node
+            assert conn is original_conn
+            assert strategy._transaction_node is original_node
+            assert strategy._transaction_connection is original_conn
+            assert new_conn in new_node._free
+
+            strategy._watching = False
+            await pipe.reset()
+            assert strategy._transaction_connection is None
+            assert strategy._transaction_node is None
+            assert original_conn in original_node._free
+            assert original_conn not in new_node._free
         finally:
             await r.aclose()
 

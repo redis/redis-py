@@ -508,6 +508,19 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(pubsub, "pattern")
         await self._test_subscribe_unsubscribe(**kwargs)
 
+    async def test_pattern_unsubscribe_with_a_list(self, pubsub):
+        # Like unsubscribe() and the sync PubSub.punsubscribe(), the first
+        # argument can be a list of patterns
+        p = pubsub
+        await p.psubscribe("f*", "b*")
+        for _ in range(2):
+            assert (await wait_for_message(p))["type"] == "psubscribe"
+
+        assert await p.punsubscribe(["f*", "b*"]) is None
+        for _ in range(2):
+            assert (await wait_for_message(p))["type"] == "punsubscribe"
+        assert p.subscribed is False
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     async def test_shard_channel_subscribe_unsubscribe(self, pubsub):
@@ -1516,6 +1529,17 @@ class TestPubSubReconnect:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.fixed_client
+async def test_run_requires_a_handler_for_every_shard_channel():
+    p = PubSub(MagicMock(), ignore_subscribe_messages=True)
+    p.shard_channels = {b"foo": None}
+
+    with pytest.raises(
+        redis.PubSubError, match="Shard Channel: 'b'foo'' has no handler registered"
+    ):
+        await p.run()
 
 
 @pytest.mark.onlynoncluster

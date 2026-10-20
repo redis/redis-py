@@ -2,6 +2,7 @@ from datetime import datetime
 import warnings
 import pytest
 import redis
+from redis.asyncio.utils import pipeline
 from redis.utils import (
     deprecated_function,
     deprecated_args,
@@ -143,3 +144,79 @@ class TestExperimentalArgsAsync:
             result = await async_func_no_args()
             assert result == "no_args"
             assert len(w) == 0
+
+
+@pytest.mark.fixed_client
+class TestPipelineContextManagerAsync:
+    class _FakePipeline:
+        def __init__(self):
+            self.executed = False
+            self.reset_calls = 0
+
+        async def execute(self):
+            self.executed = True
+
+        async def reset(self):
+            self.reset_calls += 1
+
+    class _FakeRedis:
+        def __init__(self, fake_pipeline):
+            self._fake_pipeline = fake_pipeline
+
+        def pipeline(self):
+            return self._fake_pipeline
+
+    async def test_executes_and_resets_on_success(self):
+        fake_pipeline = self._FakePipeline()
+        async with pipeline(self._FakeRedis(fake_pipeline)) as p:
+            assert p is fake_pipeline
+        assert fake_pipeline.executed is True
+        assert fake_pipeline.reset_calls == 1
+
+    async def test_resets_but_does_not_execute_on_exception(self):
+        # Same as the sync helper: the commands queued before the exception
+        # must not be sent, and reset() must still release the connection.
+        fake_pipeline = self._FakePipeline()
+        with pytest.raises(ValueError):
+            async with pipeline(self._FakeRedis(fake_pipeline)):
+                raise ValueError("boom")
+        assert fake_pipeline.executed is False
+        assert fake_pipeline.reset_calls == 1
+
+
+class OutOfStock(Exception):
+    pass
+
+
+async def _reserve(r, order):
+    async with pipeline(r) as p:
+        await p.watch(*order)
+        stock = dict(zip(order, await p.mget(*order)))
+        p.multi()
+        for key, qty in order.items():
+            if int(stock[key]) < qty:
+                raise OutOfStock(key)
+            p.decrby(key, qty)
+
+
+@pytest.mark.onlynoncluster
+async def test_pipeline_aborted_transaction_is_not_executed(r):
+    await r.mset({"stock:a": 5, "stock:b": 0})
+    in_use = len(list(r.connection_pool._get_in_use_connections()))
+    with pytest.raises(OutOfStock):
+        await _reserve(r, {"stock:a": 2, "stock:b": 1})
+    # the rejected order must not reserve anything, and the pipeline
+    # connection must be released
+    assert await r.get("stock:a") == b"5"
+    assert await r.get("stock:b") == b"0"
+    assert len(list(r.connection_pool._get_in_use_connections())) == in_use
+
+
+@pytest.mark.onlynoncluster
+async def test_pipeline_transaction_is_executed_on_success(r):
+    await r.mset({"stock:a": 5, "stock:b": 3})
+    in_use = len(list(r.connection_pool._get_in_use_connections()))
+    await _reserve(r, {"stock:a": 2, "stock:b": 1})
+    assert await r.get("stock:a") == b"3"
+    assert await r.get("stock:b") == b"2"
+    assert len(list(r.connection_pool._get_in_use_connections())) == in_use

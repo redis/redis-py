@@ -305,6 +305,34 @@ def test_strlen(client):
 
 
 @pytest.mark.redismod
+def test_none_path_is_root_path(client):
+    # path=None must address the root, not a member named "None".
+    client.json().set("arr", Path.root_path(), [0, 1])
+    assert 3 == client.json().arrappend("arr", None, 2)
+    assert 3 == client.json().arrlen("arr", None)
+    assert 2 == client.json().arrpop("arr", None)
+    assert_resp_response(client, client.json().type("arr", None), "array", ["array"])
+    assert isinstance(client.json().resp("arr", None), list)
+    assert 1 == client.json().clear("arr", None)
+    assert [] == client.json().get("arr")
+
+    client.json().set("obj", Path.root_path(), {"a": 1, "b": 2})
+    assert 2 == client.json().objlen("obj", None)
+    assert ["a", "b"] == sorted(client.json().objkeys("obj", None))
+    assert client.json().debug("MEMORY", "obj", None) > 0
+
+    client.json().set("str", Path.root_path(), "foo")
+    assert 6 == client.json().strappend("str", "bar", None)
+
+    client.json().set("bool", Path.root_path(), False)
+    assert client.json().toggle("bool", None)
+    assert client.json().get("bool") is True
+
+    assert 1 == client.json().delete("str", None)
+    assert client.exists("str") == 0
+
+
+@pytest.mark.redismod
 def test_arrappend(client):
     client.json().set("arr", Path.root_path(), [1])
     assert 2 == client.json().arrappend("arr", Path.root_path(), 2)
