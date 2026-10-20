@@ -183,10 +183,22 @@ def parse_cluster_slots(
     return slots
 
 
+def _pair_cluster_slots(slots):
+    """Pair a CLUSTER SHARDS flat ``[start, end, start, end, ...]`` slot array
+    into ``[(start, end), ...]``.
+
+    CLUSTER SHARDS returns each shard's slots as a flat integer array in both
+    RESP2 and RESP3; only the outer shard container differs between protocols.
+    """
+    return [(slots[i], slots[i + 1]) for i in range(0, len(slots), 2)]
+
+
 def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if not resp:
+        return resp
     if isinstance(resp[0], dict):
         return resp
     shards = []
@@ -224,9 +236,7 @@ def parse_cluster_shards_with_str_keys(resp, **options):
         slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
         nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
         shard = {
-            "slots": [
-                tuple(slot) if isinstance(slot, list) else slot for slot in slots
-            ],
+            "slots": _pair_cluster_slots(slots),
             "nodes": [dict(node) if isinstance(node, dict) else node for node in nodes],
         }
         shards.append(shard)
@@ -248,7 +258,7 @@ def parse_cluster_shards_unified(resp, **options):
             slots = shard_resp.get(b"slots", shard_resp.get("slots", []))
             nodes = shard_resp.get(b"nodes", shard_resp.get("nodes", []))
             shard = {
-                "slots": slots,
+                "slots": _pair_cluster_slots(slots),
                 "nodes": [
                     {str_if_bytes(k): v for k, v in node.items()}
                     if isinstance(node, dict)
@@ -326,6 +336,12 @@ REDIS_ALLOWED_KEYS = (
     "ssl_keyfile",
     "ssl_password",
     "ssl_check_hostname",
+    "ssl_validate_ocsp",
+    "ssl_validate_ocsp_stapled",
+    "ssl_ocsp_context",
+    "ssl_ocsp_expected_cert",
+    "ssl_min_version",
+    "ssl_ciphers",
     "unix_socket_path",
     "username",
     "cache",
@@ -3011,15 +3027,24 @@ class NodesManager:
                             "Cluster mode is not enabled on this node"
                         )
                     startup_nodes_reachable = True
+                    # An error from an earlier startup node is only raised when
+                    # no node answers, so drop it. Its traceback refers to this
+                    # frame: keeping it forms a reference cycle that holds
+                    # tmp_slots and tmp_nodes_cache until the GC runs.
+                    exception = None
                 except Exception as e:
                     # Try the next startup node.
-                    # The exception is saved and raised only if we have no more nodes.
+                    # The last error is kept while no node has answered, and is
+                    # raised only if none does.
                     if is_debug_log_enabled():
                         logger.debug(
                             "Topology refresh: CLUSTER SLOTS failed on "
                             f"{startup_node.name}: {type(e).__name__}: {e}"
                         )
-                    exception = e
+                    # Once a node has answered, later errors are not stored: they
+                    # would bring the cycle back.
+                    if not startup_nodes_reachable:
+                        exception = e
                     continue
 
                 # CLUSTER SLOTS command results in the following output:
@@ -3099,19 +3124,23 @@ class NodesManager:
                 # AuthorizationError subclass ConnectionError but cannot be
                 # repaired by a failover) must keep surfacing as a plain
                 # RedisClusterException.
-                if isinstance(
-                    exception, (ConnectionError, TimeoutError, OSError)
-                ) and not isinstance(
-                    exception, (AuthenticationError, AuthorizationError)
-                ):
-                    raise RedisClusterUnreachableError(
+                try:
+                    if isinstance(
+                        exception, (ConnectionError, TimeoutError, OSError)
+                    ) and not isinstance(
+                        exception, (AuthenticationError, AuthorizationError)
+                    ):
+                        raise RedisClusterUnreachableError(
+                            f"Redis Cluster cannot be connected. Please provide at least "
+                            f"one reachable node: {str(exception)}"
+                        ) from exception
+                    raise RedisClusterException(
                         f"Redis Cluster cannot be connected. Please provide at least "
                         f"one reachable node: {str(exception)}"
                     ) from exception
-                raise RedisClusterException(
-                    f"Redis Cluster cannot be connected. Please provide at least "
-                    f"one reachable node: {str(exception)}"
-                ) from exception
+                finally:
+                    # Ensure we clear local references to caught exceptions
+                    exception = None
 
             # Create Redis connections to all nodes
             self.create_redis_connections(list(tmp_nodes_cache.values()))
