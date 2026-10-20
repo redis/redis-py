@@ -91,6 +91,7 @@ from .conftest import (
     assert_resp_response,
     expects_resp2_shape,
     expects_unified_shape,
+    patch_monotonic,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -3689,9 +3690,9 @@ class TestTopologyRefreshPacing:
         patcher, nm = self._nodes_manager()
         try:
             nm._last_refresh_at = 100.0
-            with patch("redis.cluster.time.monotonic", return_value=100.9):
+            with patch_monotonic("redis.cluster", 100.9):
                 assert nm._refresh_due() is False
-            with patch("redis.cluster.time.monotonic", return_value=101.0):
+            with patch_monotonic("redis.cluster", 101.0):
                 assert nm._refresh_due() is True
         finally:
             patcher.stop()
@@ -3704,10 +3705,10 @@ class TestTopologyRefreshPacing:
             retry = Retry(backoff, 3)
             nm._last_refresh_at = 100.0
             nm._failed_refreshes = 3
-            nm._refresh_delay = None
-            with patch("redis.cluster.time.monotonic", return_value=102.9):
+            nm._refresh_due_at = None
+            with patch_monotonic("redis.cluster", 102.9):
                 assert nm._refresh_due(retry) is False
-            with patch("redis.cluster.time.monotonic", return_value=103.0):
+            with patch_monotonic("redis.cluster", 103.0):
                 assert nm._refresh_due(retry) is True
             # Computed once per refresh: a jittered backoff would otherwise
             # give a new delay on every check
@@ -3716,28 +3717,37 @@ class TestTopologyRefreshPacing:
             # The minimum interval is the floor for a shorter backoff
             short_retry = Retry(RecordingBackoff(step=0.1), 3)
             nm._failed_refreshes = 1
-            nm._refresh_delay = None
-            with patch("redis.cluster.time.monotonic", return_value=100.9):
+            nm._refresh_due_at = None
+            with patch_monotonic("redis.cluster", 100.9):
                 assert nm._refresh_due(short_retry) is False
-            with patch("redis.cluster.time.monotonic", return_value=101.0):
+            with patch_monotonic("redis.cluster", 101.0):
                 assert nm._refresh_due(short_retry) is True
         finally:
             patcher.stop()
 
     @pytest.mark.fixed_client
-    def test_backoff_delay_is_not_reused_after_the_failure_count_changed(self):
+    def test_due_time_of_failed_refreshes_is_not_kept_after_a_success(self):
         """
-        A delay another thread computed for 3 failed refreshes, written just
-        after a successful refresh reset the count, must not hold back the
-        next refresh for the backoff instead of the minimum interval.
+        The due time computed after 3 failed refreshes must not hold back the
+        refresh after a successful one for the backoff instead of the minimum
+        interval.
         """
         patcher, nm = self._nodes_manager()
         try:
             retry = Retry(RecordingBackoff(step=10.0), 3)
             nm._last_refresh_at = 100.0
-            nm._failed_refreshes = 0
-            nm._refresh_delay = (3, 30.0)
-            with patch("redis.cluster.time.monotonic", return_value=101.0):
+            nm._failed_refreshes = 3
+            nm._refresh_due_at = None
+            with patch_monotonic("redis.cluster", 101.0):
+                assert nm._refresh_due(retry) is False
+            assert nm._refresh_due_at == 130.0
+
+            with patch_monotonic("redis.cluster", 110.0):
+                nm.initialize()
+            assert nm._failed_refreshes == 0
+            with patch_monotonic("redis.cluster", 110.9):
+                assert nm._refresh_due(retry) is False
+            with patch_monotonic("redis.cluster", 111.0):
                 assert nm._refresh_due(retry) is True
         finally:
             patcher.stop()
@@ -3765,10 +3775,10 @@ class TestTopologyRefreshPacing:
         try:
             nm._last_refresh_at = 100.0
             nm._failed_refreshes = 3
-            nm._refresh_delay = None
-            with patch("redis.cluster.time.monotonic", return_value=100.9):
+            nm._refresh_due_at = None
+            with patch_monotonic("redis.cluster", 100.9):
                 assert nm._refresh_due(retry) is False
-            with patch("redis.cluster.time.monotonic", return_value=101.0):
+            with patch_monotonic("redis.cluster", 101.0):
                 assert nm._refresh_due(retry) is True
         finally:
             patcher.stop()
@@ -3782,14 +3792,128 @@ class TestTopologyRefreshPacing:
             with patch.object(
                 Redis, "execute_command", side_effect=ConnectionError("down")
             ):
-                with pytest.raises(RedisClusterException):
+                with pytest.raises(RedisClusterUnreachableError) as unreachable:
                     nm.initialize()
             assert nm._failed_refreshes == 1
+            # Only the message is kept, not the error and the frames it refers to
+            assert nm._last_refresh_unreachable_args == unreachable.value.args
             failed_at = nm._last_refresh_at
 
             nm.initialize()
             assert nm._failed_refreshes == 0
             assert nm._last_refresh_at >= failed_at
+            assert nm._last_refresh_unreachable_args is None
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_interrupted_refresh_is_not_counted_but_waits_the_interval(self):
+        """
+        A refresh interrupted before it ended (a BaseException, such as a gevent
+        timeout) is not a failed refresh, but the next one still waits the
+        interval, so callers that keep timing out do not refresh back to back.
+        """
+
+        class Interrupted(BaseException):
+            pass
+
+        patcher, nm = self._nodes_manager()
+        try:
+            with (
+                patch.object(Redis, "execute_command", side_effect=Interrupted()),
+                patch_monotonic("redis.cluster", 200.0),
+            ):
+                with pytest.raises(Interrupted):
+                    nm.initialize()
+            assert nm._failed_refreshes == 0
+            assert nm._last_refresh_at == 200.0
+            with patch_monotonic("redis.cluster", 200.9):
+                assert nm._refresh_due() is False
+            with patch_monotonic("redis.cluster", 201.0):
+                assert nm._refresh_due() is True
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_requested_refresh_is_kept_when_it_raises_another_error(self):
+        """
+        A requested refresh that raises an error other than a failed refresh
+        (for example a reply it cannot parse) raises it, and is still asked
+        for, still trying the failed node last.
+        """
+        patcher, nm = self._nodes_manager()
+        try:
+            nm._request_refresh(last_failed_node_name="127.0.0.1:7000")
+            nm._last_refresh_at = nm._refresh_due_at = None
+            with patch.object(
+                NodesManager,
+                "initialize",
+                autospec=True,
+                side_effect=ValueError("bad reply"),
+            ):
+                with pytest.raises(ValueError):
+                    nm._run_requested_refresh()
+            assert nm._refresh_requested is True
+            assert nm._requested_last_failed_node_name == "127.0.0.1:7000"
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_refresh_registers_a_snapshot_of_the_published_nodes(self):
+        """
+        The refresh registers the nodes it published from a snapshot: another
+        thread that moves a failed node to the end of the published cache
+        meanwhile, which pops it and inserts it again, cannot break it.
+        """
+        patcher, nm = self._nodes_manager()
+        try:
+            dispatch = nm._dispatch_pools_instantiated
+            registered = []
+
+            def dispatch_while_a_node_moves(nodes):
+                for node in nodes:
+                    # As another thread halfway through moving the node
+                    moved = nm.nodes_cache.pop(node.name)
+                    registered.append(node.name)
+                    nm.nodes_cache[node.name] = moved
+                dispatch(nodes)
+
+            with patch.object(
+                nm,
+                "_dispatch_pools_instantiated",
+                side_effect=dispatch_while_a_node_moves,
+            ):
+                nm.initialize()
+            assert sorted(registered) == sorted(nm.nodes_cache)
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_moving_a_failed_node_to_the_end_takes_the_lock(self):
+        """
+        The error paths of many threads move a failed node to the end of the
+        caches at once; each move runs under the lock a refresh publishes the
+        caches under.
+        """
+
+        class RecordingLock:
+            def __init__(self):
+                self._lock = threading.RLock()
+                self.entered = 0
+
+            def __enter__(self):
+                self.entered += 1
+                return self._lock.__enter__()
+
+            def __exit__(self, *exc_info):
+                return self._lock.__exit__(*exc_info)
+
+        patcher, nm = self._nodes_manager()
+        try:
+            nm._lock = RecordingLock()
+            nm.move_node_to_end_of_cached_nodes("127.0.0.1:7000")
+            assert nm._lock.entered == 1
+            assert list(nm.nodes_cache)[-1] == "127.0.0.1:7000"
         finally:
             patcher.stop()
 
@@ -3797,7 +3921,7 @@ class TestTopologyRefreshPacing:
     def test_requests_are_merged_and_run_once_when_due(self):
         patcher, nm = self._nodes_manager()
         try:
-            nm._last_refresh_at = None
+            nm._last_refresh_at = nm._refresh_due_at = None
             nm._request_refresh(
                 additional_startup_nodes_info=[("127.0.0.1", 7001)],
                 last_failed_node_name="127.0.0.1:7000",
@@ -3835,7 +3959,7 @@ class TestTopologyRefreshPacing:
 
                 # A refresh that completes after the request answers it
                 nm._epoch += 1
-                nm._last_refresh_at = None
+                nm._last_refresh_at = nm._refresh_due_at = None
                 nm._run_requested_refresh()
                 init.assert_not_called()
                 assert nm._refresh_requested is False
@@ -3860,7 +3984,7 @@ class TestTopologyRefreshPacing:
         """
         patcher, nm = self._nodes_manager()
         try:
-            nm._last_refresh_at = None
+            nm._last_refresh_at = nm._refresh_due_at = None
             nm._request_refresh(
                 additional_startup_nodes_info=[("127.0.0.1", 7001)],
                 last_failed_node_name="127.0.0.1:7000",
@@ -3918,7 +4042,7 @@ class TestTopologyRefreshPacing:
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     def test_connection_error_refreshes_before_the_next_attempt_when_due(self):
         rc = get_mocked_redis_client(host=default_host, port=default_port)
-        rc.nodes_manager._last_refresh_at = None
+        rc.nodes_manager._last_refresh_at = rc.nodes_manager._refresh_due_at = None
         checkout, parse, calls = self._checkout_failing_then_ok(1)
         with (
             checkout,
@@ -3948,7 +4072,7 @@ class TestTopologyRefreshPacing:
 
             # Once due, the next command runs the requested refresh first,
             # even though it does not fail itself
-            rc.nodes_manager._last_refresh_at = None
+            rc.nodes_manager._last_refresh_at = rc.nodes_manager._refresh_due_at = None
             assert rc.get("foo") == b"value"
             init.assert_called_once()
 
@@ -3993,7 +4117,7 @@ class TestTopologyRefreshPacing:
         rc = get_mocked_redis_client(host=default_host, port=default_port)
         nm = rc.nodes_manager
         nm._request_refresh()
-        nm._last_refresh_at = None
+        nm._last_refresh_at = nm._refresh_due_at = None
         checkout, parse, calls = self._checkout_failing_then_ok(0)
         with (
             checkout,
@@ -4010,6 +4134,45 @@ class TestTopologyRefreshPacing:
         init.assert_called_once()
         assert len(calls) == 1
         assert nm._refresh_requested is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("unreachable", [True, False], ids=["unreachable", "up"])
+    @pytest.mark.parametrize("call", ["command", "pipeline", "transaction"])
+    def test_out_of_retries_raises_unreachable_error_while_no_node_answers(
+        self, call, unreachable
+    ):
+        """
+        A command, pipeline or transaction that runs out of retries on
+        connection errors raises RedisClusterUnreachableError, with its own
+        error as the cause, while the last refresh reached no node; and its own
+        error otherwise.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        if unreachable:
+            rc.nodes_manager._last_refresh_unreachable_args = (
+                "Redis Cluster cannot be connected",
+            )
+        checkout, parse, calls = self._checkout_failing_then_ok(100)
+        with (
+            checkout,
+            parse,
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            with pytest.raises(
+                RedisClusterUnreachableError if unreachable else ConnectionError
+            ) as raised:
+                if call == "command":
+                    rc.get("foo")
+                else:
+                    rc.pipeline(transaction=call == "transaction").get("foo").execute()
+
+        assert len(calls) > 1
+        if unreachable:
+            assert str(raised.value) == "Redis Cluster cannot be connected"
+            assert type(raised.value.__cause__) is ConnectionError
+        else:
+            assert type(raised.value) is ConnectionError
 
     @pytest.mark.fixed_client
     def test_retries_wait_as_long_as_the_retry_backoff_says(self):
@@ -4041,7 +4204,7 @@ class TestTopologyRefreshPacing:
             host=default_host, port=default_port, reinitialize_steps=1
         )
         if due:
-            rc.nodes_manager._last_refresh_at = None
+            rc.nodes_manager._last_refresh_at = rc.nodes_manager._refresh_due_at = None
         slot = rc.keyslot("foo")
         owner = rc.get_node_from_key("foo")
         responses = [
@@ -4100,7 +4263,7 @@ class TestTopologyRefreshPacing:
         )
         nm = rc.nodes_manager
         if due:
-            nm._last_refresh_at = None
+            nm._last_refresh_at = nm._refresh_due_at = None
         strategy = rc.pipeline(transaction=True)._execution_strategy
         owner = rc.get_node_from_key("foo")
         error = (
@@ -4131,7 +4294,7 @@ class TestTopologyRefreshPacing:
         rc = get_mocked_redis_client(host=default_host, port=default_port)
         nm = rc.nodes_manager
         nm._request_refresh()
-        nm._last_refresh_at = None
+        nm._last_refresh_at = nm._refresh_due_at = None
         strategy = rc.pipeline(transaction=True)._execution_strategy
         with (
             patch.object(NodesManager, "initialize", autospec=True) as init,
@@ -4189,7 +4352,7 @@ class TestTopologyRefreshPacing:
         )
         nm = rc.nodes_manager
         if due:
-            nm._last_refresh_at = None
+            nm._last_refresh_at = nm._refresh_due_at = None
         owner = rc.get_node_from_key("foo")
         moved = MovedError(f"{rc.keyslot('foo')} {owner.host}:{owner.port}")
         pipe = rc.pipeline()
@@ -4252,8 +4415,8 @@ class TestTopologyRefreshPacing:
 class TestPipelineNonNodeFailureErrors:
     """
     A full client pool, a server at its maxclients limit or rejected
-    credentials are not node failures: pipelines and transactions re-raise them
-    without refreshing the topology and without a retry.
+    credentials are not node failures: commands, pipelines and transactions
+    re-raise them without refreshing the topology and without a retry.
     """
 
     ERRORS = [
@@ -4277,6 +4440,21 @@ class TestPipelineNonNodeFailureErrors:
 
         assert checkout.call_count == 1
         initialize.assert_not_called()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("error", ERRORS, ids=IDS)
+    def test_command_does_not_refresh_or_retry(self, error):
+        r = get_mocked_redis_client(host=default_host, port=default_port)
+        with (
+            patch("redis.cluster.get_connection", side_effect=error) as checkout,
+            patch.object(NodesManager, "initialize", autospec=True) as initialize,
+        ):
+            with pytest.raises(type(error)):
+                r.get("foo")
+
+        assert checkout.call_count == 1
+        initialize.assert_not_called()
+        assert r.nodes_manager._refresh_requested is False
 
 
 class TestNodesManager:

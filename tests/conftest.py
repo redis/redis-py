@@ -510,6 +510,16 @@ def cluster_teardown(client, flushdb):
     client.disconnect_connection_pools()
 
 
+def patch_monotonic(module: str, value: float):
+    """
+    Freeze ``time.monotonic`` as :module: sees it, without patching the
+    ``time`` module that every other thread and library also uses.
+    """
+    frozen_time = Mock(wraps=time)
+    frozen_time.monotonic.return_value = value
+    return mock.patch(f"{module}.time", frozen_time)
+
+
 @pytest.fixture()
 def no_topology_refresh_interval():
     """

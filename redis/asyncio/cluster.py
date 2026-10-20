@@ -77,6 +77,7 @@ from redis.cluster import (
     AbstractRedisCluster,
     LoadBalancer,
     LoadBalancingStrategy,
+    _error_to_raise,
     _should_request_refresh,
     _topology_refresh_delay,
     block_pipeline_command,
@@ -378,11 +379,12 @@ class RedisCluster(
           retry of a command or a pipeline; a command that failed with
           :class:`~.ClusterDownError` or :class:`~.SlotNotCoveredError` also
           waits a fixed 0.25 seconds before it. A topology refresh triggered by an
-          error (connection errors, cluster down, the ``reinitialize_steps`` MOVED
-          threshold) is run by the first command attempt to start once it is due,
-          at most once per second; after refreshes that failed in a row, the next
-          one waits as long as the backoff gives for that many failures, but at
-          least one second.
+          error (connection errors, the ``reinitialize_steps`` MOVED threshold) is
+          run by the first command attempt to start once it is due, at most once
+          per second; after refreshes that failed in a row, the next one waits as
+          long as the backoff gives for that many failures, but at least one
+          second. A command that runs out of retries while the last refresh
+          reached no node raises :class:`~.RedisClusterUnreachableError`.
           Backoffs that keep state between calls
           (:class:`~.DecorrelatedJitterBackoff`) are not fully supported: the
           retry object is shared by every command and pipeline of the client, so
@@ -795,6 +797,22 @@ class RedisCluster(
         self._usage_counter = 0
         self._usage_lock = asyncio.Lock()
 
+    def _initialize_due(self) -> bool:
+        """
+        Whether initialize() has work to do now: the client has no topology
+        yet, or a refresh was asked for, is due and no other task is running
+        it. The command, pipeline and transaction attempts check this before
+        awaiting initialize(), so an attempt made while a requested refresh is
+        not due yet costs no coroutine.
+        """
+        return self._initialize and not (
+            self._topology_ready
+            and (
+                not self.nodes_manager._refresh_due(self.retry)
+                or (self._lock is not None and self._lock.locked())
+            )
+        )
+
     async def initialize(
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
@@ -817,10 +835,7 @@ class RedisCluster(
         current topology keeps serving until a refresh succeeds.
         """
         if self._initialize:
-            if self._topology_ready and (
-                not self.nodes_manager._refresh_due(self.retry)
-                or (self._lock is not None and self._lock.locked())
-            ):
+            if not self._initialize_due():
                 # A refresh was asked for but is not due yet, or another task
                 # is running it; the current topology keeps serving. The flag
                 # stays until a refresh succeeds, so a later call runs it
@@ -839,6 +854,17 @@ class RedisCluster(
                         # lock moved the next one out; the current topology
                         # keeps serving until it is due
                         return self
+                    requested_at_epoch = self.nodes_manager._refresh_requested_at_epoch
+                    if (
+                        not first_initialize
+                        and requested_at_epoch is not None
+                        and requested_at_epoch != self.nodes_manager._epoch
+                    ):
+                        # A refresh completed after the last request (for
+                        # example one SMIGRATED ran) and already answers it
+                        self.nodes_manager._refresh_requested_at_epoch = None
+                        self._initialize = False
+                        return self
                     try:
                         await self._refresh_topology(
                             additional_startup_nodes_info=additional_startup_nodes_info,
@@ -846,6 +872,7 @@ class RedisCluster(
                         )
                         self._initialize = False
                         self._topology_ready = True
+                        self.nodes_manager._refresh_requested_at_epoch = None
                     except BaseException as e:
                         # Only a client that never initialized is torn down. A
                         # failed or cancelled refresh keeps the connections of
@@ -920,6 +947,9 @@ class RedisCluster(
                 )
         if last_failed_node_name is not None:
             nodes_manager._requested_last_failed_node_name = last_failed_node_name
+        # The epoch of the newest request: a refresh that completes after it
+        # already answers every merged request
+        nodes_manager._refresh_requested_at_epoch = nodes_manager._epoch
         self._initialize = True
 
     async def aclose(self) -> None:
@@ -1516,9 +1546,10 @@ class RedisCluster(
 
         for _ in range(execute_attempts):
             if self._initialize:
-                # The node that failed is kept on the nodes manager, so the
-                # refresh tries it last even when it runs on a later command
-                await self.initialize()
+                if self._initialize_due():
+                    # The node that failed is kept on the nodes manager, so the
+                    # refresh tries it last even when it runs on a later command
+                    await self.initialize()
                 if (
                     len(target_nodes) == 1
                     and target_nodes[0] == self.get_default_node()
@@ -1604,7 +1635,9 @@ class RedisCluster(
                             retry_attempts=failure_count,
                             is_internal=False,
                         )
-                    raise e
+                    raise _error_to_raise(
+                        self.nodes_manager._last_refresh_unreachable_args, e
+                    )
 
     async def _execute_command(
         self, target_node: "ClusterNode", *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -2477,7 +2510,9 @@ class NodesManager:
         "address_remap",
         "_last_refresh_at",
         "_failed_refreshes",
-        "_refresh_delay",
+        "_refresh_due_at",
+        "_last_refresh_unreachable_args",
+        "_refresh_requested_at_epoch",
         "_requested_last_failed_node_name",
         "_requested_additional_startup_nodes",
     )
@@ -2502,13 +2537,23 @@ class NodesManager:
         self._epoch: int = 0
         self.read_load_balancer = LoadBalancer()
         self._initialize_lock: asyncio.Lock = asyncio.Lock()
-        # When the last refresh ended, how many failed in a row, and the delay
-        # the next error-triggered refresh waits, with the failure count it was
-        # computed for (computed once per refresh, because a jittered backoff
-        # returns a new value on every call). See _refresh_due.
+        # When the last refresh ended, how many failed in a row, and when the
+        # next error-triggered refresh is due. Every refresh that ends clears
+        # the due time and the next check computes it, once, from the backoff
+        # of the caller's retry (a jittered backoff returns a new value on
+        # every call). See _refresh_due.
         self._last_refresh_at: Optional[float] = None
         self._failed_refreshes = 0
-        self._refresh_delay: Optional[Tuple[int, float]] = None
+        self._refresh_due_at: Optional[float] = None
+        # The message (args) of the error of the last refresh if it reached no
+        # node, cleared by a refresh that ends otherwise; only the message, so
+        # the error does not keep the frames of that refresh alive. See
+        # _error_to_raise.
+        self._last_refresh_unreachable_args: Optional[Tuple[Any, ...]] = None
+        # The epoch of the newest refresh request, until a refresh answers it:
+        # a refresh that completes after it, such as one SMIGRATED runs,
+        # already does
+        self._refresh_requested_at_epoch: Optional[int] = None
         # The node whose connection error asked for the pending refresh: the
         # refresh tries it last when no other name is passed in
         self._requested_last_failed_node_name: Optional[str] = None
@@ -2689,13 +2734,24 @@ class NodesManager:
 
     @asynccontextmanager
     async def _counting_failed_refresh(self) -> AsyncGenerator[None, None]:
-        """Record a refresh that raised, so error-triggered refreshes back off."""
+        """
+        Record a refresh that raised, so error-triggered refreshes back off.
+
+        A refresh cancelled before it ended (for example by a timeout around
+        the command that ran it) is not counted as failed, but the next one
+        still waits the delay, so callers that keep timing out do not run one
+        refresh after another.
+        """
         try:
             yield
-        except Exception:
-            self._failed_refreshes += 1
+        except BaseException as e:
+            if isinstance(e, Exception):
+                self._failed_refreshes += 1
+                self._last_refresh_unreachable_args = (
+                    e.args if isinstance(e, RedisClusterUnreachableError) else None
+                )
             self._last_refresh_at = time.monotonic()
-            self._refresh_delay = None
+            self._refresh_due_at = None
             raise
 
     @asynccontextmanager
@@ -2724,20 +2780,17 @@ class NodesManager:
         before the delay of _topology_refresh_delay has passed since the
         previous refresh ended.
         """
-        last_refresh_at = self._last_refresh_at
-        if last_refresh_at is None:
-            return True
-        failed_refreshes = self._failed_refreshes
-        cached = self._refresh_delay
-        if cached is None or cached[0] != failed_refreshes:
-            # Keyed by the failure count it was computed for, so a delay
-            # computed just before a refresh reset the count is not reused
-            cached = (
-                failed_refreshes,
-                _topology_refresh_delay(retry, failed_refreshes),
+        due_at = self._refresh_due_at
+        if due_at is None:
+            # The first check since a refresh ended
+            last_refresh_at = self._last_refresh_at
+            if last_refresh_at is None:
+                return True
+            due_at = last_refresh_at + _topology_refresh_delay(
+                retry, self._failed_refreshes
             )
-            self._refresh_delay = cached
-        return time.monotonic() - last_refresh_at >= cached[1]
+            self._refresh_due_at = due_at
+        return time.monotonic() >= due_at
 
     async def initialize(
         self,
@@ -3017,7 +3070,8 @@ class NodesManager:
                 == requested_additional_startup_nodes
             ):
                 self._requested_additional_startup_nodes = ()
-            self._refresh_delay = None
+            self._refresh_due_at = None
+            self._last_refresh_unreachable_args = None
             self._epoch += 1
         # Dispatch so listeners (e.g. ClusterPubSub) can reconcile per-node
         # state after slot ownership may have changed. A listener must not
@@ -3390,7 +3444,7 @@ class AbstractStrategy(ExecutionStrategy):
         self._command_queue: List["PipelineCommand"] = []
 
     async def initialize(self) -> "ClusterPipeline":
-        if self._pipe.cluster_client._initialize:
+        if self._pipe.cluster_client._initialize_due():
             await self._pipe.cluster_client.initialize()
         self._command_queue = []
         return self._pipe
@@ -3484,7 +3538,7 @@ class PipelineStrategy(AbstractStrategy):
             failure_count = 0
             while True:
                 try:
-                    if self._pipe.cluster_client._initialize:
+                    if self._pipe.cluster_client._initialize_due():
                         await self._pipe.cluster_client.initialize()
                     return await self._execute(
                         self._pipe.cluster_client,
@@ -3512,7 +3566,10 @@ class PipelineStrategy(AbstractStrategy):
                             await asyncio.sleep(delay)
                     else:
                         # All other errors should be raised.
-                        raise e
+                        nodes_manager = self._pipe.cluster_client.nodes_manager
+                        raise _error_to_raise(
+                            nodes_manager._last_refresh_unreachable_args, e
+                        )
         finally:
             await self.reset()
 
@@ -3854,7 +3911,7 @@ class TransactionStrategy(AbstractStrategy):
         # Run a topology refresh an earlier error asked for, once due. This runs
         # on the caller's loop, before every attempt: execute_command returns
         # this coroutine from its private loop unawaited.
-        if self._pipe.cluster_client._initialize:
+        if self._pipe.cluster_client._initialize_due():
             await self._pipe.cluster_client.initialize()
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
@@ -4031,14 +4088,18 @@ class TransactionStrategy(AbstractStrategy):
     async def _execute_transaction_with_retries(
         self, stack: List["PipelineCommand"], raise_on_error: bool
     ):
-        return await self._retry.call_with_retry(
-            lambda: self._execute_transaction(stack, raise_on_error),
-            lambda error, failure_count: self._reinitialize_on_error(
-                error, failure_count
-            ),
-            is_retryable=RedisCluster._is_retryable_cluster_error,
-            with_failure_count=True,
-        )
+        try:
+            return await self._retry.call_with_retry(
+                lambda: self._execute_transaction(stack, raise_on_error),
+                lambda error, failure_count: self._reinitialize_on_error(
+                    error, failure_count
+                ),
+                is_retryable=RedisCluster._is_retryable_cluster_error,
+                with_failure_count=True,
+            )
+        except (ConnectionError, TimeoutError) as e:
+            nodes_manager = self._pipe.cluster_client.nodes_manager
+            raise _error_to_raise(nodes_manager._last_refresh_unreachable_args, e)
 
     async def _execute_transaction(
         self, stack: List["PipelineCommand"], raise_on_error: bool
@@ -4052,7 +4113,7 @@ class TransactionStrategy(AbstractStrategy):
 
         # Run a topology refresh an earlier error asked for, once due. This runs
         # on the caller's loop, before every attempt.
-        if self._pipe.cluster_client._initialize:
+        if self._pipe.cluster_client._initialize_due():
             await self._pipe.cluster_client.initialize()
 
         held_connection = self._transaction_connection
@@ -4498,7 +4559,7 @@ class ClusterPubSub(PubSub):
         )
 
     async def _ensure_cluster_initialized(self) -> None:
-        if self.cluster._initialize:
+        if self.cluster._initialize_due():
             await self.cluster.initialize()
 
     def set_pubsub_node(

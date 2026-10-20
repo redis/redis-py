@@ -396,6 +396,7 @@ class TestClusterTransaction:
         try:
             async with r.pipeline(transaction=True) as pipe:
                 await pipe.watch(key)
+                connection = pipe._execution_strategy._transaction_connection
                 # As a refresh that moves the slot to another node would
                 r.nodes_manager.slots_cache[slot] = [node_other]
                 await pipe.get(key)
@@ -404,10 +405,8 @@ class TestClusterTransaction:
                 pipe.set(key, "val")
                 assert await pipe.execute() == [True]
 
-            assert not any(
-                (conn.host, conn.port) == (node_owning.host, node_owning.port)
-                for conn in node_other._free
-            )
+            assert connection in node_owning._free
+            assert connection not in node_other._free
         finally:
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 

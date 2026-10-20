@@ -107,7 +107,7 @@ and then the backoff delay as well.
 
 ``CLUSTERDOWN`` or a slot that is not covered refreshes the cluster topology
 (``CLUSTER SLOTS``) at once, before the retry; if that refresh fails, the
-command raises its error.
+command raises the refresh error.
 
 A connection error or a timeout only asks for a refresh, which is run by the
 first command attempt that starts once it is due, whichever command that is.
@@ -118,9 +118,13 @@ A refresh asked for this way that fails (no node reachable, or no usable
 topology) is logged and asked for again, and the command that ran it goes on
 with the slot map the client already has: the nodes it routes to may still
 answer, for example when ``dynamic_startup_nodes=False`` and only the startup
-nodes are unreachable. After refreshes that failed in a row, the next one
-waits as long as the ``retry`` backoff gives for that many failures, but at
-least one second.
+nodes are unreachable. A command that runs out of retries on a connection
+error or a timeout while the last refresh reached no node raises
+``RedisClusterUnreachableError``, with its own error as the cause. After
+refreshes that failed in a row, the next one waits as long as the ``retry``
+backoff gives for that many failures, but at least one second. A refresh that
+was interrupted, for example by a timeout around the command that ran it, is
+not counted as failed, but the next one still waits at least one second.
 Refreshes pushed by the server during maintenance (``SMIGRATED``) and the first
 connect are not limited.
 
