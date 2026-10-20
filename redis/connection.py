@@ -4389,14 +4389,14 @@ class BlockingConnectionPool(ConnectionPool):
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default
-    :py:class:`~redis.ConnectionPool` implementation, in that,
+    :py:class:`~redis.connection.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple redis clients (safely across threads if required).
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a :py:class:`~redis.ConnectionError` (as the default
-    :py:class:`~redis.ConnectionPool` implementation does), it
+    raising a :py:class:`~redis.exceptions.MaxConnectionsError` (as the default
+    :py:class:`~redis.connection.ConnectionPool` implementation does), it
     makes the client wait ("blocks") for a specified number of seconds until
     a connection becomes available.
 
