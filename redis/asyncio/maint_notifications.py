@@ -273,13 +273,13 @@ class AsyncMaintNotificationsPoolHandler:
             reset_host_address=reset_host_address,
         )
 
+        # Discarded once the cleanup is done, so one cancelled halfway is
+        # still run by cancel_scheduled_tasks(), and before the listeners run
+        self._pending_handoffs.discard(notification)
         # A newer MOVING notification has superseded this one when the
         # kwargs were not reverted: the pool stays relaxed until it expires.
         if reverted:
             self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
-        # Discarded only once the cleanup is done, so one cancelled
-        # halfway is still run by cancel_scheduled_tasks()
-        self._pending_handoffs.discard(notification)
         return reverted
 
     def _schedule(

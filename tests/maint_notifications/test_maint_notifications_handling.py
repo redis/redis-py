@@ -3152,3 +3152,65 @@ def test_pool_close_retried_after_failed_cleanup_runs_it_again():
     assert handler._pending_handoffs == set()
     completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
     assert [e.notification for e in completed] == [notification]
+
+
+@pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_reports_completion_once():
+    """
+    A completion listener that closes the pool re-enters close() while the
+    handoff is being cleaned up; the reentrant close must not run the cleanup
+    again and report a second completion.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+
+
+@pytest.mark.fixed_client
+def test_pool_close_disconnects_even_when_moving_cleanup_fails():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    disconnect = MagicMock()
+
+    failing_reset = patch.object(
+        pool,
+        "update_connections_settings",
+        side_effect=OSError(9, "Bad file descriptor"),
+    )
+    with failing_reset, patch.object(pool, "disconnect", new=disconnect):
+        with pytest.raises(OSError):
+            pool.close()
+
+    # the pool is closed regardless; the handoff stays for a retried close()
+    disconnect.assert_called_once_with()
+    assert handler._pending_handoffs == {notification}

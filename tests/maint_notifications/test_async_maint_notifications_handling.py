@@ -1787,6 +1787,42 @@ async def test_concurrent_aclose_completes_pending_handoff_once():
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+async def test_pool_aclose_disconnects_even_when_moving_cleanup_fails():
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+    disconnect = AsyncMock()
+
+    failing_cleanup = mock.patch.object(
+        pool,
+        "cleanup_moving_notification",
+        side_effect=OSError(9, "Bad file descriptor"),
+    )
+    with failing_cleanup, mock.patch.object(pool, "disconnect", new=disconnect):
+        with pytest.raises(OSError):
+            await pool.aclose()
+
+    # the pool is closed regardless; the handoff stays for a retried aclose()
+    disconnect.assert_awaited_once_with()
+    assert handler._pending_handoffs == {notification}
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 @pytest.mark.parametrize("new_node_host", [MOVED_HOST, None])
 async def test_pool_reused_after_aclose_mid_moving_has_reverted_kwargs(new_node_host):
     pool = ConnectionPool(

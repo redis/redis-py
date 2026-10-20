@@ -1113,13 +1113,14 @@ class MaintNotificationsPoolHandler:
                     include_free_connections=True,
                 )
 
+            # Discarded once the state reset is done, so one that failed halfway
+            # is run again by a retried close(), and before the listeners run,
+            # so a listener closing the pool does not run it a second time
+            self._pending_handoffs.discard(notification)
             # A newer MOVING notification has superseded this one when the
             # kwargs were not reverted: the pool stays relaxed until it expires.
             if kwargs is not None:
                 self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
-            # Discarded only once the cleanup is done, so one that failed
-            # halfway is run again by a retried close()
-            self._pending_handoffs.discard(notification)
             return kwargs is not None
 
 

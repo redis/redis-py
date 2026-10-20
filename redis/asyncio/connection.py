@@ -3327,8 +3327,10 @@ class ConnectionPool(
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""
-        await self._on_close()
-        await self.disconnect()
+        try:
+            await self._on_close()
+        finally:
+            await self.disconnect()
 
     async def __aenter__(self: _CP) -> _CP:
         return self
