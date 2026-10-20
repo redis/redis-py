@@ -89,6 +89,7 @@ from redis.utils import (
     SENTINEL,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     experimental_method,
     safe_str,
@@ -2206,7 +2207,7 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"

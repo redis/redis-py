@@ -150,10 +150,10 @@ from redis.utils import (
     SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
-    safe_str,
     str_if_bytes,
     truncate_text,
 )
@@ -3531,7 +3531,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
@@ -3778,7 +3778,7 @@ class PipelineStrategy(AbstractStrategy):
                 for cmd in todo:
                     result = cmd.result
                     if isinstance(result, Exception):
-                        command = " ".join(map(safe_str, cmd.args))
+                        command = command_text(cmd.args)
                         # Errors from the redirect retry may carry no args,
                         # e.g. MaxConnectionsError() from acquire_connection().
                         error = result.args[0] if result.args else type(result).__name__

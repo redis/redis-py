@@ -4,6 +4,7 @@ import pytest
 from redis.exceptions import DataError
 from redis.utils import (
     check_protocol_version,
+    command_text,
     compare_versions,
     decode_field_value,
     DEFAULT_RESP_VERSION,
@@ -344,6 +345,42 @@ class TestTruncateText:
         # ``break_long_words`` does not apply to this case), so it drops the word
         # entirely and returns just the placeholder.
         assert truncate_text("a" * 200) == "..."
+
+
+@pytest.mark.fixed_client
+class TestCommandText:
+    def test_regular_command_shows_arguments(self):
+        assert command_text(("SET", b"key", 1)) == "SET key 1"
+
+    @pytest.mark.parametrize(
+        "command,expected",
+        [
+            (("AUTH", "user", "secret"), "AUTH <REDACTED>"),
+            (("auth", b"secret"), "auth <REDACTED>"),
+            (("HELLO", 3, "AUTH", "user", "secret"), "HELLO <REDACTED>"),
+            (
+                ("MIGRATE", "host", 6379, "", 0, 10, "AUTH", "secret", "KEYS", "k"),
+                "MIGRATE <REDACTED>",
+            ),
+            (("ACL SETUSER", "user", ">secret"), "ACL SETUSER <REDACTED>"),
+            (("ACL", "SETUSER", "user", ">secret"), "ACL SETUSER <REDACTED>"),
+            (("CONFIG SET", "requirepass", "secret"), "CONFIG SET <REDACTED>"),
+            (("config", "set", "masterauth", "secret"), "config set <REDACTED>"),
+        ],
+    )
+    def test_credential_command_arguments_redacted(self, command, expected):
+        assert command_text(command) == expected
+
+    def test_credential_command_without_arguments(self):
+        assert command_text(("AUTH",)) == "AUTH"
+        assert command_text(("ACL", "SETUSER")) == "ACL SETUSER"
+
+    def test_other_acl_and_config_subcommands_show_arguments(self):
+        assert command_text(("ACL", "GETUSER", "user")) == "ACL GETUSER user"
+        assert command_text(("CONFIG GET", "maxmemory")) == "CONFIG GET maxmemory"
+
+    def test_empty_command(self):
+        assert command_text(()) == ""
 
 
 @pytest.mark.fixed_client
