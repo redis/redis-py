@@ -53,6 +53,7 @@ class ResubscribeOnActiveDatabaseChanged(AsyncEventListenerInterface):
             new_pubsub = event.new_database.client.pubsub(**event.kwargs)
             new_pubsub.channels = old_pubsub.channels
             new_pubsub.patterns = old_pubsub.patterns
+            new_pubsub.shard_channels = old_pubsub.shard_channels
             await new_pubsub.on_connect(None)
             event.command_executor.active_pubsub = new_pubsub
             await old_pubsub.aclose()

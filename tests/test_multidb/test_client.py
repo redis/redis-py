@@ -8,6 +8,8 @@ import pybreaker
 import pytest
 
 from redis import RedisCluster
+from redis._parsers import Encoder
+from redis.client import NEVER_DECODE
 from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import InitialHealthCheck, DatabaseConfig
@@ -249,6 +251,178 @@ class TestMultiDbClient:
                 assert mock_db.circuit.state == CBState.CLOSED
                 assert mock_db1.circuit.state == CBState.CLOSED
                 assert mock_db2.circuit.state == CBState.CLOSED
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_zrank_with_custom_score_cast(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        decode_responses,
+    ):
+        # zrank/zrevrank with a custom score cast follow the active database's
+        # decode_responses setting.
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.get_connection_kwargs.return_value = {
+                "decode_responses": decode_responses
+            }
+            mock_db1.client.execute_command.return_value = [1, b"2.5"]
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                for command in (client.zrank, client.zrevrank):
+                    assert command(
+                        "key", "member", withscore=True, score_cast_func=bytes
+                    ) == [1, b"2.5"]
+                    options = mock_db1.client.execute_command.call_args.kwargs
+                    assert options["decode_responses"] is decode_responses
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_connection_kwargs_and_encoder_follow_active_database(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Before initialization: the highest-weighted database.
+                assert not client.initialized
+                assert (
+                    client.get_connection_kwargs()
+                    is mock_db1.client.get_connection_kwargs.return_value
+                )
+                assert client.get_encoder() is mock_db1.client.get_encoder.return_value
+
+                client.set_active_database(mock_db2)
+                pipe = client.pipeline()
+                for host in (client, pipe):
+                    assert (
+                        host.get_connection_kwargs()
+                        is mock_db2.client.get_connection_kwargs.return_value
+                    )
+                    assert (
+                        host.get_encoder() is mock_db2.client.get_encoder.return_value
+                    )
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_slowlog_get_before_first_command(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        decode_responses,
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.get_connection_kwargs.return_value = {
+                "decode_responses": decode_responses
+            }
+            mock_db1.client.execute_command.return_value = []
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert not client.initialized
+                assert client.slowlog_get() == []
+                assert client.initialized
+
+                args = mock_db1.client.execute_command.call_args
+                assert args.args == ("SLOWLOG GET",)
+                if decode_responses:
+                    assert args.kwargs == {NEVER_DECODE: []}
+                else:
+                    assert args.kwargs == {}
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_acl_setuser_uses_active_database_encoder(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.get_encoder.return_value = Encoder(
+                encoding="utf-8", encoding_errors="strict", decode_responses=False
+            )
+            mock_db1.client.execute_command.return_value = b"OK"
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert client.acl_setuser("user", enabled=True, passwords=["+pass"])
+                args = mock_db1.client.execute_command.call_args.args
+                assert args == ("ACL SETUSER", "user", b"on", b">pass")
             finally:
                 client.close()
 

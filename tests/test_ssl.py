@@ -471,16 +471,27 @@ class TestOCSPCertificateBinding:
     is only current between its this_update and next_update times."""
 
     @staticmethod
-    def _make_certificate(common_name, serial, signing_key=None, ca=False):
+    def _make_certificate(
+        common_name,
+        serial,
+        signing_key=None,
+        ca=False,
+        ocsp_signing=False,
+        rsa_key=False,
+        rsa_padding=None,
+    ):
         pytest.importorskip("cryptography")
 
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.asymmetric import ec
-        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives.asymmetric import ec, rsa
+        from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        key = ec.generate_private_key(ec.SECP256R1())
+        if rsa_key:
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        else:
+            key = ec.generate_private_key(ec.SECP256R1())
         builder = (
             x509.CertificateBuilder()
             .subject_name(
@@ -498,14 +509,28 @@ class TestOCSPCertificateBinding:
             builder = builder.add_extension(
                 x509.BasicConstraints(ca=True, path_length=None), critical=True
             )
-        return builder.sign(signing_key or key, hashes.SHA256()), key
+        if ocsp_signing:
+            builder = builder.add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.OCSP_SIGNING]),
+                critical=False,
+            )
+        if rsa_padding is not None:
+            signed = builder.sign(
+                signing_key or key, hashes.SHA256(), rsa_padding=rsa_padding
+            )
+        else:
+            signed = builder.sign(signing_key or key, hashes.SHA256())
+        return signed, key
 
     @staticmethod
-    def _good_response(ca, ca_key, target, this_update, next_update):
+    def _good_response(ca, ca_key, target, this_update, next_update, responder=None):
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.x509 import ocsp
 
-        response = (
+        # A delegated responder signs with its own key and ships its
+        # certificate in the response.
+        signer, signer_key = responder or (ca, ca_key)
+        builder = (
             ocsp.OCSPResponseBuilder()
             .add_response(
                 cert=target,
@@ -517,9 +542,11 @@ class TestOCSPCertificateBinding:
                 revocation_time=None,
                 revocation_reason=None,
             )
-            .responder_id(ocsp.OCSPResponderEncoding.NAME, ca)
-            .sign(ca_key, hashes.SHA256())
+            .responder_id(ocsp.OCSPResponderEncoding.NAME, signer)
         )
+        if responder is not None:
+            builder = builder.certificates([signer])
+        response = builder.sign(signer_key, hashes.SHA256())
         return response.public_bytes(serialization.Encoding.DER)
 
     @classmethod
@@ -558,6 +585,98 @@ class TestOCSPCertificateBinding:
         with pytest.raises(ConnectionError) as e:
             _check_certificate(ca, cert, good_for_other)
         assert "serial number does not match" in str(e.value)
+
+    def test_check_certificate_accepts_delegated_responder(self):
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key)
+        responder = self._make_certificate(
+            "Test OCSP", 5, signing_key=ca_key, ocsp_signing=True
+        )
+        response = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+            responder=responder,
+        )
+
+        assert _check_certificate(ca, cert, response) is True
+
+    def test_check_certificate_accepts_rsa_pss_signed_certificate(self):
+        # An RSA issuer may sign with RSASSA-PSS rather than PKCS1v15; the
+        # issuance check must accept it.
+        pytest.importorskip("cryptography", minversion="41.0.0")
+
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        pss = padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        )
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True, rsa_key=True)
+        cert, _ = self._make_certificate(
+            "node", 111, signing_key=ca_key, rsa_padding=pss
+        )
+        response = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+        )
+
+        assert _check_certificate(ca, cert, response) is True
+
+    def test_check_certificate_rejects_delegated_responder_not_from_issuer(self):
+        # A self-signed responder certificate that only claims the issuer's
+        # name, and so can sign anything, must not be trusted as a delegate.
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key)
+        forged = self._make_certificate("Test OCSP", 5, ocsp_signing=True)
+        response = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+            responder=forged,
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            _check_certificate(ca, cert, response)
+        assert "was not issued by" in str(e.value)
+
+    def test_check_certificate_rejects_issuer_that_did_not_sign_cert(self):
+        # The issuer certificate comes from the peer chain or an AIA fetch; one
+        # that merely carries the right name must not vouch for the cert.
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        _, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key)
+        fake_ca, fake_ca_key = self._make_certificate("Test CA", 1, ca=True)
+        response = self._good_response(
+            fake_ca,
+            fake_ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            _check_certificate(fake_ca, cert, response)
+        assert "was not issued by" in str(e.value)
 
     def test_check_certificate_rejects_stale_response_west_of_utc(self):
         # next_update is already in the past: the response is stale and must be

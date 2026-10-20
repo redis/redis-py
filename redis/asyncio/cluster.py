@@ -2804,6 +2804,10 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
+    def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
+        """Get the connection kwargs from the cluster client."""
+        return self.cluster_client.get_connection_kwargs()
+
     # HIMPORT lifecycle on a cluster pipeline delegates to the parent client, mutating
     # the one shared registry that every node pool references. A fieldset declared here
     # is therefore visible to the batched himport_set pre-flight, mirroring the sync
@@ -3409,20 +3413,24 @@ class TransactionStrategy(AbstractStrategy):
         altered as long as the watch commands for those keys were sent over the same
         connection. So once we start watching a key, we fetch a connection to the
         node that owns that slot and reuse it.
+
+        ``_transaction_node`` is only updated when a new connection is acquired, so
+        it always names the node that owns the held connection, even if the slot
+        map changes while the connection is held.
         """
         if not self._pipeline_slots:
             raise RedisClusterException(
                 "At least a command with a key is needed to identify a node"
             )
 
-        node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
-            list(self._pipeline_slots)[0], False
-        )
-        self._transaction_node = node
-
         if not self._transaction_connection:
-            connection: Connection = self._transaction_node.acquire_connection()
-            self._transaction_connection = connection
+            node: ClusterNode = (
+                self._pipe.cluster_client.nodes_manager.get_node_from_slot(
+                    list(self._pipeline_slots)[0], False
+                )
+            )
+            self._transaction_connection = node.acquire_connection()
+            self._transaction_node = node
 
         return self._transaction_node, self._transaction_connection
 

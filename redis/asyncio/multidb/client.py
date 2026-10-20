@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, List, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
+from redis._parsers import Encoder
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.config import (
     DEFAULT_GRACE_PERIOD,
@@ -145,6 +146,28 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             )
 
         self.initialized = True
+
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """
+        Get the connection keyword arguments of the active database's client.
+        """
+        return self._underlying_client().get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """
+        Get the encoder of the active database's client.
+        """
+        return self._underlying_client().get_encoder()
+
+    def _underlying_client(self):
+        active_database = self.command_executor.active_database
+        if active_database is not None:
+            return active_database.client
+
+        # Before initialization there is no active database yet, so use the
+        # first configured one (databases are kept in descending weight order).
+        database, _ = self._databases.get_top_n(1)[0]
+        return database.client
 
     def get_databases(self) -> Databases:
         """
@@ -483,6 +506,14 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._command_stack = []
         self._client = client
 
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """Get the connection keyword arguments of the parent client."""
+        return self._client.get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """Get the encoder of the parent client."""
+        return self._client.get_encoder()
+
     async def __aenter__(self: "Pipeline") -> "Pipeline":
         return self
 
@@ -637,6 +668,29 @@ class PubSub:
             "unsubscribe", *args
         )
 
+    async def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "ssubscribe", *args, **kwargs
+        )
+
+    async def sunsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "sunsubscribe", *args
+        )
+
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
     ):
@@ -649,6 +703,22 @@ class PubSub:
         """
         return await self._client.command_executor.execute_pubsub_method(
             "get_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
+        )
+
+    async def get_sharded_message(
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
+    ):
+        """
+        Get the next message if one is available in a sharded channel, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number or None to wait indefinitely.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "get_sharded_message",
             ignore_subscribe_messages=ignore_subscribe_messages,
             timeout=timeout,
         )

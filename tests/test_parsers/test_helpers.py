@@ -18,6 +18,7 @@ from redis._parsers.helpers import (
     zpop_score_pairs_resp3_to_resp2_legacy,
     zset_score_for_rank_resp3_to_resp2_legacy,
     zset_score_pairs_resp3_to_resp2_legacy,
+    zset_score_pairs_resp3_to_resp2_legacy_flat,
 )
 
 
@@ -405,3 +406,39 @@ def test_resp3_to_resp2_legacy_default_float_cast(score):
     check(value)
     [(member, value)] = zpop_score_pairs_resp3_to_resp2_legacy([[b"m", score]])
     check(value)
+
+
+@pytest.mark.fixed_client
+def test_resp3_to_resp2_legacy_decoded_scores_are_str():
+    # With decode_responses=True members arrive as str, and RESP2 would
+    # return the score text as str too.
+    identity = lambda x: x  # noqa: E731
+    options = {"withscores": True, "score_cast_func": identity}
+    assert zset_score_pairs_resp3_to_resp2_legacy([["m", 2.5]], **options) == [
+        ("m", "2.5")
+    ]
+    assert zset_score_pairs_resp3_to_resp2_legacy_flat([["m", 1.0]], **options) == [
+        "m",
+        "1",
+    ]
+    assert zmpop_resp3_to_resp2_legacy(["key", [["m", 0.1]]]) == [
+        "key",
+        [["m", "0.1"]],
+    ]
+    assert zpop_score_pairs_resp3_to_resp2_legacy(
+        ["m", 2.5], score_cast_func=identity
+    ) == [("m", "2.5")]
+    assert zpop_score_pairs_resp3_to_resp2_legacy(
+        [["m", 2.5]], score_cast_func=identity
+    ) == [("m", "2.5")]
+    assert zset_score_for_rank_resp3_to_resp2_legacy(
+        [3, 2.5], withscore=True, score_cast_func=identity, decode_responses=True
+    ) == [3, "2.5"]
+    # Without decoding the scores stay bytes.
+    assert zset_score_for_rank_resp3_to_resp2_legacy(
+        [3, 2.5], withscore=True, score_cast_func=identity
+    ) == [3, b"2.5"]
+    assert zmpop_resp3_to_resp2_legacy([b"key", [[b"m", 0.1]]]) == [
+        b"key",
+        [[b"m", b"0.1"]],
+    ]
