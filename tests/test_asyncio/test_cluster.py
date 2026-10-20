@@ -3920,7 +3920,10 @@ class TestNodesManager:
                 initialize_frame = tb.tb_frame
             tb = tb.tb_next
         assert initialize_frame is not None
-        assert initialize_frame.f_locals.get("exception") is None
+        # `is None` alone also holds when no such local exists, so assert the
+        # name is present before asserting its value.
+        assert "exception" in initialize_frame.f_locals
+        assert initialize_frame.f_locals["exception"] is None
 
     @pytest.mark.fixed_client
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
