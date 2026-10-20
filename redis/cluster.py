@@ -6177,14 +6177,8 @@ class TransactionStrategy(AbstractStrategy):
                     )
                 # Disconnect and release back to pool
                 self._transaction_connection.disconnect()
-                node = self._nodes_manager.find_connection_owner(
-                    self._transaction_connection
-                )
-                if node and node.redis_connection:
-                    node.redis_connection.connection_pool.release(
-                        self._transaction_connection
-                    )
-                self._transaction_connection = None
+                node = self._transaction_node
+                self._release_transaction_connection()
 
             self._pipe.reinitialize_counter += 1
             should_request_refresh = _should_request_refresh(
@@ -6385,6 +6379,19 @@ class TransactionStrategy(AbstractStrategy):
             data.append(r)
         return data
 
+    def _release_transaction_connection(self) -> None:
+        """
+        Return the held connection to the pool of the node it was taken from.
+
+        That node, not the one ``nodes_cache`` holds under its name now: a
+        refresh may have removed the node, or replaced it with a new instance,
+        and the connection belongs to the old node's pool either way.
+        """
+        connection, self._transaction_connection = self._transaction_connection, None
+        node = self._transaction_node
+        if connection and node and node.redis_connection:
+            node.redis_connection.connection_pool.release(connection)
+
     def reset(self):
         self._command_queue = []
 
@@ -6399,26 +6406,12 @@ class TransactionStrategy(AbstractStrategy):
                     self._transaction_connection.read_response()
                 # we can safely return the connection to the pool here since we're
                 # sure we're no longer WATCHing anything
-                node = self._nodes_manager.find_connection_owner(
-                    self._transaction_connection
-                )
-                if node and node.redis_connection:
-                    node.redis_connection.connection_pool.release(
-                        self._transaction_connection
-                    )
-                self._transaction_connection = None
+                self._release_transaction_connection()
             except self.CONNECTION_ERRORS:
                 # disconnect will also remove any previous WATCHes
                 if self._transaction_connection:
                     self._transaction_connection.disconnect()
-                    node = self._nodes_manager.find_connection_owner(
-                        self._transaction_connection
-                    )
-                    if node and node.redis_connection:
-                        node.redis_connection.connection_pool.release(
-                            self._transaction_connection
-                        )
-                    self._transaction_connection = None
+                    self._release_transaction_connection()
 
         # clean up the other instance attributes
         self._transaction_node = None
