@@ -3258,22 +3258,30 @@ class ConnectionPool(
         """Releases the connection back to the pool"""
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
-        async with self._lock:
-            self._in_use_connections.remove(connection)
-
+        try:
             if connection.should_reconnect():
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Disconnecting released connection marked for reconnect: "
-                        f"{connection}, {connection.extract_connection_details()}"
-                    )
-                await connection.disconnect()
+                async with self._lock:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Disconnecting released connection marked for reconnect: "
+                            f"{connection}, {connection.extract_connection_details()}"
+                        )
+                    await connection.disconnect()
 
-            self._available_connections.append(connection)
-
-        await self._event_dispatcher.dispatch_async(
-            AsyncAfterConnectionReleasedEvent(connection)
-        )
+            # Listeners such as the deferred re-auth use the connection's socket,
+            # so run them while it is still marked in use and can't be handed to
+            # another task.
+            await self._event_dispatcher.dispatch_async(
+                AsyncAfterConnectionReleasedEvent(connection)
+            )
+        finally:
+            async with self._lock:
+                self._in_use_connections.remove(connection)
+                # Maintenance can mark the connection for reconnect while the
+                # event listeners run and the idle sweep has already passed.
+                if connection.should_reconnect():
+                    await connection.disconnect()
+                self._available_connections.append(connection)
 
         # Record state transition: USED -> IDLE
         pool_name = get_pool_name(self)

@@ -142,6 +142,74 @@ class DummyConnection(Connection):
         return False
 
 
+class ReAuthBlockedConnection(DummyConnection):
+    """A connection whose deferred AUTH stays pending until released by the test."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.re_auth_started = asyncio.Event()
+        self.finish_re_auth = asyncio.Event()
+
+    async def re_auth(self):
+        self.re_auth_started.set()
+        await self.finish_re_auth.wait()
+
+
+class TestConnectionPoolReleaseReAuth:
+    async def test_release__deferred_re_auth_pending__connection_not_available(self):
+        pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
+        conn = await pool.get_connection()
+
+        release_task = asyncio.create_task(pool.release(conn))
+        try:
+            await asyncio.wait_for(conn.re_auth_started.wait(), timeout=1)
+
+            # While AUTH is still waiting for its reply, another task must not be
+            # able to take the connection and read from the same socket.
+            assert conn not in pool._available_connections
+        finally:
+            conn.finish_re_auth.set()
+            await release_task
+
+        assert conn in pool._available_connections
+        await pool.aclose()
+
+    async def test_release__marked_for_reconnect_during_re_auth__disconnected(self):
+        pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
+        conn = await pool.get_connection()
+        assert conn.is_connected
+        conn.should_reconnect = lambda: conn_marked
+
+        conn_marked = False
+        release_task = asyncio.create_task(pool.release(conn))
+        try:
+            await asyncio.wait_for(conn.re_auth_started.wait(), timeout=1)
+            # maintenance marks the in-use connection while the AUTH is pending
+            conn_marked = True
+        finally:
+            conn.finish_re_auth.set()
+            await release_task
+
+        assert not conn.is_connected
+        assert conn in pool._available_connections
+        await pool.aclose()
+
+    async def test_release__deferred_re_auth_fails__connection_still_returned(self):
+        class FailingReAuthConnection(DummyConnection):
+            async def re_auth(self):
+                raise ConnectionError("AUTH failed")
+
+        pool = redis.ConnectionPool(connection_class=FailingReAuthConnection)
+        conn = await pool.get_connection()
+
+        with pytest.raises(ConnectionError):
+            await pool.release(conn)
+
+        assert conn not in pool._in_use_connections
+        assert conn in pool._available_connections
+        await pool.aclose()
+
+
 class TestConnectionPool:
     @asynccontextmanager
     async def get_pool(
