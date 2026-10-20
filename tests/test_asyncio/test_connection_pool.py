@@ -174,24 +174,63 @@ class TestConnectionPoolReleaseReAuth:
         assert conn in pool._available_connections
         await pool.aclose()
 
-    async def test_release__marked_for_reconnect_during_re_auth__disconnected(self):
+    async def test_release__token_queued_while_re_auth_pending__applied(self):
         pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
         conn = await pool.get_connection()
-        assert conn.is_connected
-        conn.should_reconnect = lambda: conn_marked
+        applied = []
 
-        conn_marked = False
+        async def re_auth():
+            # like the real one: the token is read before the AUTH round trip
+            token_at_start = conn.token
+            conn.re_auth_started.set()
+            await conn.finish_re_auth.wait()
+            if token_at_start is not None:
+                applied.append(token_at_start)
+                conn.token = None
+
+        async def send_command(*args):
+            applied.append(args)
+
+        conn.token = None
+        conn.re_auth = re_auth
+        conn.send_command = send_command
+        conn.read_response = AsyncMock()
+        conn.set_re_auth_token = lambda token: setattr(conn, "token", token)
+
+        async def call_with_retry(do, fail):
+            return await do()
+
+        conn.retry = MagicMock(call_with_retry=call_with_retry)
+        token = MagicMock()
+        token.try_get.return_value = "user"
+        token.get_value.return_value = "secret"
+
         release_task = asyncio.create_task(pool.release(conn))
-        try:
-            await asyncio.wait_for(conn.re_auth_started.wait(), timeout=1)
-            # maintenance marks the in-use connection while the AUTH is pending
-            conn_marked = True
-        finally:
-            conn.finish_re_auth.set()
-            await release_task
+        await asyncio.wait_for(conn.re_auth_started.wait(), timeout=1)
+        # a token rotation arrives while the deferred AUTH of the release is pending
+        callback_task = asyncio.create_task(pool.re_auth_callback(token))
+        await asyncio.sleep(0)
+        conn.finish_re_auth.set()
+        await asyncio.gather(release_task, callback_task)
 
-        assert not conn.is_connected
+        # the token must not stay queued on a connection that is already available
+        assert conn.token is None
+        assert applied, "the new token was never sent"
         assert conn in pool._available_connections
+        await pool.aclose()
+
+    async def test_release__connection_not_in_pool__no_side_effects(self):
+        pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
+        foreign = ReAuthBlockedConnection()
+        await foreign.connect()
+        foreign.should_reconnect = lambda: True
+
+        with pytest.raises(KeyError):
+            await pool.release(foreign)
+
+        assert not foreign.re_auth_started.is_set()
+        assert foreign.is_connected
+        assert foreign not in pool._available_connections
         await pool.aclose()
 
     async def test_release__deferred_re_auth_fails__connection_still_returned(self):

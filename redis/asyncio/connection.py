@@ -3258,9 +3258,10 @@ class ConnectionPool(
         """Releases the connection back to the pool"""
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
-        try:
-            if connection.should_reconnect():
-                async with self._lock:
+        async with self._lock:
+            self._in_use_connections.remove(connection)
+            try:
+                if connection.should_reconnect():
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
                             "Disconnecting released connection marked for reconnect: "
@@ -3268,19 +3269,14 @@ class ConnectionPool(
                         )
                     await connection.disconnect()
 
-            # Listeners such as the deferred re-auth use the connection's socket,
-            # so run them while it is still marked in use and can't be handed to
-            # another task.
-            await self._event_dispatcher.dispatch_async(
-                AsyncAfterConnectionReleasedEvent(connection)
-            )
-        finally:
-            async with self._lock:
-                self._in_use_connections.remove(connection)
-                # Maintenance can mark the connection for reconnect while the
-                # event listeners run and the idle sweep has already passed.
-                if connection.should_reconnect():
-                    await connection.disconnect()
+                # Listeners such as the deferred re-auth use the connection's
+                # socket. Run them under the lock, before the connection is
+                # available, so no other task can take it, and a token queued by
+                # re_auth_callback() can't be missed.
+                await self._event_dispatcher.dispatch_async(
+                    AsyncAfterConnectionReleasedEvent(connection)
+                )
+            finally:
                 self._available_connections.append(connection)
 
         # Record state transition: USED -> IDLE
