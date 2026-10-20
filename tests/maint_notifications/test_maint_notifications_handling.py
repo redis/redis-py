@@ -3039,6 +3039,42 @@ def test_timer_firing_during_close_does_not_run_its_callback():
 
 
 @pytest.mark.fixed_client
+def test_pool_close_completes_superseded_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent] * 2
+
+    pool.close()
+
+    # closing ends the relaxation of every pending handoff, also of the one
+    # a newer MOVING superseded, so each started event gets its pair
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert {e.notification for e in completed} == {first, second}
+    assert len(completed) == 2
+
+
+@pytest.mark.fixed_client
 def test_pool_close_completes_pending_handoff_event():
     events = []
 

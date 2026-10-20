@@ -1047,7 +1047,11 @@ class MaintNotificationsPoolHandler:
             # stay in its connection kwargs, and forget the handoffs so the
             # server can redeliver a still-active MOVING to the reused pool.
             for notification in pending_handoffs:
-                self.handle_node_moved_notification(notification)
+                if not self.handle_node_moved_notification(notification):
+                    # Closing ends the relaxation of a superseded handoff too
+                    self._dispatch_handoff_event(
+                        MaintenanceCompletedEvent, notification
+                    )
                 self._processed_notifications.discard(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
@@ -1069,9 +1073,14 @@ class MaintNotificationsPoolHandler:
                     moving_address_src=moving_address_src,
                 )
 
-    def handle_node_moved_notification(self, notification: NodeMovingNotification):
+    def handle_node_moved_notification(
+        self, notification: NodeMovingNotification
+    ) -> bool:
         """
         Handle the cleanup after a node moving notification expires.
+
+        Returns whether the cleanup reverted the connection kwargs; it does not
+        when a newer MOVING notification has superseded this one.
         """
         notification_hash = hash(notification)
 
@@ -1109,6 +1118,7 @@ class MaintNotificationsPoolHandler:
             # kwargs were not reverted: the pool stays relaxed until it expires.
             if kwargs is not None:
                 self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            return kwargs is not None
 
 
 class MaintNotificationsConnectionHandler:

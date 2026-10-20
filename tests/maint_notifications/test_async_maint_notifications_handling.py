@@ -1671,6 +1671,45 @@ async def test_pool_aclose_cancels_handler_scheduled_tasks():
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+async def test_pool_aclose_completes_superseded_handoff_event():
+    """
+    Closing the pool ends the relaxation of every pending handoff, also of the
+    one a newer MOVING superseded, so each started event gets its pair.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.set_connection(DummyAsyncConnection(peer=DEFAULT_HOST))
+    first = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="10.9.8.7", new_node_port=MOVED_PORT, ttl=60
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(first)
+        await handler.handle_node_moving_notification(second)
+        assert [type(e) for e in listener.events] == [MaintenanceStartedEvent] * 2
+
+        await pool.aclose()
+
+    completed = [e for e in listener.events if isinstance(e, MaintenanceCompletedEvent)]
+    assert {e.notification for e in completed} == {first, second}
+    assert len(completed) == 2
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 async def test_pool_aclose_completes_pending_handoff_event():
     """
     Closing the pool cancels the cleanup that would have ended the handoff's

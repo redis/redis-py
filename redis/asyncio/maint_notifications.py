@@ -239,9 +239,12 @@ class AsyncMaintNotificationsPoolHandler:
 
     async def handle_node_moved_notification(
         self, notification: NodeMovingNotification
-    ) -> None:
+    ) -> bool:
         """
         Handle the cleanup after a node moving notification expires.
+
+        Returns whether the cleanup reverted the connection kwargs; it does not
+        when a newer MOVING notification has superseded this one.
         """
         notification_hash = hash(notification)
 
@@ -271,6 +274,7 @@ class AsyncMaintNotificationsPoolHandler:
             # Discarded only once the cleanup is done, so one cancelled
             # halfway is still run by cancel_scheduled_tasks()
             self._pending_handoffs.discard(notification)
+            return reverted
 
     def _schedule(
         self,
@@ -321,7 +325,10 @@ class AsyncMaintNotificationsPoolHandler:
         # in its connection kwargs, and forget the handoffs so the server can
         # redeliver a still-active MOVING to the reused pool.
         for notification in pending_handoffs:
-            await self.handle_node_moved_notification(notification)
+            reverted = await self.handle_node_moved_notification(notification)
+            if not reverted:
+                # Closing ends the relaxation of a superseded handoff too
+                self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
             self._processed_notifications.discard(notification)
 
 
