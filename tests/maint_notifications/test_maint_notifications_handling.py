@@ -3105,3 +3105,50 @@ def test_pool_close_completes_pending_handoff_event():
     ]
     assert events[1].notification is notification
     assert events[1].connection_pool is pool
+
+
+@pytest.mark.fixed_client
+def test_pool_close_retried_after_failed_cleanup_runs_it_again():
+    """
+    A MOVING cleanup that fails halfway, as when a connection is disconnected
+    under it, leaves the handoff pending: a retried close() runs it again and
+    reports its completion once.
+    """
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    update_connections_settings = pool.update_connections_settings
+    calls = []
+
+    def failing_once(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise OSError(9, "Bad file descriptor")
+        return update_connections_settings(**kwargs)
+
+    with patch.object(pool, "update_connections_settings", new=failing_once):
+        with pytest.raises(OSError):
+            pool.close()
+        pool.close()
+
+    assert len(calls) == 2
+    assert calls[1]["matching_notification_hash"] == hash(notification)
+    assert handler._pending_handoffs == set()
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert [e.notification for e in completed] == [notification]

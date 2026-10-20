@@ -1085,7 +1085,6 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
-            self._pending_handoffs.discard(notification)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
                     f"Reverting temporary changes related to notification: {notification}, "
@@ -1118,6 +1117,9 @@ class MaintNotificationsPoolHandler:
             # kwargs were not reverted: the pool stays relaxed until it expires.
             if kwargs is not None:
                 self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            # Discarded only once the cleanup is done, so one that failed
+            # halfway is run again by a retried close()
+            self._pending_handoffs.discard(notification)
             return kwargs is not None
 
 

@@ -1751,6 +1751,42 @@ async def test_pool_aclose_completes_pending_handoff_event():
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
+async def test_concurrent_aclose_completes_pending_handoff_once():
+    """
+    Two aclose() calls racing over the same pending handoff report its
+    completion once: the second closer must not take the cleanup the first
+    one already ran for a superseded handoff.
+    """
+    listener = _RecordingListener()
+    config = _config_with_listener(listener)
+    pool = ConnectionPool(
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        protocol=3,
+        maint_notifications_config=config,
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.set_connection(DummyAsyncConnection(peer=DEFAULT_HOST))
+    notification = NodeMovingNotification(
+        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
+    )
+
+    with mock.patch(
+        "redis.asyncio.maint_notifications.record_connection_handoff",
+        new=AsyncMock(),
+    ):
+        await handler.handle_node_moving_notification(notification)
+        await asyncio.gather(pool.aclose(), pool.aclose())
+
+    assert [type(e) for e in listener.events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    assert handler._pending_handoffs == set()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
 @pytest.mark.parametrize("new_node_host", [MOVED_HOST, None])
 async def test_pool_reused_after_aclose_mid_moving_has_reverted_kwargs(new_node_host):
     pool = ConnectionPool(
