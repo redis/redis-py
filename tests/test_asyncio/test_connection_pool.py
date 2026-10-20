@@ -219,6 +219,43 @@ class TestConnectionPoolReleaseReAuth:
         assert conn in pool._available_connections
         await pool.aclose()
 
+    async def test_release__re_auth_needs_the_pool_lock__no_deadlock(self):
+        class PoolLockReAuthConnection(DummyConnection):
+            async def re_auth(self):
+                # A MOVING push read during the AUTH reply makes the maintenance
+                # handler take the pool lock (apply_moving_notification()).
+                async with self.pool._get_pool_lock():
+                    pass
+
+        pool = redis.ConnectionPool(connection_class=PoolLockReAuthConnection)
+        conn = await pool.get_connection()
+        conn.pool = pool
+
+        await asyncio.wait_for(pool.release(conn), timeout=2)
+
+        assert conn in pool._available_connections
+        await pool.aclose()
+
+    async def test_release__pool_disconnect_during_re_auth__connection_closed(self):
+        pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
+        conn = await pool.get_connection()
+        assert conn.is_connected
+
+        release_task = asyncio.create_task(pool.release(conn))
+        try:
+            await asyncio.wait_for(conn.re_auth_started.wait(), timeout=1)
+
+            # Closing the pool while the deferred AUTH is pending must still see
+            # the connection.
+            await pool.disconnect()
+
+            assert not conn.is_connected
+        finally:
+            conn.finish_re_auth.set()
+            await release_task
+
+        await pool.aclose()
+
     async def test_release__connection_not_in_pool__no_side_effects(self):
         pool = redis.ConnectionPool(connection_class=ReAuthBlockedConnection)
         foreign = ReAuthBlockedConnection()

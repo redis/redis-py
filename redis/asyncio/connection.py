@@ -3017,6 +3017,9 @@ class ConnectionPool(
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
         self._lock = asyncio.Lock()
+        # In-use connections that got a new credentials token while their release
+        # is running (see release()).
+        self._re_auth_queued: Set[AbstractConnection] = set()
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3258,9 +3261,16 @@ class ConnectionPool(
         """Releases the connection back to the pool"""
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
-        async with self._lock:
-            self._in_use_connections.remove(connection)
-            try:
+        if connection not in self._in_use_connections:
+            raise KeyError(connection)
+
+        # The listeners, such as the deferred re-auth, use the connection's socket
+        # and can need the pool lock (a MOVING push read during the AUTH reply
+        # does), so they run without it. The connection stays in use meanwhile:
+        # no other task can take it and pool shutdown still sees it.
+        try:
+            while True:
+                self._re_auth_queued.discard(connection)
                 if connection.should_reconnect():
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
@@ -3269,15 +3279,24 @@ class ConnectionPool(
                         )
                     await connection.disconnect()
 
-                # Listeners such as the deferred re-auth use the connection's
-                # socket. Run them under the lock, before the connection is
-                # available, so no other task can take it, and a token queued by
-                # re_auth_callback() can't be missed.
                 await self._event_dispatcher.dispatch_async(
                     AsyncAfterConnectionReleasedEvent(connection)
                 )
-            finally:
-                self._available_connections.append(connection)
+
+                async with self._lock:
+                    # re_auth_callback() queued a token while the listeners ran.
+                    # Make the connection available only when none is pending,
+                    # so a token is never left behind.
+                    if connection in self._re_auth_queued:
+                        continue
+                    await self._make_available(connection)
+                    break
+        finally:
+            # Only when a listener raised or the task was cancelled.
+            if connection in self._in_use_connections:
+                async with self._lock:
+                    if connection in self._in_use_connections:
+                        await self._make_available(connection)
 
         # Record state transition: USED -> IDLE
         pool_name = get_pool_name(self)
@@ -3291,6 +3310,18 @@ class ConnectionPool(
             connection_state=ConnectionState.IDLE,
             counter=1,
         )
+
+    async def _make_available(self, connection: AbstractConnection) -> None:
+        """Moves a connection from in use to available. Needs the pool lock."""
+        self._in_use_connections.remove(connection)
+        try:
+            # Maintenance can mark the connection for reconnect while the
+            # event listeners run.
+            if connection.should_reconnect():
+                await connection.disconnect()
+        finally:
+            self._available_connections.append(connection)
+            self._re_auth_queued.discard(connection)
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -3362,6 +3393,7 @@ class ConnectionPool(
                 )
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+                self._re_auth_queued.add(conn)
 
     async def _mock(self, error: RedisError):
         """
