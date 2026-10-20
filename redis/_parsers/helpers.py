@@ -1677,15 +1677,17 @@ def parse_function_stats_unified(response, **options):
     if response is None or isinstance(response, dict):
         return response
     stats = {}
-    for key, value in pairs_to_dict(response).items():
+    it = iter(response)
+    for key, value in zip(it, it):
         if isinstance(value, list):
             name = str_if_bytes(key)
             if name == "running_script":
                 value = pairs_to_dict(value)
             elif name == "engines":
+                engines = iter(value)
                 value = {
                     engine: pairs_to_dict(engine_stats)
-                    for engine, engine_stats in pairs_to_dict(value).items()
+                    for engine, engine_stats in zip(engines, engines)
                 }
         stats[key] = value
     return stats
@@ -1710,11 +1712,13 @@ def parse_function_stats_resp3_to_resp2_legacy(response, **options):
                         engine_stats = [
                             item for kv in engine_stats.items() for item in kv
                         ]
-                    engines.extend([engine, engine_stats])
+                    engines.append(engine)
+                    engines.append(engine_stats)
                 value = engines
             else:
                 value = [item for kv in value.items() for item in kv]
-        flat.extend([key, value])
+        flat.append(key)
+        flat.append(value)
     return flat
 
 
