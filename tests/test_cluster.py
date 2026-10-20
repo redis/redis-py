@@ -3812,6 +3812,8 @@ class TestTopologyRefreshPacing:
         A refresh interrupted before it ended (a BaseException, such as a gevent
         timeout) is not a failed refresh, but the next one still waits the
         interval, so callers that keep timing out do not refresh back to back.
+        Its outcome is unknown, so it leaves no record of a refresh that
+        reached no node either.
         """
 
         class Interrupted(BaseException):
@@ -3819,6 +3821,7 @@ class TestTopologyRefreshPacing:
 
         patcher, nm = self._nodes_manager()
         try:
+            nm._last_refresh_unreachable_args = ("down",)
             with (
                 patch.object(Redis, "execute_command", side_effect=Interrupted()),
                 patch_monotonic("redis.cluster", 200.0),
@@ -3827,6 +3830,7 @@ class TestTopologyRefreshPacing:
                     nm.initialize()
             assert nm._failed_refreshes == 0
             assert nm._last_refresh_at == 200.0
+            assert nm._last_refresh_unreachable_args is None
             with patch_monotonic("redis.cluster", 200.9):
                 assert nm._refresh_due() is False
             with patch_monotonic("redis.cluster", 201.0):
@@ -3885,6 +3889,46 @@ class TestTopologyRefreshPacing:
             ):
                 nm.initialize()
             assert sorted(registered) == sorted(nm.nodes_cache)
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_refresh_does_not_release_a_node_another_thread_is_moving(self):
+        """
+        The nodes a refresh releases are the ones missing from the topology it
+        published, taken under the lock: a node of that topology that another
+        thread is halfway through moving to the end of the published cache
+        (popped, not inserted again yet) while the removed nodes are released
+        keeps its connections.
+        """
+        patcher, nm = self._nodes_manager()
+        try:
+            release = nm._release_removed_nodes
+            moved = []
+
+            def release_while_a_node_moves(old_nodes_cache, new_node_names):
+                # As another thread that popped a node of the new topology and
+                # has not inserted it again yet
+                name = next(iter(nm.nodes_cache))
+                node = nm.nodes_cache.pop(name)
+                moved.append(node)
+                try:
+                    release(old_nodes_cache, new_node_names)
+                finally:
+                    nm.nodes_cache[name] = node
+
+            with (
+                patch.object(
+                    nm,
+                    "_release_removed_nodes",
+                    side_effect=release_while_a_node_moves,
+                ),
+                patch.object(NodesManager, "_free_pool_connections") as free,
+            ):
+                nm.initialize()
+            freed = [c.args[0] for c in free.call_args_list]
+            (node,) = moved
+            assert node.redis_connection.connection_pool not in freed
         finally:
             patcher.stop()
 
@@ -4138,17 +4182,21 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("unreachable", [True, False], ids=["unreachable", "up"])
-    @pytest.mark.parametrize("call", ["command", "pipeline", "transaction"])
+    @pytest.mark.parametrize("call", ["command", "pipeline", "transaction", "watch"])
     def test_out_of_retries_raises_unreachable_error_while_no_node_answers(
         self, call, unreachable
     ):
         """
-        A command, pipeline or transaction that runs out of retries on
+        A command, pipeline, transaction or WATCH that runs out of retries on
         connection errors raises RedisClusterUnreachableError, with its own
         error as the cause, while the last refresh reached no node; and its own
         error otherwise.
         """
-        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        # Transactions and WATCH retry with the backoff of their own copy of
+        # the retry
+        rc = get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 3)
+        )
         if unreachable:
             rc.nodes_manager._last_refresh_unreachable_args = (
                 "Redis Cluster cannot be connected",
@@ -4158,12 +4206,20 @@ class TestTopologyRefreshPacing:
             checkout,
             parse,
             patch.object(NodesManager, "initialize", autospec=True),
+            # The slot of WATCH comes from COMMAND GETKEYS otherwise, which
+            # this client has no server for
+            patch.object(
+                ClusterPipeline, "determine_slot", return_value=rc.keyslot("foo")
+            ),
         ):
             with pytest.raises(
                 RedisClusterUnreachableError if unreachable else ConnectionError
             ) as raised:
                 if call == "command":
                     rc.get("foo")
+                elif call == "watch":
+                    with rc.pipeline(transaction=True) as pipe:
+                        pipe.watch("foo")
                 else:
                     rc.pipeline(transaction=call == "transaction").get("foo").execute()
 
@@ -4173,6 +4229,53 @@ class TestTopologyRefreshPacing:
             assert type(raised.value.__cause__) is ConnectionError
         else:
             assert type(raised.value) is ConnectionError
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay", "no_topology_refresh_interval")
+    @pytest.mark.parametrize("call", ["command", "pipeline", "transaction", "watch"])
+    def test_retry_gives_up_once_a_refresh_since_its_error_reached_no_node(self, call):
+        """
+        The refresh a connection error asks for runs on the next attempt and
+        reaches no node: the slot map that attempt would retry on is the one
+        the error came from, so the command, pipeline, transaction or WATCH
+        gives up at once with RedisClusterUnreachableError, with its own error
+        as the cause, instead of using up its retries.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(NoBackoff(), 3),
+            # A transaction asks for the refresh at this threshold
+            reinitialize_steps=1,
+        )
+        nm = rc.nodes_manager
+        checkout, parse, calls = self._checkout_failing_then_ok(100)
+        with (
+            checkout,
+            parse,
+            # Every node fails the CLUSTER SLOTS of the refresh too
+            patch.object(Redis, "execute_command", side_effect=ConnectionError("down")),
+            # The slot of WATCH comes from COMMAND GETKEYS otherwise, which
+            # this client has no server for
+            patch.object(
+                ClusterPipeline, "determine_slot", return_value=rc.keyslot("foo")
+            ),
+        ):
+            with pytest.raises(RedisClusterUnreachableError) as raised:
+                if call == "command":
+                    rc.get("foo")
+                elif call == "watch":
+                    with rc.pipeline(transaction=True) as pipe:
+                        pipe.watch("foo")
+                else:
+                    rc.pipeline(transaction=call == "transaction").get("foo").execute()
+
+        # One attempt failed, the refresh it asked for reached no node, and no
+        # further attempt was made
+        assert len(calls) == 1
+        assert nm._failed_refreshes == 1
+        assert "Redis Cluster cannot be connected" in str(raised.value)
+        assert type(raised.value.__cause__) is ConnectionError
 
     @pytest.mark.fixed_client
     def test_retries_wait_as_long_as_the_retry_backoff_says(self):
@@ -4338,6 +4441,72 @@ class TestTopologyRefreshPacing:
 
         assert len(attempts) == 3
         assert [c.args[0] for c in sleep.call_args_list] == [0.001, 0.002]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
+    def test_pipeline_waits_for_the_cluster_before_retrying_a_cluster_down_error(
+        self, error
+    ):
+        """
+        A pipeline that failed with CLUSTERDOWN or an uncovered slot waits the
+        fixed 0.25 seconds a command does before its retry, and the backoff
+        delay after it.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 2),
+        )
+        pipe = rc.pipeline()
+        strategy = pipe._execution_strategy
+        attempts = []
+
+        def send(stack, raise_on_error=True, allow_redirections=True):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise error
+            return [b"value"]
+
+        with (
+            patch.object(strategy, "_send_cluster_commands", side_effect=send),
+            patch("redis.cluster.time.sleep") as sleep,
+        ):
+            assert pipe.get("foo").execute() == [b"value"]
+
+        assert len(attempts) == 2
+        assert [c.args[0] for c in sleep.call_args_list] == [0.25, 0.001]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
+    def test_pipeline_retry_asks_for_a_refresh_run_once_due(self, error):
+        """
+        A pipeline that failed with CLUSTERDOWN or an uncovered slot asks for a
+        topology refresh, which its next attempt runs once due, instead of
+        retrying on a slot map only another error could have replaced.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        pipe = rc.pipeline()
+        strategy = pipe._execution_strategy
+        attempts = []
+
+        def send(stack, raise_on_error=True, allow_redirections=True):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise error
+            return [b"value"]
+
+        with (
+            patch.object(strategy, "_send_cluster_commands", side_effect=send),
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+            patch("redis.cluster.time.sleep"),
+        ):
+            assert pipe.get("foo").execute() == [b"value"]
+
+        assert len(attempts) == 2
+        init.assert_called_once()
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])

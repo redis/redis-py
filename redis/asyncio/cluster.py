@@ -376,15 +376,17 @@ class RedisCluster(
     :param retry:
         | A retry object that defines the retry strategy and the number of
           retries for the cluster client. Its backoff sets the delay before each
-          retry of a command or a pipeline; a command that failed with
+          retry of a command or a pipeline; one that failed with
           :class:`~.ClusterDownError` or :class:`~.SlotNotCoveredError` also
           waits a fixed 0.25 seconds before it. A topology refresh triggered by an
           error (connection errors, the ``reinitialize_steps`` MOVED threshold) is
           run by the first command attempt to start once it is due, at most once
           per second; after refreshes that failed in a row, the next one waits as
           long as the backoff gives for that many failures, but at least one
-          second. A command that runs out of retries while the last refresh
-          reached no node raises :class:`~.RedisClusterUnreachableError`.
+          second. A command that failed with a connection error or a timeout
+          gives up with :class:`~.RedisClusterUnreachableError` once a refresh
+          that ended since reached no node, or when it runs out of retries while
+          the last refresh did.
           Backoffs that keep state between calls
           (:class:`~.DecorrelatedJitterBackoff`) are not fully supported: the
           retry object is shared by every command and pipeline of the client, so
@@ -861,8 +863,11 @@ class RedisCluster(
                         and requested_at_epoch != self.nodes_manager._epoch
                     ):
                         # A refresh completed after the last request (for
-                        # example one SMIGRATED ran) and already answers it
+                        # example one SMIGRATED ran) and counts as answering
+                        # it, the nodes it named included
                         self.nodes_manager._refresh_requested_at_epoch = None
+                        self.nodes_manager._requested_last_failed_node_name = None
+                        self.nodes_manager._requested_additional_startup_nodes = ()
                         self._initialize = False
                         return self
                     try:
@@ -947,8 +952,10 @@ class RedisCluster(
                 )
         if last_failed_node_name is not None:
             nodes_manager._requested_last_failed_node_name = last_failed_node_name
-        # The epoch of the newest request: a refresh that completes after it
-        # already answers every merged request
+        # The epoch of the newest request. A refresh that completes after it
+        # counts as answering every merged request, even one that started
+        # before the error and read a slot map from before it: an error that
+        # outlives it asks again
         nodes_manager._refresh_requested_at_epoch = nodes_manager._epoch
         self._initialize = True
 
@@ -1544,6 +1551,12 @@ class RedisCluster(
         # Start timing for observability
         start_time = time.monotonic()
 
+        # The error the previous attempt failed with, and when the last refresh
+        # had ended by then: a refresh since that reached no node ends the
+        # retries (see NodesManager._error_instead_of_retry)
+        last_error: Optional[Exception] = None
+        last_refresh_at: Optional[float] = None
+
         for _ in range(execute_attempts):
             if self._initialize:
                 if self._initialize_due():
@@ -1556,6 +1569,12 @@ class RedisCluster(
                 ):
                     # Replace the default cluster node
                     self.replace_default_node()
+            if last_error is not None:
+                outage_error = self.nodes_manager._error_instead_of_retry(
+                    last_error, last_refresh_at
+                )
+                if outage_error is not None:
+                    raise outage_error
             try:
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
@@ -1602,6 +1621,8 @@ class RedisCluster(
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
                     failure_count += 1
+                    last_error = e
+                    last_refresh_at = self.nodes_manager._last_refresh_at
 
                     if hasattr(e, "connection"):
                         # ``args[0]``, not the resolved ``command``: every other metric in
@@ -2740,16 +2761,17 @@ class NodesManager:
         A refresh cancelled before it ended (for example by a timeout around
         the command that ran it) is not counted as failed, but the next one
         still waits the delay, so callers that keep timing out do not run one
-        refresh after another.
+        refresh after another. Its outcome is unknown, so it clears the record
+        of a refresh that reached no node.
         """
         try:
             yield
         except BaseException as e:
             if isinstance(e, Exception):
                 self._failed_refreshes += 1
-                self._last_refresh_unreachable_args = (
-                    e.args if isinstance(e, RedisClusterUnreachableError) else None
-                )
+            self._last_refresh_unreachable_args = (
+                e.args if isinstance(e, RedisClusterUnreachableError) else None
+            )
             self._last_refresh_at = time.monotonic()
             self._refresh_due_at = None
             raise
@@ -2791,6 +2813,26 @@ class NodesManager:
             )
             self._refresh_due_at = due_at
         return time.monotonic() >= due_at
+
+    def _error_instead_of_retry(
+        self, error: Exception, last_refresh_at: Optional[float]
+    ) -> Optional[Exception]:
+        """
+        The error to raise instead of retrying :error:, the connection or
+        timeout error of the previous attempt, or None to retry. A refresh that
+        ended since that attempt failed (``_last_refresh_at`` moved from
+        :last_refresh_at:, read when the error was raised) and reached no node
+        leaves the retry the slot map that attempt failed on, so the caller
+        gives up now with the :class:`~.RedisClusterUnreachableError` that
+        _error_to_raise builds.
+        """
+        if (
+            self._last_refresh_unreachable_args is None
+            or self._last_refresh_at == last_refresh_at
+        ):
+            return None
+        outage_error = _error_to_raise(self._last_refresh_unreachable_args, error)
+        return None if outage_error is error else outage_error
 
     async def initialize(
         self,
@@ -2860,9 +2902,12 @@ class NodesManager:
                 # Vary which startup node is queried first so clients do not
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
+            # An address that is already a startup node is queried through that
+            # node, so no temporary node is built for it
             additional_startup_nodes = [
                 ClusterNode(host, port, **self.connection_kwargs)
                 for host, port in additional_startup_nodes_info
+                if get_node_name(host, port) not in self.startup_nodes
             ]
             temporary_nodes.extend(additional_startup_nodes)
             if last_failed_node_name is not None:
@@ -3530,16 +3575,38 @@ class PipelineStrategy(AbstractStrategy):
     async def execute(
         self, raise_on_error: bool = True, allow_redirections: bool = True
     ) -> List[Any]:
+        """
+        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY as many
+        times as ``retry`` allows, with the backoff delay before each attempt
+        and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
+        Every retried error asks for a topology refresh, which the next attempt
+        runs once due. NOT_NODE_FAILURE_ERRORS are raised at once. Out of
+        retries, the last error is raised, as RedisClusterUnreachableError when
+        the last refresh reached no node; a refresh that reached no node since
+        an attempt failed ends the retries the same way.
+        """
         if not self._command_queue:
             return []
 
         try:
             retry_attempts = self._pipe.cluster_client.retry.get_retries()
             failure_count = 0
+            nodes_manager = self._pipe.cluster_client.nodes_manager
+            # The error the previous attempt failed with, and when the last
+            # refresh had ended by then: a refresh since that reached no node
+            # ends the retries (see NodesManager._error_instead_of_retry)
+            last_error: Optional[Exception] = None
+            last_refresh_at: Optional[float] = None
             while True:
                 try:
                     if self._pipe.cluster_client._initialize_due():
                         await self._pipe.cluster_client.initialize()
+                    if last_error is not None:
+                        outage_error = nodes_manager._error_instead_of_retry(
+                            last_error, last_refresh_at
+                        )
+                        if outage_error is not None:
+                            raise outage_error
                     return await self._execute(
                         self._pipe.cluster_client,
                         self._command_queue,
@@ -3558,6 +3625,12 @@ class PipelineStrategy(AbstractStrategy):
                         # closing the connections of the shared client
                         self._pipe.cluster_client._request_refresh()
                         failure_count += 1
+                        last_error = e
+                        last_refresh_at = nodes_manager._last_refresh_at
+                        if type(e) in (ClusterDownError, SlotNotCoveredError):
+                            # Give the cluster time to recover first, as a
+                            # command that failed so does
+                            await asyncio.sleep(0.25)
                         # Space the attempts out as the retry backoff says
                         delay = self._pipe.cluster_client._retry_backoff_delay(
                             self._pipe.cluster_client.retry, failure_count
@@ -3566,7 +3639,6 @@ class PipelineStrategy(AbstractStrategy):
                             await asyncio.sleep(delay)
                     else:
                         # All other errors should be raised.
-                        nodes_manager = self._pipe.cluster_client.nodes_manager
                         raise _error_to_raise(
                             nodes_manager._last_refresh_unreachable_args, e
                         )
@@ -3779,6 +3851,10 @@ class TransactionStrategy(AbstractStrategy):
         self._transaction_node: Optional[ClusterNode] = None
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
+        # The error the running retry is retrying, and when the last refresh
+        # had ended by then: a refresh since that reached no node ends the
+        # retries (see NodesManager._error_instead_of_retry)
+        self._retrying: Optional[Tuple[Exception, Optional[float]]] = None
         self._retry = copy(self._pipe.cluster_client.retry)
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
@@ -3900,12 +3976,30 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = True
 
     async def _immediate_execute_command(self, *args, **options):
-        return await self._retry.call_with_retry(
-            lambda: self._get_connection_and_send_command(*args, **options),
-            self._reinitialize_on_error,
-            is_retryable=RedisCluster._is_retryable_cluster_error,
-            with_failure_count=True,
-        )
+        try:
+            return await self._retry.call_with_retry(
+                lambda: self._get_connection_and_send_command(*args, **options),
+                self._reinitialize_on_error,
+                is_retryable=RedisCluster._is_retryable_cluster_error,
+                with_failure_count=True,
+            )
+        except (ConnectionError, TimeoutError) as e:
+            nodes_manager = self._pipe.cluster_client.nodes_manager
+            raise _error_to_raise(nodes_manager._last_refresh_unreachable_args, e)
+        finally:
+            # The error of a retried attempt serves the run's next attempt only
+            self._retrying = None
+
+    def _raise_instead_of_retry(self) -> None:
+        """
+        Give up the running retry when a refresh that ended since its error
+        reached no node (see NodesManager._error_instead_of_retry).
+        """
+        if self._retrying is not None:
+            nodes_manager = self._pipe.cluster_client.nodes_manager
+            outage_error = nodes_manager._error_instead_of_retry(*self._retrying)
+            if outage_error is not None:
+                raise outage_error
 
     async def _get_connection_and_send_command(self, *args, **options):
         # Run a topology refresh an earlier error asked for, once due. This runs
@@ -3913,6 +4007,7 @@ class TransactionStrategy(AbstractStrategy):
         # this coroutine from its private loop unawaited.
         if self._pipe.cluster_client._initialize_due():
             await self._pipe.cluster_client.initialize()
+        self._raise_instead_of_retry()
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
         # Only disconnect if not watching - disconnecting would lose WATCH state.
@@ -3990,6 +4085,10 @@ class TransactionStrategy(AbstractStrategy):
         return output
 
     async def _reinitialize_on_error(self, error, failure_count):
+        self._retrying = (
+            error,
+            self._pipe.cluster_client.nodes_manager._last_refresh_at,
+        )
         if hasattr(error, "connection"):
             await record_error_count(
                 server_address=error.connection.host,
@@ -4100,6 +4199,9 @@ class TransactionStrategy(AbstractStrategy):
         except (ConnectionError, TimeoutError) as e:
             nodes_manager = self._pipe.cluster_client.nodes_manager
             raise _error_to_raise(nodes_manager._last_refresh_unreachable_args, e)
+        finally:
+            # The error of a retried attempt serves the run's next attempt only
+            self._retrying = None
 
     async def _execute_transaction(
         self, stack: List["PipelineCommand"], raise_on_error: bool
@@ -4109,12 +4211,13 @@ class TransactionStrategy(AbstractStrategy):
                 "All keys involved in a cluster transaction must map to the same slot"
             )
 
-        self._executing = True
-
         # Run a topology refresh an earlier error asked for, once due. This runs
         # on the caller's loop, before every attempt.
         if self._pipe.cluster_client._initialize_due():
             await self._pipe.cluster_client.initialize()
+        self._raise_instead_of_retry()
+
+        self._executing = True
 
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
@@ -4281,6 +4384,7 @@ class TransactionStrategy(AbstractStrategy):
             self._pipeline_slots = set()
             self._transaction_has_keyed_slot = False
             self._executing = False
+            self._retrying = None
 
     def multi(self):
         if self._explicit_transaction:
@@ -4559,7 +4663,7 @@ class ClusterPubSub(PubSub):
         )
 
     async def _ensure_cluster_initialized(self) -> None:
-        if self.cluster._initialize_due():
+        if self.cluster._initialize:
             await self.cluster.initialize()
 
     def set_pubsub_node(
