@@ -2540,15 +2540,24 @@ class NodesManager:
                             "Cluster mode is not enabled on this node"
                         )
                     startup_nodes_reachable = True
+                    # An error from an earlier startup node is only raised when
+                    # no node answers, so drop it. Its traceback refers to this
+                    # frame: keeping it forms a reference cycle that holds
+                    # tmp_slots and tmp_nodes_cache until the GC runs.
+                    exception = None
                 except Exception as e:
                     # Try the next startup node.
-                    # The exception is saved and raised only if we have no more nodes.
+                    # The last error is kept while no node has answered, and is
+                    # raised only if none does.
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
                             "Topology refresh: CLUSTER SLOTS failed on "
                             f"{startup_node.name}: {type(e).__name__}: {e}"
                         )
-                    exception = e
+                    # Once a node has answered, later errors are not stored: they
+                    # would bring the cycle back.
+                    if not startup_nodes_reachable:
+                        exception = e
                     continue
 
                 # CLUSTER SLOTS command results in the following output:
@@ -2644,19 +2653,23 @@ class NodesManager:
                 # AuthorizationError subclass ConnectionError but cannot be
                 # repaired by a failover) must keep surfacing as a plain
                 # RedisClusterException.
-                if isinstance(
-                    exception, (ConnectionError, TimeoutError, OSError)
-                ) and not isinstance(
-                    exception, (AuthenticationError, AuthorizationError)
-                ):
-                    raise RedisClusterUnreachableError(
+                try:
+                    if isinstance(
+                        exception, (ConnectionError, TimeoutError, OSError)
+                    ) and not isinstance(
+                        exception, (AuthenticationError, AuthorizationError)
+                    ):
+                        raise RedisClusterUnreachableError(
+                            f"Redis Cluster cannot be connected. Please provide at least "
+                            f"one reachable node: {str(exception)}"
+                        ) from exception
+                    raise RedisClusterException(
                         f"Redis Cluster cannot be connected. Please provide at least "
                         f"one reachable node: {str(exception)}"
                     ) from exception
-                raise RedisClusterException(
-                    f"Redis Cluster cannot be connected. Please provide at least "
-                    f"one reachable node: {str(exception)}"
-                ) from exception
+                finally:
+                    # Ensure we clear local references to caught exceptions
+                    exception = None
 
             # Check if the slots are not fully covered
             if not fully_covered and self.require_full_coverage:
@@ -3400,20 +3413,24 @@ class TransactionStrategy(AbstractStrategy):
         altered as long as the watch commands for those keys were sent over the same
         connection. So once we start watching a key, we fetch a connection to the
         node that owns that slot and reuse it.
+
+        ``_transaction_node`` is only updated when a new connection is acquired, so
+        it always names the node that owns the held connection, even if the slot
+        map changes while the connection is held.
         """
         if not self._pipeline_slots:
             raise RedisClusterException(
                 "At least a command with a key is needed to identify a node"
             )
 
-        node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
-            list(self._pipeline_slots)[0], False
-        )
-        self._transaction_node = node
-
         if not self._transaction_connection:
-            connection: Connection = self._transaction_node.acquire_connection()
-            self._transaction_connection = connection
+            node: ClusterNode = (
+                self._pipe.cluster_client.nodes_manager.get_node_from_slot(
+                    list(self._pipeline_slots)[0], False
+                )
+            )
+            self._transaction_connection = node.acquire_connection()
+            self._transaction_node = node
 
         return self._transaction_node, self._transaction_connection
 
