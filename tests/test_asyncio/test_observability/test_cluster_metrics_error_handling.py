@@ -5,6 +5,8 @@ These tests verify that the async cluster error handling correctly records metri
 when exceptions occur, even when using ClusterNode objects instead of Connection objects.
 """
 
+import asyncio
+
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from redis.asyncio.cluster import RedisCluster, ClusterNode
@@ -297,6 +299,9 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
             cluster._policy_resolver.resolve = AsyncMock(return_value=None)
             cluster.command_flags = {}
             cluster._refresh_topology = AsyncMock()
+            # The refresh runs under the lock of an initialized client
+            cluster._lock = asyncio.Lock()
+            cluster._topology_ready = True
 
             with patch.object(
                 ClusterNode,
@@ -342,6 +347,9 @@ class TestAsyncClusterMetricsRecordingDuringErrorHandling:
             cluster._policy_resolver.resolve = AsyncMock(return_value=None)
             cluster.command_flags = {}
             cluster._refresh_topology = AsyncMock()
+            # The refresh runs under the lock of an initialized client
+            cluster._lock = asyncio.Lock()
+            cluster._topology_ready = True
 
             with patch.object(
                 ClusterNode,
