@@ -404,6 +404,9 @@ class HybridCursorQuery:
         """
         Create a new hybrid cursor query object.
 
+        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by Redis versions
+        8.4 to 8.10. Newer servers reject it as an unknown argument.
+
         Args:
             count: Number of results to return per cursor iteration.
             max_idle: Maximum idle time for the cursor.
