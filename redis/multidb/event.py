@@ -69,13 +69,26 @@ class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
         client = event.old_database.client
 
         if isinstance(client, Redis):
-            client.connection_pool.update_active_connections_for_reconnect()
-            client.connection_pool.disconnect(inuse_connections=False)
+            self._free_pool_connections(client.connection_pool)
         else:
             for node in client.nodes_manager.nodes_cache.values():
-                pool = node.redis_connection.connection_pool
+                self._free_pool_connections(node.redis_connection.connection_pool)
+
+    @staticmethod
+    def _free_pool_connections(pool) -> None:
+        # Mark and disconnect under one lock, so a connection acquired meanwhile
+        # is either marked for reconnect or disconnected while still free. The
+        # maintenance flag makes BlockingConnectionPool honour that lock too.
+        set_in_maintenance = getattr(pool, "set_in_maintenance", None)
+        with pool._get_pool_lock():
+            if set_in_maintenance is not None:
+                set_in_maintenance(True)
+            try:
                 pool.update_active_connections_for_reconnect()
-                pool.disconnect(inuse_connections=False)
+                pool.disconnect_free_connections()
+            finally:
+                if set_in_maintenance is not None:
+                    set_in_maintenance(False)
 
 
 class RegisterCommandFailure(EventListenerInterface):

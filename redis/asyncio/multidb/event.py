@@ -69,8 +69,17 @@ class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
         client = event.old_database.client
 
         if isinstance(client, Redis):
-            await client.connection_pool.update_active_connections_for_reconnect()
-            await client.connection_pool.disconnect(inuse_connections=False)
+            pool = client.connection_pool
+            # Mark and disconnect under one lock, so a connection acquired
+            # meanwhile is either marked for reconnect or disconnected while
+            # still free. The maintenance flag makes BlockingConnectionPool
+            # honour that lock too.
+            async with pool._get_pool_lock():
+                pool._set_in_maintenance(True)
+                try:
+                    await pool._run_proactive_reconnect_without_locking()
+                finally:
+                    pool._set_in_maintenance(False)
         else:
             for node in client.nodes_manager.nodes_cache.values():
                 node.update_active_connections_for_reconnect()

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -54,16 +54,24 @@ class TestCloseConnectionOnActiveDatabaseChanged:
         old_database = MagicMock()
         old_database.client = MagicMock(spec=Redis)
         pool = old_database.client.connection_pool = MagicMock()
-        pool.update_active_connections_for_reconnect = AsyncMock()
-        pool.disconnect = AsyncMock()
+        pool._run_proactive_reconnect_without_locking = AsyncMock()
 
         await CloseConnectionOnActiveDatabaseChanged().listen(
             AsyncActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
         )
 
         old_database.client.aclose.assert_not_called()
-        pool.update_active_connections_for_reconnect.assert_awaited_once_with()
-        pool.disconnect.assert_awaited_once_with(inuse_connections=False)
+        pool.disconnect.assert_not_called()
+        # Mark and disconnect must happen under the pool lock, with the blocking
+        # pool's maintenance flag raised so its get_connection honours that lock.
+        assert pool.mock_calls == [
+            call._get_pool_lock(),
+            call._get_pool_lock().__aenter__(),
+            call._set_in_maintenance(True),
+            call._run_proactive_reconnect_without_locking(),
+            call._set_in_maintenance(False),
+            call._get_pool_lock().__aexit__(None, None, None),
+        ]
 
     @pytest.mark.asyncio
     async def test_cluster_keeps_in_use_connections(self):
