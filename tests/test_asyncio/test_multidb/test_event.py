@@ -2,9 +2,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from redis.asyncio import Redis
 from redis.asyncio.multidb.client import PubSub
 from redis.asyncio.multidb.event import (
     AsyncActiveDatabaseChanged,
+    CloseConnectionOnActiveDatabaseChanged,
     ResubscribeOnActiveDatabaseChanged,
 )
 
@@ -43,6 +45,44 @@ class TestResubscribeOnActiveDatabaseChanged:
         new_pubsub.on_connect.assert_awaited_once_with(None)
         assert command_executor.active_pubsub is new_pubsub
         old_pubsub.aclose.assert_awaited_once()
+
+
+@pytest.mark.fixed_client
+class TestCloseConnectionOnActiveDatabaseChanged:
+    @pytest.mark.asyncio
+    async def test_standalone_keeps_in_use_connections(self):
+        old_database = MagicMock()
+        old_database.client = MagicMock(spec=Redis)
+        pool = old_database.client.connection_pool = MagicMock()
+        pool.update_active_connections_for_reconnect = AsyncMock()
+        pool.disconnect = AsyncMock()
+
+        await CloseConnectionOnActiveDatabaseChanged().listen(
+            AsyncActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
+        )
+
+        old_database.client.aclose.assert_not_called()
+        pool.update_active_connections_for_reconnect.assert_awaited_once_with()
+        pool.disconnect.assert_awaited_once_with(inuse_connections=False)
+
+    @pytest.mark.asyncio
+    async def test_cluster_keeps_in_use_connections(self):
+        old_database = MagicMock()
+        nodes = [MagicMock(), MagicMock()]
+        for node in nodes:
+            node.disconnect_free_connections = AsyncMock()
+        old_database.client.nodes_manager.nodes_cache = {
+            f"node{i}": node for i, node in enumerate(nodes)
+        }
+
+        await CloseConnectionOnActiveDatabaseChanged().listen(
+            AsyncActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
+        )
+
+        old_database.client.aclose.assert_not_called()
+        for node in nodes:
+            node.update_active_connections_for_reconnect.assert_called_once_with()
+            node.disconnect_free_connections.assert_awaited_once_with()
 
 
 @pytest.mark.fixed_client

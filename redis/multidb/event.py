@@ -61,19 +61,21 @@ class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
 
 class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
     """
-    Close connection to the old active database.
+    Drop the free connections to the old active database and mark the in-use
+    ones for reconnect, so they are not torn down mid-command.
     """
 
     def listen(self, event: ActiveDatabaseChanged):
-        event.old_database.client.close()
+        client = event.old_database.client
 
-        if isinstance(event.old_database.client, Redis):
-            event.old_database.client.connection_pool.update_active_connections_for_reconnect()
-            event.old_database.client.connection_pool.disconnect()
+        if isinstance(client, Redis):
+            client.connection_pool.update_active_connections_for_reconnect()
+            client.connection_pool.disconnect(inuse_connections=False)
         else:
-            for node in event.old_database.client.nodes_manager.nodes_cache.values():
-                node.redis_connection.connection_pool.update_active_connections_for_reconnect()
-                node.redis_connection.connection_pool.disconnect()
+            for node in client.nodes_manager.nodes_cache.values():
+                pool = node.redis_connection.connection_pool
+                pool.update_active_connections_for_reconnect()
+                pool.disconnect(inuse_connections=False)
 
 
 class RegisterCommandFailure(EventListenerInterface):
