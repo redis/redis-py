@@ -5237,7 +5237,10 @@ class ClusterPubSub(PubSub):
             # intentionally runs outside the lock so reconciliation is not
             # stalled by long polls.
             async with self._shard_state_lock:
-                if message["channel"] in self.pending_unsubscribe_shard_channels:
+                if (
+                    message["channel"] in self.pending_unsubscribe_shard_channels
+                    and message["channel"] not in pubsub.shard_channels
+                ):
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
                     self.shard_channels.pop(message["channel"], None)
@@ -5369,7 +5372,12 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
-                if channel in self.pending_unsubscribe_shard_channels:
+                old_name = self._shard_channel_to_node.get(channel)
+                old_pubsub = self.node_pubsub_mapping.get(old_name)
+                if (
+                    old_pubsub is not None
+                    and channel in old_pubsub.pending_unsubscribe_shard_channels
+                ):
                     continue
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
@@ -5382,7 +5390,6 @@ class ClusterPubSub(PubSub):
                     # slots-cache change notification.
                     uncovered.append(channel)
                     continue
-                old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
                     owner = self.node_pubsub_mapping.get(new_node.name)
                     if owner is not None and channel in owner.shard_channels:
