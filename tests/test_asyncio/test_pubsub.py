@@ -2657,6 +2657,38 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._shard_channel_to_node[channel] == new_node.name
         assert channel not in pubsub.pending_unsubscribe_shard_channels
 
+    async def test_reinitialize_retries_revived_channel_after_failed_attach(self):
+        """
+        Moving a channel a reconnect subscribed again sends ``SUNSUBSCRIBE`` to
+        the old node before it attaches to the new owner. If the attach fails,
+        the stale cluster-level pending entry must not make the next pass skip
+        the channel as a user unsubscribe.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = lambda *_: (
+            old_ps.pending_unsubscribe_shard_channels.add(channel)
+        )
+        new_ps = self._make_node_pubsub()
+        new_ps.ssubscribe.side_effect = [ConnectionError("new owner is down"), None]
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        with pytest.raises(ConnectionError):
+            await pubsub.reinitialize_shard_subscriptions()
+        await pubsub.reinitialize_shard_subscriptions()
+
+        assert new_ps.ssubscribe.await_count == 2
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert channel not in pubsub.pending_unsubscribe_shard_channels
+
     async def test_reinitialize_skips_channel_whose_unsubscribe_the_node_confirmed(
         self,
     ):

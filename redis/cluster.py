@@ -4655,9 +4655,10 @@ class ClusterPubSub(PubSub):
                 if channel in self.pending_unsubscribe_shard_channels:
                     # A reconnect clears the per-node pending set and replays
                     # SSUBSCRIBE, so a channel the node still holds without a
-                    # pending unsubscribe is subscribed again, not leaving.
-                    # Check the pending set first: handle_message drops the
-                    # channel before its pending entry.
+                    # pending unsubscribe is subscribed again, not leaving, and
+                    # its cluster-level entry is stale. Check the pending set
+                    # first: handle_message drops the channel before its
+                    # pending entry.
                     old_pubsub = self.node_pubsub_mapping.get(old_name)
                     if (
                         old_pubsub is None
@@ -4665,6 +4666,7 @@ class ClusterPubSub(PubSub):
                         or channel not in old_pubsub.shard_channels
                     ):
                         continue
+                    self.pending_unsubscribe_shard_channels.discard(channel)
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
