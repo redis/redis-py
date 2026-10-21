@@ -130,6 +130,7 @@ async def test_unblocked_by_demotion_on_a_replica_connection_is_raised(
 
 
 @pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
 async def test_client_unblock_error_is_not_a_demotion(connect_args):
     """
     Mirror of the sync test: CLIENT UNBLOCK ... ERROR also answers UNBLOCKED,

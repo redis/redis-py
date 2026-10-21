@@ -363,6 +363,7 @@ class TestSentinelManagedConnectionDemotedMaster:
         finally:
             conn.disconnect()
 
+    @pytest.mark.onlynoncluster
     def test_client_unblock_error_is_not_a_demotion(self, master_host):
         """
         CLIENT UNBLOCK ... ERROR also answers UNBLOCKED, with another message:
