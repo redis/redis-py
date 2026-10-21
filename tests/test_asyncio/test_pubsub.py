@@ -2657,6 +2657,32 @@ class TestClusterPubSubSlotMigration:
         assert pubsub._shard_channel_to_node[channel] == new_node.name
         assert channel not in pubsub.pending_unsubscribe_shard_channels
 
+    async def test_reinitialize_skips_channel_whose_unsubscribe_the_node_confirmed(
+        self,
+    ):
+        """
+        The per-node pubsub drops the channel when it reads the ``SUNSUBSCRIBE``
+        confirmation, before ``get_sharded_message`` updates the cluster-level
+        state. A pass running in between must not subscribe it again.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub()
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        await pubsub.reinitialize_shard_subscriptions()
+
+        new_ps.ssubscribe.assert_not_awaited()
+        assert channel in pubsub.pending_unsubscribe_shard_channels
+
     async def test_sunsubscribe_keeps_tracking_for_channel_resubscribed_on_reconnect(
         self,
     ):

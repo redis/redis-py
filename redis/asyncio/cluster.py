@@ -5373,12 +5373,17 @@ class ClusterPubSub(PubSub):
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
                 old_name = self._shard_channel_to_node.get(channel)
-                old_pubsub = self.node_pubsub_mapping.get(old_name)
-                if (
-                    old_pubsub is not None
-                    and channel in old_pubsub.pending_unsubscribe_shard_channels
-                ):
-                    continue
+                if channel in self.pending_unsubscribe_shard_channels:
+                    # A reconnect clears the per-node pending set and replays
+                    # SSUBSCRIBE, so a channel the node still holds without a
+                    # pending unsubscribe is subscribed again, not leaving.
+                    old_pubsub = self.node_pubsub_mapping.get(old_name)
+                    if (
+                        old_pubsub is None
+                        or channel not in old_pubsub.shard_channels
+                        or channel in old_pubsub.pending_unsubscribe_shard_channels
+                    ):
+                        continue
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
