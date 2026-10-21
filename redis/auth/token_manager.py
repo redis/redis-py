@@ -357,7 +357,7 @@ class TokenManager:
                 loop = asyncio.get_running_loop()
                 wrapped = _async_to_sync_wrapper(loop, self._renew_token_async)
                 logger.info(f"Next token renewal scheduled in {delay} seconds")
-                loop.call_later(delay, wrapped)
+                self._next_timer = loop.call_later(delay, wrapped)
 
             if not skip_initial:
                 try:
