@@ -1380,6 +1380,52 @@ async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_labels_with_insertion_filters_and_on_duplicate(decoded_r: redis.Redis):
+    ts = decoded_r.ts()
+    filters = {
+        "duplicate_policy": "last",
+        "ignore_max_time_diff": 5,
+        "ignore_max_val_diff": 10.0,
+    }
+    labels = {"sensor": "1"}
+
+    assert await ts.create("create", labels=labels, **filters)
+    assert labels == (await ts.info("create"))["labels"]
+    assert 1000 == await ts.add("create", 1000, 1.0)
+    assert 1000 == await ts.add("create", 1004, 3.0)
+
+    assert await ts.alter("create", labels={}, **filters)
+    assert {} == (await ts.info("create"))["labels"]
+    assert 1000 == await ts.add("create", 1003, 2.0)
+
+    assert 1000 == await ts.add("add", 1000, 1.0, labels=labels, **filters)
+    assert labels == (await ts.info("add"))["labels"]
+    assert 1000 == await ts.add("add", 1004, 3.0)
+
+    assert 1000 == await ts.add("add-dup", 1000, 1.0)
+    assert 1000 == await ts.add(
+        "add-dup", 1000, 2.0, labels=labels, on_duplicate="last"
+    )
+    assert {} == (await ts.info("add-dup"))["labels"]
+
+    assert 1000 == await ts.add(
+        "add-new", 1000, 1.0, labels=labels, on_duplicate="last"
+    )
+    assert labels == (await ts.info("add-new"))["labels"]
+
+    assert 1000 == await ts.incrby(
+        "incrby", 1.0, timestamp=1000, labels=labels, **filters
+    )
+    assert labels == (await ts.info("incrby"))["labels"]
+
+    assert 1000 == await ts.decrby(
+        "decrby", 1.0, timestamp=1000, labels=labels, **filters
+    )
+    assert labels == (await ts.info("decrby"))["labels"]
+
+
+@pytest.mark.redismod
 @skip_if_server_version_lt("8.5.0")
 async def test_range_with_count_nan_count_all_aggregators(decoded_r: redis.Redis):
     await decoded_r.ts().create(

@@ -132,10 +132,10 @@ class TimeSeriesCommands:
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
+        self._append_labels(params, labels)
 
         return self.execute_command(CREATE_CMD, *params)
 
@@ -226,10 +226,10 @@ class TimeSeriesCommands:
         self._append_retention(params, retention_msecs)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
+        self._append_labels(params, labels)
 
         return self.execute_command(ALTER_CMD, *params)
 
@@ -342,11 +342,11 @@ class TimeSeriesCommands:
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
         self._append_on_duplicate(params, on_duplicate)
+        self._append_labels(params, labels)
 
         return self.execute_command(ADD_CMD, *params)
 
@@ -508,10 +508,10 @@ class TimeSeriesCommands:
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
+        self._append_labels(params, labels)
 
         return self.execute_command(INCRBY_CMD, *params)
 
@@ -630,10 +630,10 @@ class TimeSeriesCommands:
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
+        self._append_labels(params, labels)
 
         return self.execute_command(DECRBY_CMD, *params)
 
