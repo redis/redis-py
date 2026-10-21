@@ -1,5 +1,6 @@
 import copy
 import functools
+import ipaddress
 import logging
 import os
 import socket
@@ -2997,6 +2998,12 @@ class SSLConnection(Connection):
 
             #  need another socket
             con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
+            # Send the same SNI as sslsock so the probe is given the same
+            # certificate. ssl sends none for an IP address, so neither do we.
+            try:
+                ipaddress.ip_address(self.host)
+            except ValueError:
+                con.set_tlsext_host_name(self.host.encode())
             con.request_ocsp()
             con.connect((self.host, self.port))
             con.do_handshake()

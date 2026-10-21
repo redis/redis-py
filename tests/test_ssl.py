@@ -718,45 +718,64 @@ class TestOCSPCertificateBinding:
             time.tzset()
 
     @staticmethod
-    def _serve_tls(handshakes):
+    def _serve_tls(handshakes, sni=None):
         """Accept one loopback TLS connection per (certificate, key, issuer,
-        staple) entry, in order, and return the listening port."""
+        staple) entry, in order, and return the listening port. A client that
+        sends a server name found in sni is given that entry instead."""
         OpenSSL = pytest.importorskip("OpenSSL")
+
+        def context(cert, key, issuer, staple):
+            ctx = OpenSSL.SSL.Context(OpenSSL.SSL.TLS_SERVER_METHOD)
+            ctx.use_certificate(OpenSSL.crypto.X509.from_cryptography(cert))
+            ctx.use_privatekey(OpenSSL.crypto.PKey.from_cryptography_key(key))
+            ctx.add_extra_chain_cert(OpenSSL.crypto.X509.from_cryptography(issuer))
+            if staple is not None:
+                ctx.set_ocsp_server_callback(lambda *_, s=staple: s)
+            return ctx
+
+        sni_contexts = {name: context(*entry) for name, entry in (sni or {}).items()}
+
+        def select_context(con):
+            ctx = sni_contexts.get(con.get_servername())
+            if ctx is not None:
+                con.set_context(ctx)
 
         listener = socket.create_server(("127.0.0.1", 0))
 
         def serve():
             accepted = []
             with listener:
-                for cert, key, issuer, staple in handshakes:
+                for entry in handshakes:
                     raw, _ = listener.accept()
                     accepted.append(raw)
-                    ctx = OpenSSL.SSL.Context(OpenSSL.SSL.TLS_SERVER_METHOD)
-                    ctx.use_certificate(OpenSSL.crypto.X509.from_cryptography(cert))
-                    ctx.use_privatekey(OpenSSL.crypto.PKey.from_cryptography_key(key))
-                    ctx.add_extra_chain_cert(
-                        OpenSSL.crypto.X509.from_cryptography(issuer)
-                    )
-                    if staple is not None:
-                        ctx.set_ocsp_server_callback(lambda *_, s=staple: s)
+                    ctx = context(*entry)
+                    ctx.set_tlsext_servername_callback(select_context)
                     con = OpenSSL.SSL.Connection(ctx, raw)
                     con.set_accept_state()
                     try:
                         con.do_handshake()
                     except OpenSSL.SSL.Error:
                         pass
+            # Hold each socket until the client is done with it, so closing
+            # here does not race the probe's shutdown.
             for raw in accepted:
+                raw.settimeout(5)
+                try:
+                    while raw.recv(4096):
+                        pass
+                except OSError:
+                    pass
                 raw.close()
 
         threading.Thread(target=serve, daemon=True).start()
         return listener.getsockname()[1]
 
-    def _stapled_connection(self, port, ca):
+    def _stapled_connection(self, port, ca, host="127.0.0.1"):
         import OpenSSL
         from cryptography.hazmat.primitives import serialization
 
         return redis.SSLConnection(
-            host="127.0.0.1",
+            host=host,
             port=port,
             ssl_ca_data=ca.public_bytes(serialization.Encoding.PEM).decode(),
             ssl_check_hostname=False,
@@ -805,3 +824,38 @@ class TestOCSPCertificateBinding:
         with pytest.raises(ConnectionError) as e:
             self._stapled_connection(port, ca)._connect()
         assert "does not match" in str(e.value)
+
+    def test_stapled_ocsp_probe_sends_server_name(self):
+        # Behind SNI routing the default certificate differs from the one
+        # sslsock asked for by name; the probe must ask for the same one.
+        pytest.importorskip("OpenSSL")
+        ca, node, (other, other_key, other_staple) = self._stapled_handshake_material()
+        default = (other, other_key, ca, other_staple)
+        port = self._serve_tls(
+            [default, default], sni={b"localhost": (node[0], node[1], ca, node[2])}
+        )
+
+        sock = self._stapled_connection(port, ca, host="localhost")._connect()
+        sock.close()
+
+    def test_stapled_ocsp_rejects_forged_issuer_on_probe(self):
+        # The probe presents the right leaf, but with a self-made issuer that
+        # only copies the CA's name and signs a GOOD staple for it.
+        pytest.importorskip("OpenSSL")
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, (cert, key, _), _ = self._stapled_handshake_material()
+        fake_ca, fake_ca_key = self._make_certificate("Test CA", 1, ca=True)
+        forged_staple = self._good_response(
+            fake_ca,
+            fake_ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+        )
+        port = self._serve_tls(
+            [(cert, key, ca, None), (cert, key, fake_ca, forged_staple)]
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            self._stapled_connection(port, ca)._connect()
+        assert "was not issued by" in str(e.value)
