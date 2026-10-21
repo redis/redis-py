@@ -489,12 +489,26 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
                 event.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token):
+        error = None
         for pool in self._event.connection_pools:
-            pool.re_auth_callback(token)
+            try:
+                pool.re_auth_callback(token)
+            except Exception as e:
+                if error is None:
+                    error = e
+        if error is not None:
+            raise error
 
     async def _re_auth_async(self, token):
+        error = None
         for pool in self._event.connection_pools:
-            await pool.re_auth_callback(token)
+            try:
+                await pool.re_auth_callback(token)
+            except Exception as e:
+                if error is None:
+                    error = e
+        if error is not None:
+            raise error
 
     def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)
@@ -565,9 +579,16 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
         # under its key is skipped: it is being closed, even if a later refresh
         # re-added its address as a new node. Nodes added in the meantime connect
         # with the current credentials and need no AUTH.
+        error = None
         for key, node in tuple(nodes.items()):
             if nodes.get(key) is node:
-                await node.re_auth_callback(token)
+                try:
+                    await node.re_auth_callback(token)
+                except Exception as e:
+                    if error is None:
+                        error = e
+        if error is not None:
+            raise error
 
     async def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)
