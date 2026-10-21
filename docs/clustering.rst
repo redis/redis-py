@@ -105,6 +105,13 @@ way. A command or a pipeline that failed with ``CLUSTERDOWN`` or a slot that
 is not covered first waits a fixed 0.25 seconds, to give the cluster time to
 recover, and then the backoff delay as well.
 
+Once a transaction's ``WATCH`` has been acknowledged, a retryable error raises
+``WatchError`` instead of retrying without the watch. This includes redirects,
+connection errors and timeouts both before ``MULTI`` and during ``EXEC``. Retry
+the whole transaction, including ``WATCH`` and any reads, rather than just the
+failed command. Errors before the first ``WATCH`` reply can still be retried.
+This applies to both synchronous and asynchronous cluster transactions.
+
 A single command that failed with ``CLUSTERDOWN`` or a slot that is not covered
 also refreshes the cluster topology (``CLUSTER SLOTS``) at once, before the
 retry; if that refresh fails, the command raises the refresh error.

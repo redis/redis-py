@@ -6084,6 +6084,7 @@ class TransactionStrategy(AbstractStrategy):
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
     CONNECTION_ERRORS = (
         ConnectionError,
+        TimeoutError,
         OSError,
         ClusterDownError,
         SlotNotCoveredError,
@@ -6093,6 +6094,7 @@ class TransactionStrategy(AbstractStrategy):
         super().__init__(pipe)
         self._explicit_transaction = False
         self._watching = False
+        self._watch_acknowledged = False
         self._pipeline_slots: Set[int] = set()
         # True once a keyed (non-slot-agnostic) command has fixed the slot
         self._transaction_has_keyed_slot = False
@@ -6295,8 +6297,11 @@ class TransactionStrategy(AbstractStrategy):
             conn.send_command(*args)
             output = redis_node.parse_response(conn, command_name, **options)
 
-        if command_name in self.UNWATCH_COMMANDS:
+        if command_name == "WATCH":
+            self._watch_acknowledged = True
+        elif command_name in self.UNWATCH_COMMANDS:
             self._watching = False
+            self._watch_acknowledged = False
         return output
 
     def _reinitialize_on_error(self, error, failure_count):
@@ -6312,13 +6317,10 @@ class TransactionStrategy(AbstractStrategy):
                 is_internal=True,
             )
 
-        if self._watching:
-            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
-                raise WatchError("Slot rebalancing occurred while watching keys")
-
-        if (
-            type(error) in self.SLOT_REDIRECT_ERRORS
-            or type(error) in self.CONNECTION_ERRORS
+        # WATCH is requested before the first attempt, but only a reply
+        # establishes the protection that a retry must not silently discard.
+        if self._watch_acknowledged or isinstance(
+            error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             node = None
             if self._transaction_connection:
@@ -6369,6 +6371,13 @@ class TransactionStrategy(AbstractStrategy):
                 self._pipe.reinitialize_counter = 0
 
         self._executing = False
+        if self._watch_acknowledged:
+            self.reset()
+            if isinstance(error, self.SLOT_REDIRECT_ERRORS):
+                raise WatchError(
+                    "Slot rebalancing occurred while watching keys"
+                ) from error
+            raise WatchError("An error occurred while watching keys") from error
 
     def _raise_first_error(self, responses, stack, start_time):
         """
@@ -6503,6 +6512,7 @@ class TransactionStrategy(AbstractStrategy):
 
         # EXEC clears any watched keys
         self._watching = False
+        self._watch_acknowledged = False
 
         if response is None:
             raise WatchError("Watched variable changed.")
@@ -6576,6 +6586,7 @@ class TransactionStrategy(AbstractStrategy):
         # clean up the other instance attributes
         self._transaction_node = None
         self._watching = False
+        self._watch_acknowledged = False
         self._explicit_transaction = False
         self._pipeline_slots = set()
         self._transaction_has_keyed_slot = False
