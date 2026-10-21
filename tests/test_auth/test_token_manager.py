@@ -952,3 +952,29 @@ class TestTokenManager:
 
         mock_listener.on_error.assert_awaited_once()
         assert mgr._next_timer.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_async_renewal_is_scheduled_after_callback(self):
+        timers = []
+        now = datetime.now(timezone.utc).timestamp() * 1000
+        mock_provider = Mock(spec=IdentityProviderInterface)
+        mock_provider.request_token.return_value = SimpleToken(
+            "value", now + 60000, now, {"oid": "test"}
+        )
+
+        async def on_next(token):
+            timers.append(mgr._next_timer)
+            raise Exception("Some exception")
+
+        mock_listener = Mock(spec=CredentialsListener)
+        mock_listener.on_next = on_next
+        mock_listener.on_error = AsyncMock()
+
+        retry_policy = RetryPolicy(1, 10)
+        config = TokenManagerConfig(0.9, 0, 1000, retry_policy)
+        mgr = TokenManager(mock_provider, config)
+        await mgr.start_async(mock_listener, block_for_initial=True)
+        mgr.stop()
+
+        assert timers == [None]
+        assert mgr._next_timer is not None

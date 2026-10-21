@@ -311,16 +311,20 @@ class TokenManager:
                 )
                 return
 
+            callback_error = None
+            if not skip_initial:
+                try:
+                    self._listener.on_next(token_res.get_token())
+                except Exception as e:
+                    callback_error = e
+
             if delay > 0:
                 loop = asyncio.get_running_loop()
                 self._next_timer = loop.call_later(delay, self._renew_token)
                 logger.info(f"Next token renewal scheduled in {delay} seconds")
 
-            if not skip_initial:
-                try:
-                    self._listener.on_next(token_res.get_token())
-                except Exception as e:
-                    raise TokenRenewalErr(e)
+            if callback_error is not None:
+                raise TokenRenewalErr(callback_error) from callback_error
 
             return token_res
         except Exception as e:
@@ -353,17 +357,21 @@ class TokenManager:
                 )
                 return
 
+            callback_error = None
+            if not skip_initial:
+                try:
+                    await self._listener.on_next(token_res.get_token())
+                except Exception as e:
+                    callback_error = e
+
             if delay > 0:
                 loop = asyncio.get_running_loop()
                 wrapped = _async_to_sync_wrapper(loop, self._renew_token_async)
                 logger.info(f"Next token renewal scheduled in {delay} seconds")
                 self._next_timer = loop.call_later(delay, wrapped)
 
-            if not skip_initial:
-                try:
-                    await self._listener.on_next(token_res.get_token())
-                except Exception as e:
-                    raise TokenRenewalErr(e)
+            if callback_error is not None:
+                raise TokenRenewalErr(callback_error) from callback_error
         except Exception as e:
             if self._listener.on_error is None:
                 raise e
