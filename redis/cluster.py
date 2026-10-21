@@ -4656,11 +4656,13 @@ class ClusterPubSub(PubSub):
                     # A reconnect clears the per-node pending set and replays
                     # SSUBSCRIBE, so a channel the node still holds without a
                     # pending unsubscribe is subscribed again, not leaving.
+                    # Check the pending set first: handle_message drops the
+                    # channel before its pending entry.
                     old_pubsub = self.node_pubsub_mapping.get(old_name)
                     if (
                         old_pubsub is None
-                        or channel not in old_pubsub.shard_channels
                         or channel in old_pubsub.pending_unsubscribe_shard_channels
+                        or channel not in old_pubsub.shard_channels
                     ):
                         continue
                 try:
