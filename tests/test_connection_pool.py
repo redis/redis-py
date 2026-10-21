@@ -19,6 +19,8 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
 )
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -178,6 +180,25 @@ class TestConnectionPool:
         assert c1 != c2
         with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
+
+    @pytest.mark.fixed_client
+    def test_failed_re_auth_does_not_stop_the_other_connections(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        failing.send_command.side_effect = redis.AuthenticationError("expired")
+        other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        in_use = mock.Mock(spec=Connection)
+        pool._available_connections.extend([failing, other])
+        pool._in_use_connections.add(in_use)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(redis.AuthenticationError, match="expired"):
+            pool.re_auth_callback(token)
+
+        other.send_command.assert_called_once_with("AUTH", "oid", "value")
+        in_use.set_re_auth_token.assert_called_once_with(token)
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}

@@ -2483,6 +2483,7 @@ class ClusterNode:
                 self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         tmp_queue = collections.deque()
         try:
             while self._free:
@@ -2495,20 +2496,26 @@ class ClusterNode:
                     # a socket here only to authenticate could raise and stop
                     # the token renewal
                     continue
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(), lambda error: self._mock(error)
+                    )
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
