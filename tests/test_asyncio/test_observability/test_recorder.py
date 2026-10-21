@@ -37,6 +37,7 @@ from redis.observability.attributes import (
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
+from redis.observability.providers import ObservabilityInstance
 from redis.observability.registry import get_observables_registry_instance
 
 
@@ -955,6 +956,74 @@ class TestRecorderDisabled:
             await recorder.record_pubsub_message(PubSubDirection.PUBLISH)
             await recorder.record_streaming_lag(0.1, "stream", "group")
 
+        recorder.reset_collector()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+class TestCollectorResolution:
+    """The collector lookup runs once per observability configuration.
+
+    The recording helpers run on every command, so a miss - observability is
+    disabled - is cached as well. ObservabilityInstance.init() and
+    reset_collector() drop that cache so a later enable still collects.
+    """
+
+    async def test_disabled_path_resolves_the_collector_once(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        for _ in range(5):
+            await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+            await recorder.record_connection_count("pool", ConnectionState.IDLE, 1)
+
+        assert len(lookups) == 1
+        recorder.reset_collector()
+
+    async def test_reset_collector_resolves_again(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 1
+
+        recorder.reset_collector()
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 2
+        recorder.reset_collector()
+
+    async def test_init_drops_a_cached_miss(
+        self, monkeypatch, metrics_collector, mock_instruments
+    ):
+        recorder.reset_collector()
+        monkeypatch.setattr(recorder, "_get_or_create_collector", lambda: None)
+
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        mock_instruments.operation_duration.record.assert_not_called()
+
+        # Turning observability on must drop the cached miss, so that the next
+        # recording uses the collector the recorder resolves from now on.
+        monkeypatch.setattr(
+            recorder, "_get_or_create_collector", lambda: metrics_collector
+        )
+        ObservabilityInstance().init(OTelConfig())
+
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        mock_instruments.operation_duration.record.assert_called_once()
         recorder.reset_collector()
 
 

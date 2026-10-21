@@ -236,6 +236,14 @@ class ObservabilityInstance:
 
         self._provider_manager = OTelProviderManager(config)
 
+        # Both recorders cache the resolved collector - including the answer
+        # "observability is disabled" - so that disabled recording costs two
+        # global reads on the command hot path. Initializing (or
+        # re-initializing) observability must drop those caches: a client that
+        # recorded before init() would otherwise stay silent, and a re-init
+        # with a different config would keep the previous collector.
+        _reset_recorder_collectors()
+
         logger.info("Observability initialized")
 
         return self
@@ -329,6 +337,20 @@ class ObservabilityInstance:
 
 # Global singleton instance
 _observability_instance: Optional[ObservabilityInstance] = None
+
+
+def _reset_recorder_collectors() -> None:
+    """Drop the collector caches kept by the sync and async recorders.
+
+    Both recorders import this module for ``get_observability_instance``, so
+    their ``reset_collector`` is imported here, at call time, to keep the
+    import graph acyclic.
+    """
+    from redis.asyncio.observability.recorder import reset_collector as reset_async
+    from redis.observability.recorder import reset_collector as reset_sync
+
+    reset_sync()
+    reset_async()
 
 
 def get_observability_instance() -> ObservabilityInstance:

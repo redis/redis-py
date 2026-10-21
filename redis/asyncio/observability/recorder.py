@@ -40,6 +40,12 @@ if TYPE_CHECKING:
 
 # Global metrics collector instance (lazy-initialized)
 _async_metrics_collector: Optional[RedisMetricsCollector] = None
+# Whether the collector above has been looked up already. A *miss* is cached
+# too: resolving it walks the observability singleton, and while observability
+# is disabled each recording call would run that lookup again.
+# ObservabilityInstance.init() clears both this flag and the collector, so
+# enabling observability after a recording call still starts collecting.
+_async_collector_resolved = False
 
 CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
 
@@ -51,10 +57,14 @@ def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     Returns:
         RedisMetricsCollector instance if observability is enabled, None otherwise
     """
-    global _async_metrics_collector
+    global _async_metrics_collector, _async_collector_resolved
 
     if _async_metrics_collector is not None:
         return _async_metrics_collector
+    if _async_collector_resolved:
+        # A previous lookup found observability disabled; keep the miss cached
+        return None
+    _async_collector_resolved = True
 
     try:
         manager = get_observability_instance().get_provider_manager()
@@ -620,8 +630,9 @@ def reset_collector() -> None:
     """
     Reset the global async collector (used for testing or re-initialization).
     """
-    global _async_metrics_collector
+    global _async_metrics_collector, _async_collector_resolved
     _async_metrics_collector = None
+    _async_collector_resolved = False
 
 
 async def is_enabled() -> bool:
