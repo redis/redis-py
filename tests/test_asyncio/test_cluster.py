@@ -784,6 +784,75 @@ class TestTopologyRefreshPacing:
         assert initialize.await_count == (1 if due else 0)
 
     @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("fails", [False, True], ids=["succeeds", "fails"])
+    async def test_default_node_is_replaced_only_after_failing_on_it(
+        self, fails
+    ) -> None:
+        """
+        While a refresh another node's error asked for is pending, a command
+        that goes to the default node and succeeds leaves the default node as
+        it is; one whose attempt fails on it replaces it before the retry.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        default_node = r.get_default_node()
+        # Pending and not due: the client was just created
+        r._request_refresh(last_failed_node_name="127.0.0.1:7001")
+        attempts = []
+
+        async def execute_command(node, *args, **kwargs):
+            attempts.append(node)
+            if fails and len(attempts) == 1:
+                raise ConnectionError("down")
+            return b"PONG"
+
+        with (
+            mock.patch.object(
+                RedisCluster,
+                "_determine_nodes",
+                autospec=True,
+                side_effect=lambda client, *args, **kwargs: [client.get_default_node()],
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+        ):
+            # Routed to the default node, as a keyless command is
+            assert await r.get("foo") == b"PONG"
+
+        assert attempts[0] is default_node
+        if fails:
+            assert r.get_default_node() is not default_node
+            assert attempts[1] is r.get_default_node()
+        else:
+            assert attempts == [default_node]
+            assert r.get_default_node() is default_node
+
+    @pytest.mark.fixed_client
+    async def test_pending_refresh_leaves_a_targeted_default_node_in_place(
+        self,
+    ) -> None:
+        """
+        A command the caller sent to the default node, made while a refresh
+        another node's error asked for is pending, does not replace the default
+        node: nothing failed on it.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        default_node = r.get_default_node()
+        # Pending and not due: the client was just created
+        r._request_refresh(last_failed_node_name="127.0.0.1:7001")
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, return_value=b"PONG"
+        ) as execute_command:
+            assert await r.execute_command("PING", target_nodes=default_node) is True
+
+        assert [c.args[0] for c in execute_command.await_args_list] == [default_node]
+        assert r.get_default_node() is default_node
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("answered", [True, False], ids=["answered", "pending"])
     async def test_request_answered_by_a_later_refresh_is_dropped(
         self, answered

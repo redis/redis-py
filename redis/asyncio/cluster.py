@@ -1557,18 +1557,16 @@ class RedisCluster(
         last_error: Optional[Exception] = None
         last_refresh_at: Optional[float] = None
 
+        # Whether the attempt targets the default node alone: only an attempt
+        # that failed on it replaces it, not one made while a refresh another
+        # error asked for is pending
+        is_default_node = False
+
         for _ in range(execute_attempts):
-            if self._initialize:
-                if self._initialize_due():
-                    # The node that failed is kept on the nodes manager, so the
-                    # refresh tries it last even when it runs on a later command
-                    await self.initialize()
-                if (
-                    len(target_nodes) == 1
-                    and target_nodes[0] == self.get_default_node()
-                ):
-                    # Replace the default cluster node
-                    self.replace_default_node()
+            if self._initialize_due():
+                # The node that failed is kept on the nodes manager, so the
+                # refresh tries it last even when it runs on a later command
+                await self.initialize()
             if last_error is not None:
                 outage_error = self.nodes_manager._error_instead_of_retry(
                     last_error, last_refresh_at
@@ -1587,6 +1585,10 @@ class RedisCluster(
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
                         )
+                    is_default_node = (
+                        len(target_nodes) == 1
+                        and target_nodes[0] == self.get_default_node()
+                    )
 
                 if len(target_nodes) == 1:
                     # Return the processed result
@@ -1617,6 +1619,9 @@ class RedisCluster(
                     ](dict(zip(keys, values)))
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
+                    if is_default_node:
+                        # Replace the default cluster node
+                        self.replace_default_node()
                     # The nodes and slots cache were should be reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1

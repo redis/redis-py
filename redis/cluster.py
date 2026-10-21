@@ -1957,11 +1957,12 @@ class RedisCluster(
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
                         )
-                    if (
+                    # Per attempt: only an attempt that failed on the default
+                    # node replaces it
+                    is_default_node = (
                         len(target_nodes) == 1
                         and target_nodes[0] == self.get_default_node()
-                    ):
-                        is_default_node = True
+                    )
                 for node in target_nodes:
                     res[node.name] = self._execute_command(node, *args, **kwargs)
 
