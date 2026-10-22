@@ -217,6 +217,10 @@ Core Commands
      - Flat function data becomes nested dictionaries.
      - ``[[b"library_name", b"lib", ...]]``
      - ``[{b"library_name": b"lib", b"functions": [...]}]``
+   * - ``FUNCTION STATS``
+     - Flat stats become nested dictionaries.
+     - ``[b"running_script", None, b"engines", [b"LUA", [...]]]``
+     - ``{b"running_script": None, b"engines": {b"LUA": {...}}}``
    * - ``MEMORY STATS``
      - Structural keys are decoded and numeric values use native types.
      - ``{b"peak.allocated": b"1024"}``
