@@ -480,13 +480,18 @@ class TestOCSPCertificateBinding:
         ocsp_signing=False,
         rsa_key=False,
         rsa_padding=None,
+        aia=False,
     ):
         pytest.importorskip("cryptography")
 
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import ec, rsa
-        from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+        from cryptography.x509.oid import (
+            AuthorityInformationAccessOID,
+            ExtendedKeyUsageOID,
+            NameOID,
+        )
 
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         if rsa_key:
@@ -513,6 +518,22 @@ class TestOCSPCertificateBinding:
         if ocsp_signing:
             builder = builder.add_extension(
                 x509.ExtendedKeyUsage([ExtendedKeyUsageOID.OCSP_SIGNING]),
+                critical=False,
+            )
+        if aia:
+            builder = builder.add_extension(
+                x509.AuthorityInformationAccess(
+                    [
+                        x509.AccessDescription(
+                            AuthorityInformationAccessOID.OCSP,
+                            x509.UniformResourceIdentifier("http://ocsp.test/"),
+                        ),
+                        x509.AccessDescription(
+                            AuthorityInformationAccessOID.CA_ISSUERS,
+                            x509.UniformResourceIdentifier("http://ca.test/ca.der"),
+                        ),
+                    ]
+                ),
                 critical=False,
             )
         if rsa_padding is not None:
@@ -859,3 +880,79 @@ class TestOCSPCertificateBinding:
         with pytest.raises(ConnectionError) as e:
             self._stapled_connection(port, ca)._connect()
         assert "was not issued by" in str(e.value)
+
+    def _unauthorized_then_direct(self, monkeypatch, direct_cert_is_socket_cert):
+        """Run OCSPVerifier.is_valid against a socket presenting a certificate
+        whose first ocsp query is answered UNAUTHORIZED. The direct connection
+        presents either that same certificate or another one from the same CA,
+        and every later ocsp query is answered GOOD for the certificate it
+        names."""
+        import base64
+        from urllib.parse import urlparse
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.x509 import ocsp
+
+        import redis.ocsp
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key, aia=True)
+        other, _ = self._make_certificate("other", 999, signing_key=ca_key, aia=True)
+        direct = cert if direct_cert_is_socket_cert else other
+        unauthorized = ocsp.OCSPResponseBuilder.build_unsuccessful(
+            ocsp.OCSPResponseStatus.UNAUTHORIZED
+        ).public_bytes(serialization.Encoding.DER)
+        queries = []
+
+        class Response:
+            ok = True
+
+            def __init__(self, content):
+                self.content = content
+
+        def get(url, headers=None):
+            if url == "http://ca.test/ca.der":
+                return Response(ca.public_bytes(serialization.Encoding.DER))
+            request = ocsp.load_der_ocsp_request(
+                base64.b64decode(urlparse(url).path.lstrip("/"))
+            )
+            queries.append(request.serial_number)
+            if len(queries) == 1:
+                return Response(unauthorized)
+            target = cert if request.serial_number == cert.serial_number else other
+            return Response(
+                self._good_response(
+                    ca,
+                    ca_key,
+                    target,
+                    now - datetime.timedelta(days=1),
+                    now + datetime.timedelta(days=1),
+                )
+            )
+
+        class Socket:
+            def getpeercert(self, binary_form=False):
+                return cert.public_bytes(serialization.Encoding.DER)
+
+        monkeypatch.setattr(redis.ocsp.requests, "get", get)
+        monkeypatch.setattr(
+            redis.ocsp.ssl,
+            "get_server_certificate",
+            lambda addr, ca_certs=None: direct.public_bytes(
+                serialization.Encoding.PEM
+            ).decode(),
+        )
+        return redis.ocsp.OCSPVerifier(Socket(), "localhost", 6666).is_valid()
+
+    def test_unauthorized_ocsp_retries_with_direct_connection(self, monkeypatch):
+        assert self._unauthorized_then_direct(monkeypatch, True) is True
+
+    def test_unauthorized_ocsp_rejects_other_certificate_on_direct_connection(
+        self, monkeypatch
+    ):
+        # An unsigned UNAUTHORIZED status must not let the check move on to a
+        # certificate the socket never presented, GOOD as that one may be.
+        with pytest.raises(ConnectionError) as e:
+            self._unauthorized_then_direct(monkeypatch, False)
+        assert "does not match" in str(e.value)
