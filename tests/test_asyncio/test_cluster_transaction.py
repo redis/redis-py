@@ -310,6 +310,7 @@ class TestClusterTransaction:
                     "Slot rebalancing occurred while watching keys"
                 )
 
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     async def test_retry_transaction_on_connection_error(self, r):
         key = "book"
@@ -343,6 +344,7 @@ class TestClusterTransaction:
                 node_importing._free.remove(mock_connection)
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     async def test_retry_transaction_on_connection_error_with_watched_keys(self, r):
         key = "book"
@@ -377,6 +379,35 @@ class TestClusterTransaction:
             # Clean up mock connection from node so teardown can work
             if mock_connection in node_importing._free:
                 node_importing._free.remove(mock_connection)
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
+
+    @pytest.mark.onlycluster
+    async def test_watch_connection_stays_with_its_node_after_slot_move(self, r):
+        """
+        A slot moved by a refresh while keys are watched does not pair the held
+        connection with the new owner: commands keep using the node the
+        connection belongs to, and the connection goes back to that node's pool.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        node_owning, node_other = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
+        try:
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch(key)
+                connection = pipe._execution_strategy._transaction_connection
+                # As a refresh that moves the slot to another node would
+                r.nodes_manager.slots_cache[slot] = [node_other]
+                await pipe.get(key)
+
+                pipe.multi()
+                pipe.set(key, "val")
+                assert await pipe.execute() == [True]
+
+            assert connection in node_owning._free
+            assert connection not in node_other._free
+        finally:
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster

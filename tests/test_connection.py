@@ -4267,14 +4267,8 @@ class TestConnectionPoolMetricCount:
         conn = pool.get_connection()
         pool.release(conn)
 
-        # Simulate destruction (what __del__ / reset does)
-        idle_count = len(pool._available_connections)
-        if idle_count:
-            mock_rec(
-                pool_name=pn,
-                connection_state=ConnectionState.IDLE,
-                counter=-idle_count,
-            )
+        # Destroy the pool's connections through the pool's own teardown path.
+        pool.reset()
 
         calls = _pool_metric_calls(mock_rec, pn)
         idle_net, used_net = _net(calls)
