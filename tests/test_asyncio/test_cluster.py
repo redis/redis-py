@@ -6400,13 +6400,16 @@ class TestNodesManager:
         stays in the free queue.
         """
         node = ClusterNode(default_host, 7000)
-        failing = self._re_auth_connection(False, AuthenticationError("expired"))
+        failing = self._re_auth_connection(False)
+        failing.retry = Retry(NoBackoff(), 3)
+        failing.read_response.side_effect = AuthenticationError("expired")
         other = self._re_auth_connection(False)
         node._free.extend([failing, other])
 
         with pytest.raises(AuthenticationError, match="expired"):
             await node.re_auth_callback(mock.Mock())
 
+        failing.read_response.assert_awaited_once()
         other.send_command.assert_not_awaited()
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 

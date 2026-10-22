@@ -203,8 +203,8 @@ class TestConnectionPool:
     @pytest.mark.fixed_client
     def test_re_auth_stops_at_authentication_error(self):
         pool = self.get_pool(connection_class=DummyConnection)
-        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
-        failing.send_command.side_effect = redis.AuthenticationError("expired")
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 3))
+        failing.read_response.side_effect = redis.AuthenticationError("expired")
         other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
         in_use = mock.Mock(spec=Connection)
         pool._available_connections.extend([failing, other])
@@ -216,6 +216,7 @@ class TestConnectionPool:
         with pytest.raises(redis.AuthenticationError, match="expired"):
             pool.re_auth_callback(token)
 
+        failing.read_response.assert_called_once()
         other.send_command.assert_not_called()
         in_use.set_re_auth_token.assert_not_called()
 

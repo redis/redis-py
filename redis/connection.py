@@ -4338,7 +4338,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         lambda error: self._mock(error),
                     )
                     conn.retry.call_with_retry(
-                        lambda: conn.read_response(), lambda error: self._mock(error)
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
                     )
                 except AuthenticationError:
                     raise
