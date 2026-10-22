@@ -331,6 +331,7 @@ class SearchCommands:
                 duration=kwargs["duration"],
                 has_payload=query._with_payloads,
                 with_scores=query._with_scores,
+                field_encodings=query._return_fields_decode_as,
             )
 
         return result, ProfileInformation(res[1])
@@ -471,6 +472,7 @@ class SearchCommands:
                 duration=kwargs["duration"],
                 has_payload=query._with_payloads,
                 with_scores=query._with_scores,
+                field_encodings=query._return_fields_decode_as,
             )
 
         profile_data = res[1]
@@ -795,6 +797,7 @@ class SearchCommands:
                 results_data,
                 duration=kwargs.get("duration", 0),
                 with_scores=getattr(query, "_with_scores", False),
+                field_encodings=getattr(query, "_return_fields_decode_as", None),
             )
         profile_data = self._to_string_recursive(profile_data)
         return result, profile_data
@@ -1379,7 +1382,9 @@ class SearchCommands:
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
                         Contains the parameters substitution
             - **timeout**: int - contains the timeout in milliseconds
-            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration.
+                        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by
+                        Redis versions 8.4 to 8.10.
 
 
         For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.
@@ -1494,7 +1499,9 @@ class SearchCommands:
     ]:
         """
         Performs a search or aggregate command and collects performance
-        information.
+        information. Search results honor the query's field encodings. For binary
+        fields, use ``decode_responses=False`` and ``Query.return_field`` with
+        ``decode_field=False``.
 
         ### Parameters
 
@@ -1918,7 +1925,9 @@ class AsyncSearchCommands(SearchCommands):
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
                         Contains the parameters substitution
             - **timeout**: int - contains the timeout in milliseconds
-            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration.
+                        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by
+                        Redis versions 8.4 to 8.10.
 
 
         For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.

@@ -270,6 +270,108 @@ class TestClusterTransaction:
                 )
 
     @pytest.mark.onlycluster
+    def test_watch_connection_stays_with_its_node_after_slot_move(self, r):
+        """
+        A requested refresh that moves the slot while keys are watched does not
+        pair the held connection with the new owner: commands keep using the
+        node the connection belongs to, and the connection goes back to that
+        node's pool.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        node_owning, node_other = _find_source_and_target_node_for_slot(r, slot)
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+
+        def move_slot(retry=None):
+            # As a refresh that moves the slot to another node would
+            r.nodes_manager._refresh_requested = False
+            r.nodes_manager.slots_cache[slot] = [node_other]
+
+        try:
+            with patch.object(
+                r.nodes_manager, "_run_requested_refresh", side_effect=move_slot
+            ):
+                with r.pipeline(transaction=True) as pipe:
+                    pipe.watch(key)
+                    strategy = pipe._execution_strategy
+                    connection = strategy._transaction_connection
+                    r.nodes_manager._refresh_requested = True
+                    pipe.get(key)
+                    assert strategy._get_client_and_connection_for_transaction() == (
+                        node_owning.redis_connection,
+                        connection,
+                    )
+
+                    pipe.multi()
+                    pipe.set(key, "val")
+                    assert len(pipe.execute()) == 1
+
+            owning_pool = node_owning.redis_connection.connection_pool
+            assert connection in owning_pool._available_connections
+            assert (
+                connection
+                not in node_other.redis_connection.connection_pool._available_connections
+            )
+        finally:
+            r.nodes_manager._refresh_requested = False
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
+        assert r.get(key) == b"val"
+
+    @pytest.mark.onlycluster
+    @pytest.mark.parametrize("change", ["removed", "replaced"])
+    @pytest.mark.parametrize("release", ["reset", "error"])
+    def test_watch_connection_returns_to_its_node_after_node_left(
+        self, r, change, release
+    ):
+        """
+        A refresh that removes the node of the held WATCH connection, or
+        replaces it with a new instance under the same name, does not leak the
+        connection: it goes back to the pool of the node it was taken from,
+        both when the pipeline is reset and on the error path.
+        """
+        key = "book"
+        node_owning = r.nodes_manager.get_node_from_slot(r.keyslot(key))
+        owning_pool = node_owning.redis_connection.connection_pool
+        replacement = None
+        try:
+            with r.pipeline(transaction=True) as pipe:
+                pipe.watch(key)
+                strategy = pipe._execution_strategy
+                connection = strategy._transaction_connection
+                assert connection in owning_pool._in_use_connections
+
+                # As a refresh that drops the node, or rebuilds it, would
+                if change == "removed":
+                    del r.nodes_manager.nodes_cache[node_owning.name]
+                else:
+                    replacement = ClusterNode(
+                        node_owning.host,
+                        node_owning.port,
+                        PRIMARY,
+                        Redis(host=node_owning.host, port=node_owning.port),
+                    )
+                    r.nodes_manager.nodes_cache[node_owning.name] = replacement
+
+                if release == "error":
+                    strategy._reinitialize_on_error(
+                        redis.exceptions.ConnectionError("Conn error"), 1
+                    )
+                    assert strategy._transaction_connection is None
+                    assert not connection.is_connected
+
+            assert connection not in owning_pool._in_use_connections
+            assert connection in owning_pool._available_connections
+            if replacement is not None:
+                replacement_pool = replacement.redis_connection.connection_pool
+                assert connection not in replacement_pool._available_connections
+        finally:
+            r.nodes_manager.nodes_cache[node_owning.name] = node_owning
+            r.nodes_manager._refresh_requested = False
+            if replacement is not None:
+                replacement.redis_connection.close()
+
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
+    @pytest.mark.onlycluster
     def test_retry_transaction_on_connection_error(self, r, mock_connection):
         key = "book"
         slot = r.keyslot(key)
@@ -304,6 +406,7 @@ class TestClusterTransaction:
             node_importing.redis_connection.connection_pool = original_pool
             r.nodes_manager.slots_cache[slot] = original_slots_cache
 
+    @pytest.mark.usefixtures("no_topology_refresh_interval", "no_cluster_retry_delay")
     @pytest.mark.onlycluster
     def test_retry_transaction_on_connection_error_with_watched_keys(
         self, r, mock_connection

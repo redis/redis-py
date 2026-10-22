@@ -1,5 +1,6 @@
 import copy
 import functools
+import ipaddress
 import logging
 import os
 import socket
@@ -2975,7 +2976,9 @@ class SSLConnection(Connection):
                 "- not both."
             )
 
+        sock.settimeout(self.socket_connect_timeout)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        sslsock.settimeout(self.socket_timeout)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
@@ -2997,10 +3000,27 @@ class SSLConnection(Connection):
 
             #  need another socket
             con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
+            # Send the same SNI as sslsock so the probe is given the same
+            # certificate. ssl sends none for an IP address, so neither do we.
+            try:
+                ipaddress.ip_address(self.host)
+            except ValueError:
+                con.set_tlsext_host_name(self.host.encode())
             con.request_ocsp()
             con.connect((self.host, self.port))
             con.do_handshake()
             con.shutdown()
+
+            # The staple was validated on a second connection, so it only
+            # vouches for sslsock if both presented the same certificate.
+            staple_cert = OpenSSL.crypto.dump_certificate(
+                OpenSSL.crypto.FILETYPE_ASN1, con.get_peer_certificate()
+            )
+            if staple_cert != sslsock.getpeercert(True):
+                sslsock.close()
+                raise ConnectionError(
+                    "ocsp stapled certificate does not match the connection certificate"
+                )
             return sslsock
 
         # pure ocsp validation
@@ -3101,6 +3121,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_validate_ocsp": to_bool,
+    "ssl_validate_ocsp_stapled": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "ssl_min_version": int,
