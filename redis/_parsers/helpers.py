@@ -1665,6 +1665,63 @@ def parse_function_list_resp3_to_resp2_legacy(response, **options):
     return result
 
 
+def parse_function_stats_unified(response, **options):
+    """FUNCTION STATS → unified nested ``dict`` with bytes keys.
+
+    Accepts either RESP2 wire (a flat ``[k, v, k, v, …]`` list whose
+    ``running_script`` value is a flat list or ``None`` and whose
+    ``engines`` value pairs each engine name with a flat list of its
+    stats) or RESP3 wire (nested maps). Both are normalised to nested
+    dicts.
+    """
+    if response is None or isinstance(response, dict):
+        return response
+    stats = {}
+    it = iter(response)
+    for key, value in zip(it, it):
+        if isinstance(value, list):
+            name = str_if_bytes(key)
+            if name == "running_script":
+                value = pairs_to_dict(value)
+            elif name == "engines":
+                engines = iter(value)
+                value = {
+                    engine: pairs_to_dict(engine_stats)
+                    for engine, engine_stats in zip(engines, engines)
+                }
+        stats[key] = value
+    return stats
+
+
+def parse_function_stats_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire FUNCTION STATS → today's RESP2 flat ``list`` shape.
+
+    The reply, the running script and the stats of each engine each arrive
+    as a ``dict``; flatten them back to interleaved ``[k, v, k, v, …]``
+    lists so the Python shape matches what RESP2 wire produces natively.
+    """
+    if not isinstance(response, dict):
+        return response
+    flat = []
+    for key, value in response.items():
+        if isinstance(value, dict):
+            if str_if_bytes(key) == "engines":
+                engines = []
+                for engine, engine_stats in value.items():
+                    if isinstance(engine_stats, dict):
+                        engine_stats = [
+                            item for kv in engine_stats.items() for item in kv
+                        ]
+                    engines.append(engine)
+                    engines.append(engine_stats)
+                value = engines
+            else:
+                value = [item for kv in value.items() for item in kv]
+        flat.append(key)
+        flat.append(value)
+    return flat
+
+
 def parse_cluster_links_unified(response, **options):
     """CLUSTER LINKS → unified ``list[dict]`` with string keys.
 
