@@ -371,7 +371,11 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return bool(self._stream._buffer)
 
     async def read_from_socket(self):
-        buffer = await self._stream.read(self._read_size)
+        # Each socket read is bounded by its own socket_timeout window (see
+        # AsyncBaseParser._read_timeout_context), matching the sync parser,
+        # where the OS socket timeout applies to every recv().
+        async with self._read_timeout_context():
+            buffer = await self._stream.read(self._read_size)
         if not buffer or not isinstance(buffer, bytes):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
         self._reader.feed(buffer)
