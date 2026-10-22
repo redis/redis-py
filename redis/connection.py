@@ -2975,7 +2975,9 @@ class SSLConnection(Connection):
                 "- not both."
             )
 
+        sock.settimeout(self.socket_connect_timeout)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        sslsock.settimeout(self.socket_timeout)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
