@@ -830,11 +830,11 @@ class TestTokenManager:
             now = datetime.now(timezone.utc).timestamp() * 1000
             return SimpleToken("value", now + ttl, now, {"oid": "test"})
 
+        ttls = iter([100, 60000])
         mock_provider = Mock(spec=IdentityProviderInterface)
-        mock_provider.request_token.side_effect = [
-            generate_token(100),
-            generate_token(60000),
-        ]
+        mock_provider.request_token.side_effect = (
+            lambda *args, **kwargs: generate_token(next(ttls))
+        )
 
         def on_next(token):
             raise Exception("Some exception")
@@ -901,11 +901,11 @@ class TestTokenManager:
             now = datetime.now(timezone.utc).timestamp() * 1000
             return SimpleToken("value", now + ttl, now, {"oid": "test"})
 
+        ttls = iter([100, 60000])
         mock_provider = Mock(spec=IdentityProviderInterface)
-        mock_provider.request_token.side_effect = [
-            generate_token(100),
-            generate_token(60000),
-        ]
+        mock_provider.request_token.side_effect = (
+            lambda *args, **kwargs: generate_token(next(ttls))
+        )
 
         async def on_next(token):
             raise Exception("Some exception")
