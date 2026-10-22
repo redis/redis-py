@@ -6385,7 +6385,8 @@ class TestHybridSearch(SearchTestsBase):
             assert res["warnings"] == []
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4")
+    @skip_if_server_version_gte("8.11")
     def test_hybrid_search_query_with_cursor(self, client):
         # Create index and add data
         self._create_hybrid_search_index(client)
