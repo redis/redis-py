@@ -1379,7 +1379,9 @@ class SearchCommands:
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
                         Contains the parameters substitution
             - **timeout**: int - contains the timeout in milliseconds
-            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration.
+                        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by
+                        Redis versions 8.4 to 8.10.
 
 
         For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.
@@ -1918,7 +1920,9 @@ class AsyncSearchCommands(SearchCommands):
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
                         Contains the parameters substitution
             - **timeout**: int - contains the timeout in milliseconds
-            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration.
+                        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by
+                        Redis versions 8.4 to 8.10.
 
 
         For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.
