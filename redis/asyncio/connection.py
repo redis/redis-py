@@ -3358,6 +3358,8 @@ class ConnectionPool(
                     await conn.retry.call_with_retry(
                         lambda: conn.read_response(), lambda error: self._mock(error)
                     )
+                except AuthenticationError:
+                    raise
                 except Exception as e:
                     if first_error is None:
                         first_error = e

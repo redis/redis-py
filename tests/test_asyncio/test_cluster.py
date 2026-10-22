@@ -6393,6 +6393,24 @@ class TestNodesManager:
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
+    async def test_re_auth_stops_at_authentication_error(self) -> None:
+        """
+        A rejected token is rejected by every connection, so the first
+        AuthenticationError stops the re-authentication. Every connection
+        stays in the free queue.
+        """
+        node = ClusterNode(default_host, 7000)
+        failing = self._re_auth_connection(False, AuthenticationError("expired"))
+        other = self._re_auth_connection(False)
+        node._free.extend([failing, other])
+
+        with pytest.raises(AuthenticationError, match="expired"):
+            await node.re_auth_callback(mock.Mock())
+
+        other.send_command.assert_not_awaited()
+        assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
+
+    @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(
         self,
     ) -> None:
