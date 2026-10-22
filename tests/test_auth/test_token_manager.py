@@ -925,6 +925,7 @@ class TestTokenManager:
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
         await asyncio.wait_for(renewed.wait(), timeout=5)
+        mgr.stop()
 
         assert mock_provider.request_token.call_count == 2
         assert all(isinstance(error, TokenRenewalErr) for error in errors)
