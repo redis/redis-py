@@ -3659,7 +3659,7 @@ class TestClusterPubSubSlotMigration:
         """
         pubsub = self._make_cluster_pubsub()
         pubsub.shard_channels = {b"foo": None}
-        pubsub.cluster.nodes_manager.initialize = mock.MagicMock(return_value=None)
+        nodes_manager = pubsub.cluster.nodes_manager
 
         holder_acquired = threading.Event()
         release_holder = threading.Event()
@@ -3686,8 +3686,11 @@ class TestClusterPubSubSlotMigration:
                 # The refresh was actually submitted, not skipped, and the
                 # throttle window was armed.
                 self._drain_reconcile_worker(pubsub)
-                pubsub.cluster.nodes_manager.initialize.assert_called_once_with(
+                nodes_manager._request_refresh.assert_called_once_with(
                     disconnect_startup_nodes_pools=False
+                )
+                nodes_manager._run_requested_refresh.assert_called_once_with(
+                    pubsub.cluster.retry
                 )
                 assert pubsub._next_topology_repair > 0.0
             finally:
@@ -4725,18 +4728,22 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        initialize = pubsub.cluster.nodes_manager.initialize
+        nodes_manager = pubsub.cluster.nodes_manager
+        # The repair is an error-triggered refresh like any other: it asks for
+        # one and runs it on the worker once the minimum interval allows
+        request = nodes_manager._request_refresh
+        run_requested = nodes_manager._run_requested_refresh
 
         try:
             with pytest.raises(ConnectionError):
                 pubsub._sharded_message_generator(timeout=0.01)
             self._drain_reconcile_worker(pubsub)
-            assert initialize.call_count == 1
-            # A repair asks for a fresh slot map only. The default would mark the
-            # in-use connections of the node that answered CLUSTER SLOTS for
-            # reconnect and drop its idle ones - recycling command and pubsub
-            # connections on a healthy node once per throttle window.
-            initialize.assert_called_with(disconnect_startup_nodes_pools=False)
+            assert run_requested.call_count == 1
+            run_requested.assert_called_with(pubsub.cluster.retry)
+            # A repair asks for a fresh slot map only: it keeps the idle
+            # connections of a startup node pool that serves no node of the
+            # topology.
+            request.assert_called_with(disconnect_startup_nodes_pools=False)
             assert pubsub._unreachable_nodes == {"127.0.0.1:7000"}
 
             # Second failure inside the throttle window must not refresh again.
@@ -4744,7 +4751,7 @@ class TestClusterPubSubSlotMigration:
             with pytest.raises(ConnectionError):
                 pubsub._sharded_message_generator(timeout=0.01)
             self._drain_reconcile_worker(pubsub)
-            assert initialize.call_count == 1
+            assert run_requested.call_count == 1
 
             # Once the window expires the next failure asks again.
             pubsub._next_topology_repair = (
@@ -4754,7 +4761,7 @@ class TestClusterPubSubSlotMigration:
             with pytest.raises(ConnectionError):
                 pubsub._sharded_message_generator(timeout=0.01)
             self._drain_reconcile_worker(pubsub)
-            assert initialize.call_count == 2
+            assert run_requested.call_count == 2
         finally:
             pubsub._reconcile_executor.shutdown(wait=True)
 

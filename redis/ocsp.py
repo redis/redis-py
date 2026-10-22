@@ -112,6 +112,18 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
         cert_to_validate = responder_cert
 
     if validate:
+        # The issuer and any delegated responder certificate come from the
+        # peer's chain, the AIA fetch or the response itself, none of which is
+        # authenticated. Without these checks anyone can mint a key pair with
+        # the issuer's name and sign a GOOD response for a revoked certificate.
+        try:
+            cert.verify_directly_issued_by(issuer_cert)
+            if cert_to_validate is not issuer_cert:
+                cert_to_validate.verify_directly_issued_by(issuer_cert)
+        except (ValueError, TypeError, InvalidSignature):
+            raise ConnectionError(
+                f"certificate was not issued by {issuer_cert.subject.rfc4514_string()}"
+            )
         _verify_response(cert_to_validate, ocsp_response)
     return True
 
