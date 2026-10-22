@@ -2976,7 +2976,9 @@ class SSLConnection(Connection):
                 "- not both."
             )
 
+        sock.settimeout(self.socket_connect_timeout)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        sslsock.settimeout(self.socket_timeout)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
@@ -3119,6 +3121,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_validate_ocsp": to_bool,
+    "ssl_validate_ocsp_stapled": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "ssl_min_version": int,
