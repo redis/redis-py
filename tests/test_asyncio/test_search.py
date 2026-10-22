@@ -4294,7 +4294,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["warnings"] == []
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4")
+    @skip_if_server_version_gte("8.11")
     async def test_hybrid_search_query_with_cursor(self, decoded_r):
         # Create index and add data
         await self._create_hybrid_search_index(decoded_r)

@@ -1548,7 +1548,7 @@ class PubSub:
         """
         patterns: Iterable[ChannelT]
         if args:
-            parsed_args = list_or_args((args[0],), args[1:])
+            parsed_args = list_or_args(args[0], args[1:])
             patterns = self._normalize_keys(dict.fromkeys(parsed_args)).keys()
         else:
             parsed_args = []
@@ -1794,6 +1794,11 @@ class PubSub:
         for pattern, handler in self.patterns.items():
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
+        for s_channel, handler in self.shard_channels.items():
+            if handler is None:
+                raise PubSubError(
+                    f"Shard Channel: '{s_channel}' has no handler registered"
+                )
 
         await self.connect()
         while True:

@@ -668,6 +668,29 @@ class PubSub:
             "unsubscribe", *args
         )
 
+    async def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "ssubscribe", *args, **kwargs
+        )
+
+    async def sunsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "sunsubscribe", *args
+        )
+
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
     ):
@@ -680,6 +703,22 @@ class PubSub:
         """
         return await self._client.command_executor.execute_pubsub_method(
             "get_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
+        )
+
+    async def get_sharded_message(
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
+    ):
+        """
+        Get the next message if one is available in a sharded channel, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number or None to wait indefinitely.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "get_sharded_message",
             ignore_subscribe_messages=ignore_subscribe_messages,
             timeout=timeout,
         )

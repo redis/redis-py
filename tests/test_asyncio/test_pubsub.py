@@ -508,6 +508,19 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(pubsub, "pattern")
         await self._test_subscribe_unsubscribe(**kwargs)
 
+    async def test_pattern_unsubscribe_with_a_list(self, pubsub):
+        # Like unsubscribe() and the sync PubSub.punsubscribe(), the first
+        # argument can be a list of patterns
+        p = pubsub
+        await p.psubscribe("f*", "b*")
+        for _ in range(2):
+            assert (await wait_for_message(p))["type"] == "psubscribe"
+
+        assert await p.punsubscribe(["f*", "b*"]) is None
+        for _ in range(2):
+            assert (await wait_for_message(p))["type"] == "punsubscribe"
+        assert p.subscribed is False
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     async def test_shard_channel_subscribe_unsubscribe(self, pubsub):
@@ -1516,6 +1529,17 @@ class TestPubSubReconnect:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.fixed_client
+async def test_run_requires_a_handler_for_every_shard_channel():
+    p = PubSub(MagicMock(), ignore_subscribe_messages=True)
+    p.shard_channels = {b"foo": None}
+
+    with pytest.raises(
+        redis.PubSubError, match="Shard Channel: 'b'foo'' has no handler registered"
+    ):
+        await p.run()
 
 
 @pytest.mark.onlynoncluster
@@ -2856,7 +2880,8 @@ class TestClusterPubSubSlotMigration:
             finished.set()
 
         pubsub.shard_channels = {b"foo": None}
-        pubsub.cluster.nodes_manager.initialize = _refresh
+        # The repair runs the refresh through the cluster client
+        pubsub.cluster.initialize = _refresh
         pubsub._schedule_topology_repair()
         (task,) = list(pubsub._topology_repair_tasks)
         await started.wait()
@@ -3596,12 +3621,15 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        pubsub.cluster.nodes_manager.initialize = AsyncMock()
+        # The repair runs the refresh through the cluster client
+        pubsub.cluster.initialize = AsyncMock()
 
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 1
+        assert pubsub.cluster.initialize.await_count == 1
+        # Asked for on the client, so a failed refresh stays asked for
+        pubsub.cluster._request_refresh.assert_called_once_with()
         assert pubsub._unreachable_nodes == {"127.0.0.1:7000"}
 
         # Second failure inside the throttle window must not refresh again.
@@ -3609,7 +3637,7 @@ class TestClusterPubSubSlotMigration:
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 1
+        assert pubsub.cluster.initialize.await_count == 1
 
         # Once the window expires the next failure asks again.
         pubsub._next_topology_repair = (
@@ -3619,7 +3647,7 @@ class TestClusterPubSubSlotMigration:
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 2
+        assert pubsub.cluster.initialize.await_count == 2
 
     async def test_failed_poll_does_not_refresh_without_shard_channels(self):
         """Nothing to reconcile means nothing to refresh the topology for."""
@@ -3628,12 +3656,13 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        pubsub.cluster.nodes_manager.initialize = AsyncMock()
+        pubsub.cluster.initialize = AsyncMock()
 
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
 
-        pubsub.cluster.nodes_manager.initialize.assert_not_awaited()
+        pubsub.cluster.initialize.assert_not_awaited()
+        assert pubsub.cluster._initialize is False
 
     async def test_successful_poll_clears_the_unreachable_mark(self):
         """A node that answers again must not keep the migration fast path."""
