@@ -21,7 +21,7 @@ initializing observability:
 """
 
 import logging
-from typing import Optional
+from typing import Callable, List, Optional
 
 from redis.observability.config import OTelConfig
 
@@ -338,19 +338,42 @@ class ObservabilityInstance:
 # Global singleton instance
 _observability_instance: Optional[ObservabilityInstance] = None
 
+# Cache-invalidation hooks registered by the recorders themselves.
+#
+# Both recorders cache the resolved collector - including the answer
+# "observability is disabled" - so that disabled recording stays cheap on the
+# command hot path. Initializing (or re-initializing) observability has to drop
+# those caches: a client that recorded before init() would otherwise stay
+# silent, and a re-init with a different config would keep the previous
+# collector.
+#
+# The recorders import this module for ``get_observability_instance``, so they
+# register their ``reset_collector`` here at import time instead of this module
+# importing them. That keeps every import at module scope: a sync-only
+# application must not pull in redis.asyncio, and there is no cycle because the
+# dependency only ever runs in this direction.
+_reset_hooks: List[Callable[[], None]] = []
+
+
+def _register_reset_hook(hook: Callable[[], None]) -> None:
+    """Register a recorder's collector-cache invalidation hook.
+
+    Called at import time by each recorder module. Builtin functions compare by
+    identity, so registering the same hook twice is a no-op.
+    """
+    if hook not in _reset_hooks:
+        _reset_hooks.append(hook)
+
 
 def _reset_recorder_collectors() -> None:
-    """Drop the collector caches kept by the sync and async recorders.
+    """Drop the collector caches of every recorder that has been imported.
 
-    Both recorders import this module for ``get_observability_instance``, so
-    their ``reset_collector`` is imported here, at call time, to keep the
-    import graph acyclic.
+    A recorder registers its hook when its module is imported, and a recorder
+    only has a cache to drop once it has been imported, so the registered hooks
+    are exactly the caches that can be stale.
     """
-    from redis.asyncio.observability.recorder import reset_collector as reset_async
-    from redis.observability.recorder import reset_collector as reset_sync
-
-    reset_sync()
-    reset_async()
+    for hook in list(_reset_hooks):
+        hook()
 
 
 def get_observability_instance() -> ObservabilityInstance:

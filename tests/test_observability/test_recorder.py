@@ -186,10 +186,8 @@ def setup_recorder(metrics_collector, mock_instruments):
     # Reset the global collector before test
     recorder.reset_collector()
 
-    # Patch _get_or_create_collector to return our collector with mocked instruments
-    with patch.object(
-        recorder, "_get_or_create_collector", return_value=metrics_collector
-    ):
+    # Install our collector with mocked instruments directly: the recording helpers read this variable.
+    with patch.object(recorder, "_metrics_collector", metrics_collector):
         yield mock_instruments
 
     # Reset after test
@@ -757,7 +755,7 @@ class TestHidePubSubChannelNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             with patch.object(recorder, "_get_config", return_value=config):
                 yield mock_instruments
 
@@ -817,7 +815,7 @@ class TestHideStreamNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             with patch.object(recorder, "_get_config", return_value=config):
                 yield mock_instruments
 
@@ -923,7 +921,10 @@ class TestRecorderDisabled:
 
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             # Should not raise any exception
             record_operation_duration(
                 command_name="SET",
@@ -938,7 +939,10 @@ class TestRecorderDisabled:
         """Test is_enabled returns False when collector is None."""
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             assert recorder.is_enabled() is False
 
         recorder.reset_collector()
@@ -948,7 +952,10 @@ class TestRecorderDisabled:
 
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             # None of these should raise
             recorder.record_connection_create_time("pool", 0.1)
             recorder.record_connection_timeout("pool")
@@ -1026,21 +1033,68 @@ class TestCollectorResolution:
     def test_init_drops_a_cached_miss(
         self, monkeypatch, metrics_collector, mock_instruments
     ):
+        """init() must invalidate the recorder's cached collector.
+
+        Both recorders cache the resolved collector, including the answer
+        "observability is disabled", so that a disabled recording stays cheap.
+        Once cached, that answer is only ever replaced by dropping the cache, so
+        if init() did not drop it a recorder that ran before init() would stay
+        silent for the rest of the process.
+        """
         recorder.reset_collector()
-        monkeypatch.setattr(recorder, "_get_or_create_collector", lambda: None)
 
-        record_operation_duration("GET", 0.001, "localhost", 6379)
-        mock_instruments.operation_duration.record.assert_not_called()
+        # Prime the cache the way a recording call before init() would: a miss
+        # is cached by setting the "resolved" flag with no collector.
+        recorder._metrics_collector = None
+        recorder._collector_resolved = True
 
-        # Turning observability on must drop the cached miss, so that the next
-        # recording uses the collector the recorder resolves from now on.
-        monkeypatch.setattr(
-            recorder, "_get_or_create_collector", lambda: metrics_collector
-        )
         ObservabilityInstance().init(OTelConfig())
 
+        assert recorder._collector_resolved is False, (
+            "init() must drop the recorder's cached miss, or the recorder "
+            "stays silent after observability is enabled"
+        )
+        assert recorder._metrics_collector is None
+        reset_collector()
+
+    def test_resolution_spanning_a_reset_is_not_cached_as_a_miss(self, monkeypatch):
+        """A resolution that spans a reset must not leave the cache resolved.
+
+        The resolving call sets the "resolved" flag *before* it consults the
+        provider manager and assigns the collector only on a hit. That ordering
+        is the whole point: if the flag were set after a successful lookup, then
+        a resolution that a reset replaced would re-set the flag the reset had
+        just cleared, and the miss it resolved to would be cached on top of the
+        fresh cache - silencing metrics until the next init.
+
+        The reset here lands inside the resolution, so the answer it produces
+        belongs to the configuration that was just replaced.
+        """
+        recorder.reset_collector()
+
+        state = {"resets": 0}
+
+        def resolver_cycling_through_a_reset():
+            # The reset lands while this resolution is in flight, i.e. after the
+            # flag was set and before an answer is published.
+            reset_collector()
+            state["resets"] += 1
+            return None
+
+        monkeypatch.setattr(
+            recorder, "_get_or_create_collector", resolver_cycling_through_a_reset
+        )
+
         record_operation_duration("GET", 0.001, "localhost", 6379)
-        mock_instruments.operation_duration.record.assert_called_once()
+
+        assert state["resets"] == 1, "the reset must land inside the resolution"
+        assert recorder._metrics_collector is None
+        assert recorder._collector_resolved is False, (
+            "the resolution spanned a reset, so its answer describes the "
+            "configuration that was replaced. Caching it (the flag left set, or "
+            "an assigned collector) is the stale miss that keeps metrics off "
+            "until the next init"
+        )
         reset_collector()
 
 
@@ -1114,7 +1168,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_operation_duration(
                 command_name="SET",
                 duration_seconds=0.005,
@@ -1136,7 +1190,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_create_time(
                 connection_pool="test-pool",
                 duration_seconds=0.050,
@@ -1156,7 +1210,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_wait_time(
                 pool_name="test-pool",
                 duration_seconds=0.010,
@@ -1176,7 +1230,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
@@ -1195,7 +1249,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_relaxed_timeout(
                 connection_name="test-pool",
                 maint_notification="MOVING",
@@ -1214,7 +1268,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_pubsub_message(
                 direction=PubSubDirection.PUBLISH,
                 channel="test-channel",
@@ -1232,7 +1286,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_streaming_lag(
                 lag_seconds=0.150,
                 stream_name="test-stream",
@@ -1251,7 +1305,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_error_count(
                 server_address="localhost",
                 server_port=6379,
@@ -1275,7 +1329,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             recorder.record_maint_notification_count(
                 server_address="localhost",
                 server_port=6379,
@@ -1296,7 +1350,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             # Call all record functions
             record_operation_duration("GET", 0.001, "localhost", 6379)
             record_connection_create_time("pool", 0.050)
@@ -1340,7 +1394,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             # Call functions from enabled groups
             record_operation_duration("GET", 0.001, "localhost", 6379)
             record_pubsub_message(PubSubDirection.PUBLISH, "channel")
@@ -1463,7 +1517,7 @@ class TestRecordConnectionCount:
                 mock_meter_with_counter, mock_config_with_connection_basic
             )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             # Reset mock call counts to avoid pollution from external code
             # paths (e.g., connection pool operations in other tests) that may
             # have called record_connection_count on our mock collector.
@@ -1624,7 +1678,7 @@ class TestInitCSCItems:
                 mock_meter_with_observable, mock_config_with_csc
             )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             yield mock_meter_with_observable
 
         recorder.reset_collector()
