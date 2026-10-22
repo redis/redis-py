@@ -331,7 +331,17 @@ class OCSPVerifier:
                 raise ConnectionError("no issuers found in certificate chain")
             return self.check_certificate(ocsp_server, cert, issuer_url)
         except AuthorizationError:
-            cert, issuer_url, ocsp_server = self.components_from_direct_connection()
+            # The direct connection is a second, separate handshake, so it may
+            # be given another certificate than the one on our socket. Checking
+            # that one instead would vouch for a certificate never examined.
+            direct_cert, issuer_url, ocsp_server = (
+                self.components_from_direct_connection()
+            )
+            if direct_cert != cert:
+                raise ConnectionError(
+                    "certificate from the direct connection does not match "
+                    "the certificate on the socket"
+                )
             if issuer_url is None:
                 raise ConnectionError("no issuers found in certificate chain")
             return self.check_certificate(ocsp_server, cert, issuer_url)
