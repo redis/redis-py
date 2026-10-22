@@ -4289,8 +4289,8 @@ class TestConnectionPoolMetricCount:
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
         """release() of a connection the pool no longer owns (e.g. inherited by
-        a forked child) must not record connection.count. Fork-time accounting
-        is owned by reset()/__del__; recording here would double-count."""
+        a forked child) must not record connection.count. Accounting for inherited
+        connections belongs to the parent process."""
         pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
 
         conn = pool.get_connection()
@@ -4348,8 +4348,8 @@ class TestBlockingConnectionPoolMetricCount:
 
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
-        """Unowned (inherited-across-fork) release must not record; fork-time
-        accounting is owned by reset()/__del__."""
+        """Unowned (inherited-across-fork) release must not record; accounting
+        for inherited connections belongs to the parent process."""
         pool = self._pool()
         mock_rec.reset_mock()
 
