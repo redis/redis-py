@@ -22,6 +22,7 @@ from redis.observability.attributes import (
     AttributeBuilder,
     ConnectionState,
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     GeoFailoverReason,
     PubSubDirection,
@@ -235,6 +236,24 @@ class RedisMetricsCollector:
             unit="By",
             description="The total number of bytes saved by using CSC",
         )
+
+        # One counter per refresh outcome, with no result attribute: the names are agreed
+        # across the Redis clients.
+        refresh_descriptions = {
+            CSCRefreshResult.SUCCESS: "The total number of cache refreshes whose reply was stored",
+            CSCRefreshResult.FAILURE: "The total number of cache refreshes that failed",
+            CSCRefreshResult.DISCARDED: "The total number of answered cache refreshes whose reply was not stored, because the key was invalidated again or the reply was nil",
+            CSCRefreshResult.REJECTED: "The total number of cache refreshes not run for lack of queue room or of a free connection",
+            CSCRefreshResult.RATE_LIMITED: "The total number of invalidations the refresh rate limit absorbed",
+        }
+        self.csc_refreshes = {
+            result: self.meter.create_counter(
+                name=f"redis.client.csc.refresh.{result.value}",
+                unit="{refresh}",
+                description=description,
+            )
+            for result, description in refresh_descriptions.items()
+        }
 
     # Resiliency metric recording methods
 
@@ -710,6 +729,24 @@ class RedisMetricsCollector:
 
         attrs = self.attr_builder.build_csc_attributes()
         self.csc_network_saved.add(bytes_saved, attributes=attrs)
+
+    def record_csc_refresh(
+        self,
+        result: CSCRefreshResult,
+        count: int = 1,
+    ) -> None:
+        """
+        Record Client Side Caching (CSC) refreshes with the same outcome.
+
+        Args:
+            result: Refresh outcome, which selects the counter
+            count: Number of refreshes
+        """
+        if not hasattr(self, "csc_refreshes"):
+            return
+
+        attrs = self.attr_builder.build_csc_attributes()
+        self.csc_refreshes[result].add(count, attributes=attrs)
 
     # Utility methods
 

@@ -34,6 +34,8 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
     CacheProxy,
+    CacheRefresher,
+    InvalidationPolicy,
     TrackingMode,
 )
 from redis.commands.metadata import MetadataResolver
@@ -89,6 +91,7 @@ from .observability.attributes import (
     AttributeBuilder,
     ConnectionState,
     CSCReason,
+    CSCRefreshResult,
     CSCResult,
     get_pool_name,
 )
@@ -2063,7 +2066,19 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         conn: ConnectionInterface,
         cache: CacheInterface,
         pool_lock: threading.RLock,
+        *,
+        refresher: CacheRefresher | None = None,
     ):
+        """
+        Wrap a connection so that its reads go through the client-side cache.
+
+        Args:
+            conn: The connection to wrap.
+            cache: The cache, shared by every connection of the pool.
+            pool_lock: The pool's lock, taken to drain another connection's invalidations.
+            refresher: The pool's refresher, which re-reads invalidated entries under
+                ``InvalidationPolicy.REFRESH``. None under the evict policy.
+        """
         self.pid = os.getpid()
         self._conn = conn
         self.retry = self._conn.retry
@@ -2075,6 +2090,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._pool_lock = pool_lock
         self._cache = cache
         self._cache_lock = threading.RLock()
+        # Re-reads invalidated entries in the background; None under the evict policy.
+        self._refresher = refresher
         self._current_command_cache_key = None
         # Read once: the configuration cannot change after the pool built the cache, and the
         # mode is a connection-setup property anyway - the server refuses to switch a live
@@ -2090,6 +2107,15 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # A reply ``send_command`` resolved from the cache, waiting for ``read_response`` to
         # hand it back. Set means nothing was written, so there is no reply on the socket.
         self._pending_cache_hit = _NO_PENDING_HIT
+        # The command in flight is a refresh, which is not a read: it records no cache
+        # request.
+        self._refresh_in_progress = False
+        # Asked by a refresh once its placeholder is staked and once its reply is stored:
+        # False means the cache was flushed since the refresh was queued.
+        self._refresh_is_current: Callable[[], bool] | None = None
+        # Set when a refresh was dropped for that reason: by ``send_command`` before
+        # anything was sent, or by ``read_response`` after its reply was stored.
+        self._refresh_cancelled = False
         self.register_connect_callback(self._enable_tracking_callback)
 
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
@@ -2170,7 +2196,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def disconnect(self, *args, **kwargs):
         with self._cache_lock:
-            self._cache.flush()
+            self._flush_cache()
         # Both flags describe an exchange on the socket that is about to die with it. A stale
         # ``_pending_caching_reply`` would make the next ``read_response`` swallow a reply;
         # a stale ``_skip_next_caching`` would leak the ASK suppression onto an unrelated
@@ -2285,21 +2311,29 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             command=command, redis_keys=keys, redis_args=args
         )
 
+        # We have to trigger invalidation processing in case if
+        # it was cached by another connection to avoid
+        # queueing invalidations in stale connections.
+        #
+        # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
+        # is overwritten by our own placeholder below, so draining cannot change the
+        # result - while its ``connection_ref`` socket may hold the owner's reply pair,
+        # or another command's reply if the placeholder was stranded, and the drain
+        # (which returns non-push replies too) would consume either one.
+        #
+        # The drain runs outside this connection's cache lock. It takes the pool lock, and
+        # every invalidation it reads runs the owner's callback, which takes the owner's
+        # cache lock. Holding ours across it would order a cache lock before the pool lock,
+        # and two connections draining each other would deadlock.
         with self._cache_lock:
-            # We have to trigger invalidation processing in case if
-            # it was cached by another connection to avoid
-            # queueing invalidations in stale connections.
-            #
-            # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
-            # is overwritten by our own placeholder below, so draining cannot change the
-            # result - while its ``connection_ref`` socket may hold the owner's reply pair,
-            # or another command's reply if the placeholder was stranded, and the drain
-            # (which returns non-push replies too) would consume either one.
             entry = self._cache.get(self._current_command_cache_key)
-            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                with self._pool_lock:
-                    self._drain_invalidations(entry.connection_ref)
+        drained = entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS
+        if drained:
+            with self._pool_lock:
+                self._drain_invalidations(entry.connection_ref)
 
+        with self._cache_lock:
+            if drained:
                 # Re-check: the entry may have been invalidated during the drain, or filled
                 # in by the connection that was fetching it.
                 entry = self._cache.get(self._current_command_cache_key)
@@ -2338,6 +2372,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         if is_hit:
             self._pending_cache_hit = _clone_cache_value(cached_value)
             return
+
+            # Asked after the placeholder is staked, so a flush is either seen here or
+            # removes the placeholder: the refresher counts a flush before it empties the
+            # cache.
+            if self._refresh_is_current is not None and not self._refresh_is_current():
+                self._drop_own_placeholder()
+                self._refresh_cancelled = True
+                return
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached. Under optin the server remembers nothing
@@ -2403,7 +2445,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             )
             return response
 
-        if self._current_command_cache_key is not None:
+        if (
+            self._current_command_cache_key is not None
+            and not self._refresh_in_progress
+        ):
             # A key is still set, so ``send_command`` decided to store this reply and sent the
             # command: by construction a miss.
             record_csc_request(
@@ -2463,9 +2508,96 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 cache_entry.status = CacheEntryStatus.VALID
                 self._cache.set(cache_entry)
 
+                # Another connection's flush takes its own cache lock, not this one, so it
+                # can land between the ``get`` and the ``set`` above. The refresher counts a
+                # flush before it empties the cache, so asking after the ``set`` catches
+                # every flush the placeholder did not go with: a flush refreshes nothing.
+                if (
+                    self._refresh_is_current is not None
+                    and not self._refresh_is_current()
+                ):
+                    if self._cache.get(self._current_command_cache_key) is cache_entry:
+                        self._cache.delete_by_cache_keys(
+                            [self._current_command_cache_key]
+                        )
+                    self._refresh_cancelled = True
+
             self._current_command_cache_key = None
 
         return response
+
+    def _refresh_entry(
+        self,
+        cache_key: CacheKey,
+        is_current: Callable[[], bool] | None = None,
+    ) -> CSCRefreshResult | None:
+        """
+        Re-read one invalidated entry, for the cache refresher.
+
+        Runs the normal miss path - ``send_command`` then ``read_response`` - so the reply is
+        staked, tracked and stored exactly as a read's would be. A refresh is not a read,
+        though, so it records no cache request, neither a hit nor a miss.
+
+        Args:
+            cache_key: The key of the entry the invalidation removed. It holds the whole
+                command, so this replays the original read.
+            is_current: Asked once the placeholder is staked, and again once the reply is
+                stored. False means the cache was flushed since the refresh was queued:
+                nothing is sent, or the stored reply is removed.
+
+        Returns:
+            CSCRefreshResult | None: ``SUCCESS`` when the reply was stored, ``DISCARDED``
+            when it was answered but not stored - the entry was invalidated again in
+            flight, the reply was nil, or the cache predicate did not select it - and None
+            when nothing was sent, because a read stored the entry in the meantime or the
+            cache was flushed.
+
+        Raises:
+            Whatever the round trip raises.
+        """
+        self._refresh_in_progress = True
+        self._refresh_is_current = is_current
+        try:
+            # Read with default decoding: the decode mode is not part of the cache key, and
+            # no cacheable command needs ``NEVER_DECODE``.
+            self.send_command(*cache_key.redis_args, keys=cache_key.redis_keys)
+            if self._pending_cache_hit is not _NO_PENDING_HIT:
+                # Served from an entry a read stored since the refresher checked: nothing
+                # was written, so there is no reply to read.
+                self._pending_cache_hit = _NO_PENDING_HIT
+                return None
+            if self._refresh_cancelled:
+                return None
+
+            # The placeholder this read staked, if any. ``read_response`` promotes it in
+            # place, so its status afterwards tells whether the reply was stored, even if
+            # the entry has been invalidated again since.
+            placeholder = None
+            if self._current_command_cache_key is not None:
+                with self._cache_lock:
+                    entry = self._cache.get(self._current_command_cache_key)
+                if (
+                    entry is not None
+                    and entry.status == CacheEntryStatus.IN_PROGRESS
+                    and entry.connection_ref is self._conn
+                ):
+                    placeholder = entry
+
+            self.read_response()
+            # Stored, then removed again because the cache was flushed meanwhile.
+            flushed = self._refresh_cancelled
+        finally:
+            self._refresh_in_progress = False
+            self._refresh_is_current = None
+            self._refresh_cancelled = False
+
+        if (
+            placeholder is not None
+            and placeholder.status == CacheEntryStatus.VALID
+            and not flushed
+        ):
+            return CSCRefreshResult.SUCCESS
+        return CSCRefreshResult.DISCARDED
 
     def _drop_own_placeholder(self) -> None:
         """
@@ -2758,10 +2890,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # reconnect that fires this callback happens inside the send path, before the
             # command is written, so the reply it is waiting for comes from the new session -
             # which this callback is about to enable tracking for. Dropping it would cost the
-            # fill and gain nothing.
+            # fill and gain nothing. A refresh's placeholder is not kept: a flush refreshes
+            # nothing.
             with self._cache_lock:
                 own_placeholder = None
-                if self._current_command_cache_key is not None:
+                if (
+                    self._current_command_cache_key is not None
+                    and not self._refresh_in_progress
+                ):
                     entry = self._cache.get(self._current_command_cache_key)
                     if (
                         entry is not None
@@ -2769,7 +2905,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         and entry.connection_ref is self._conn
                     ):
                         own_placeholder = entry
-                self._cache.flush()
+                self._flush_cache()
                 if own_placeholder is not None:
                     self._cache.set(own_placeholder)
 
@@ -2808,7 +2944,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 # the old session would be served as if still tracked. Flush
                 # them here for the same reason disconnect() does.
                 with self._cache_lock:
-                    self._cache.flush()
+                    self._flush_cache()
                 raise
 
     def _process_pending_invalidations(self):
@@ -2816,10 +2952,14 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
-            # Flush cache when DB flushed on server-side
+            # Flush cache when DB flushed on server-side. Nothing is refreshed: the server
+            # reported every key as changed, and the cache refills through reads, as it
+            # does from empty.
             if data[1] is None:
-                self._cache.flush()
-            else:
+                self._flush_cache()
+                return
+
+            if self._refresher is None:
                 keys_deleted = self._cache.delete_by_redis_keys(data[1])
 
                 if len(keys_deleted) > 0:
@@ -2827,6 +2967,44 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         count=len(keys_deleted),
                         reason=CSCReason.INVALIDATION,
                     )
+                return
+
+            # The entries are removed before anything is handed over, so the replaced value
+            # can never be served again, whether or not the refresh runs.
+            entries = self._cache.take_entries_by_redis_keys(data[1])
+            if not entries:
+                return
+
+            record_csc_eviction(
+                count=len(entries),
+                reason=CSCReason.INVALIDATION,
+            )
+            # Only stored replies are re-read. An IN_PROGRESS entry is a fetch in flight,
+            # which this invalidation has already defeated - its owner no longer finds its
+            # placeholder to promote - and re-reading it would add a second fetch for the
+            # same entry. Rejected keys need nothing more: their entries are gone, and the
+            # next read fetches them as it would without refresh. ``submit`` never blocks,
+            # so this callback never waits on a refresh.
+            self._refresher.submit(
+                [
+                    entry.cache_key
+                    for entry in entries
+                    if entry.status == CacheEntryStatus.VALID
+                ]
+            )
+
+    def _flush_cache(self) -> None:
+        """
+        Empty the shared cache and drop any refresh queued before it was emptied.
+
+        Every flush this connection makes goes through here. Refresh work accepted before a
+        flush would otherwise refill the cache with entries the flush was meant to remove.
+        The refresher is told first: a refresh that staked its placeholder before then has
+        it removed by the flush, and one that stakes it later sees the cancel.
+        """
+        if self._refresher is not None:
+            self._refresher.cancel_pending()
+        self._cache.flush()
 
     def extract_connection_details(self) -> str:
         return self._conn.extract_connection_details()
@@ -3772,6 +3950,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     ``connection_class``.
     """
 
+    # Set per instance by ``reset``. The class-level default keeps a subclass that
+    # overrides ``reset`` without calling it working, as a pool that never refreshes.
+    _cache_refresher: CacheRefresher | None = None
+
     @classmethod
     def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
@@ -4047,6 +4229,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+        self._reset_cache_refresher()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -4140,12 +4323,32 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     )
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
+        return self._get_connection()
 
+    def _get_connection(self, if_available: bool = False) -> "Connection | None":
+        """
+        Get a connection from the pool.
+
+        Args:
+            if_available: Return None instead of raising when every connection is in use
+                and the pool is at ``max_connections``. The cache refresher checks out
+                through it, so that a refresh is skipped rather than make an application
+                command fail to get a connection; an override of ``get_connection`` does not
+                apply to those checkouts.
+        """
         # Start timing for observability
         self._checkpid()
         is_created = False
 
         with self._lock:
+            # Decided under the lock that the checkout below takes, so no other thread can
+            # take the last slot in between.
+            if (
+                if_available
+                and not self._available_connections
+                and self._created_connections >= self.max_connections
+            ):
+                return None
             try:
                 connection = self._available_connections.pop()
             except IndexError:
@@ -4241,7 +4444,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         # Create the connection first, then record metrics only on success
         if self.cache is not None:
             connection = CacheProxyConnection(
-                self.connection_class(**kwargs), self.cache, self._lock
+                self.connection_class(**kwargs),
+                self.cache,
+                self._lock,
+                refresher=self._cache_refresher,
             )
         else:
             connection = self.connection_class(**kwargs)
@@ -4333,7 +4539,29 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
+        # Stopped first: a refresh that connects a socket after the disconnect below then
+        # closes it before returning it, rather than leave it open in the closed pool.
+        if self._cache_refresher is not None:
+            self._cache_refresher.stop()
         self.disconnect()
+
+    def _reset_cache_refresher(self) -> None:
+        """
+        Build the refresher for this pool's cache, or clear it when there is nothing to
+        refresh.
+
+        Called from ``reset``, which also runs in a forked child: the parent's worker
+        thread does not exist there, so the child gets a refresher of its own.
+        """
+        self._cache_refresher = None
+        if self.cache is None:
+            return
+
+        config = self.cache.config
+        if config.get_invalidation_policy() is not InvalidationPolicy.REFRESH:
+            return
+
+        self._cache_refresher = CacheRefresher(self, config.get_refresh_max_inflight())
 
     def __enter__(self: _CP) -> _CP:
         return self
@@ -4499,6 +4727,7 @@ class BlockingConnectionPool(ConnectionPool):
             # Keep a list of actual connection instances so that we can
             # disconnect them later.
             self._connections = []
+            self._reset_cache_refresher()
         finally:
             if self._locked:
                 try:
@@ -4560,6 +4789,7 @@ class BlockingConnectionPool(ConnectionPool):
                     self.connection_class(**self.connection_kwargs),
                     self.cache,
                     self._lock,
+                    refresher=self._cache_refresher,
                 )
             else:
                 connection = self.connection_class(**self.connection_kwargs)
@@ -4591,10 +4821,28 @@ class BlockingConnectionPool(ConnectionPool):
         create new connections when we need to, i.e.: the actual number of
         connections will only increase in response to demand.
         """
+        return self._get_connection()
+
+    def _get_connection(self, if_available: bool = False) -> "Connection | None":
+        """
+        Get a connection, blocking for ``self.timeout`` until one is available.
+
+        Args:
+            if_available: Return None at once instead of waiting when every connection
+                is in use, or while the pool is in maintenance. The cache refresher checks
+                out through it, so that a refresh is skipped rather than make an
+                application command wait for a connection; an override of
+                ``get_connection`` does not apply to those checkouts.
+        """
         start_time_acquired = time.monotonic()
         # Make sure we haven't changed process.
         self._checkpid()
         is_created = False
+
+        # Maintenance serializes checkouts behind ``_lock``, which an application thread
+        # can hold while it waits for a connection.
+        if if_available and self._in_maintenance:
+            return None
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
@@ -4604,8 +4852,13 @@ class BlockingConnectionPool(ConnectionPool):
                 self._lock.acquire()
                 self._locked = True
             try:
-                connection = self.pool.get(block=True, timeout=self.timeout)
+                if if_available:
+                    connection = self.pool.get_nowait()
+                else:
+                    connection = self.pool.get(block=True, timeout=self.timeout)
             except Empty:
+                if if_available:
+                    return None
                 record_connection_timeout(pool_name=get_pool_name(self))
                 # Note that this is not caught by the redis client and will be
                 # raised unless handled by application code. If you want never to
