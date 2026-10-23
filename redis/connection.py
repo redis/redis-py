@@ -3,6 +3,7 @@ import functools
 import ipaddress
 import logging
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -3965,8 +3966,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._lock = threading.RLock()
 
         # Generate unique pool ID for observability (matches go-redis behavior)
-        import secrets
-
         self._pool_id = secrets.token_hex(4)
 
         MaintNotificationsAbstractConnectionPool.__init__(
@@ -4021,10 +4020,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
+        is_fork = hasattr(self, "pid") and self.pid != os.getpid()
+        if is_fork:
+            # Inherited connections were counted by the parent, not this process.
+            self._pool_id = secrets.token_hex(4)
+
         # Record metrics for connections being removed before clearing
         # (only if attributes exist - they won't during __init__)
-        if hasattr(self, "_available_connections") and hasattr(
-            self, "_in_use_connections"
+        if (
+            not is_fork
+            and hasattr(self, "_available_connections")
+            and hasattr(self, "_in_use_connections")
         ):
             with self._lock:
                 idle_count = len(self._available_connections)
@@ -4062,6 +4068,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def __del__(self) -> None:
         """Clean up connection pool and record metrics when garbage collected."""
         try:
+            if getattr(self, "pid", None) != os.getpid():
+                return
             if not hasattr(self, "_available_connections") or not hasattr(
                 self, "_in_use_connections"
             ):
@@ -4300,7 +4308,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     # The connection was checked out by this process, so
                     # decrement USED, which was counted in get_connection().
                     # Connections inherited across a fork are skipped here,
-                    # their accounting is handled by reset()/__del__.
+                    # their accounting belongs to the parent process.
                     record_connection_count(
                         pool_name=get_pool_name(self),
                         connection_state=ConnectionState.USED,
@@ -4456,6 +4464,11 @@ class BlockingConnectionPool(ConnectionPool):
         )
 
     def reset(self):
+        is_fork = hasattr(self, "pid") and self.pid != os.getpid()
+        if is_fork:
+            # Inherited connections were counted by the parent, not this process.
+            self._pool_id = secrets.token_hex(4)
+
         # Create and fill up a thread safe queue with ``None`` values.
         try:
             if self._in_maintenance:
@@ -4466,7 +4479,8 @@ class BlockingConnectionPool(ConnectionPool):
             # Note: Access pool.queue directly to avoid deadlock since we may
             # already hold self._lock (which is non-reentrant)
             if (
-                hasattr(self, "_connections")
+                not is_fork
+                and hasattr(self, "_connections")
                 and self._connections
                 and hasattr(self, "pool")
             ):
@@ -4521,6 +4535,8 @@ class BlockingConnectionPool(ConnectionPool):
     def __del__(self) -> None:
         """Clean up connection pool and record metrics when garbage collected."""
         try:
+            if getattr(self, "pid", None) != os.getpid():
+                return
             # Note: Access pool.queue directly to avoid potential deadlock
             # if GC runs while the lock is held by the same thread
             if (
@@ -4698,7 +4714,7 @@ class BlockingConnectionPool(ConnectionPool):
                 # rejects a connection checked out by this process, stop
                 # tracking it and decrement USED, which was counted in
                 # get_connection(). Connections inherited across a fork are
-                # skipped here, their accounting is handled by reset()/__del__.
+                # skipped here, their accounting belongs to the parent process.
                 if connection.pid == self.pid:
                     try:
                         self._connections.remove(connection)
