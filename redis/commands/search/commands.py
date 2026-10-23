@@ -82,6 +82,10 @@ FUZZY = "FUZZY"
 WITHPAYLOADS = "WITHPAYLOADS"
 
 
+# ``execute_command`` returns the pipeline itself when a command is queued.
+_PIPELINE_TYPES = (Pipeline, AsyncioPipeline)
+
+
 class SearchCommands:
     """Search commands."""
 
@@ -1292,6 +1296,8 @@ class SearchCommands:
         """
 
         res = self.execute_command(INFO_CMD, self.index_name)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(INFO_CMD, res)
 
     def get_params_args(
@@ -1462,7 +1468,13 @@ class SearchCommands:
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = self.execute_command(*cmd)
+        options = {}
+        if isinstance(self, Pipeline):
+            options["query"] = query
+            options["has_cursor"] = has_cursor
+        raw = self.execute_command(*cmd, **options)
+        if isinstance(raw, _PIPELINE_TYPES):
+            return raw
         return self._parse_results(
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
         )
@@ -1528,7 +1540,13 @@ class SearchCommands:
         else:
             raise ValueError("Must provide AggregateRequest object or Query object.")
 
-        res = self.execute_command(*cmd)
+        options = {}
+        if isinstance(self, Pipeline):
+            options["query"] = query
+            options["duration"] = 0
+        res = self.execute_command(*cmd, **options)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
 
         return self._parse_results(
             PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
@@ -1560,6 +1578,8 @@ class SearchCommands:
 
         res = self.execute_command(*cmd)
 
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(SPELLCHECK_CMD, res)
 
     def dict_add(self, name: str, *terms: List[str]):
@@ -1635,6 +1655,8 @@ class SearchCommands:
         """  # noqa
         cmd = [CONFIG_CMD, "GET", option]
         res = self.execute_command(*cmd)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(CONFIG_CMD, res)
 
     def tagvals(self, tagfield: str):
@@ -1835,6 +1857,8 @@ class SearchCommands:
         For more information see `FT.SYNDUMP <https://redis.io/commands/ft.syndump>`_.
         """  # noqa
         res = self.execute_command(SYNDUMP_CMD, self.index_name)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(SYNDUMP_CMD, res)
 
 
@@ -1848,6 +1872,8 @@ class AsyncSearchCommands(SearchCommands):
         """
 
         res = await self.execute_command(INFO_CMD, self.index_name)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(INFO_CMD, res)
 
     async def aliaslist(self) -> Set[str | bytes]:
@@ -1863,7 +1889,7 @@ class AsyncSearchCommands(SearchCommands):
         For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
         """  # noqa
         res = await self.execute_command(ALIAS_LIST_CMD, self.index_name)
-        if isinstance(res, (Pipeline, AsyncioPipeline)):
+        if isinstance(res, _PIPELINE_TYPES):
             return res
         return self._parse_results(ALIAS_LIST_CMD, res)
 
@@ -1896,7 +1922,7 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 
-        if isinstance(res, (Pipeline, AsyncioPipeline)):
+        if isinstance(res, _PIPELINE_TYPES):
             return res
 
         return self._parse_results(
@@ -1958,7 +1984,7 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(*pieces, **options)
 
-        if isinstance(res, (Pipeline, AsyncioPipeline)):
+        if isinstance(res, _PIPELINE_TYPES):
             return res
 
         return self._parse_results(HYBRID_CMD, res, **options)
@@ -1990,7 +2016,13 @@ class AsyncSearchCommands(SearchCommands):
             raise ValueError("Bad query", query)
         cmd += self.get_params_args(query_params)
 
-        raw = await self.execute_command(*cmd)
+        options = {}
+        if isinstance(self, Pipeline):
+            options["query"] = query
+            options["has_cursor"] = has_cursor
+        raw = await self.execute_command(*cmd, **options)
+        if isinstance(raw, _PIPELINE_TYPES):
+            return raw
         return self._parse_results(
             AGGREGATE_CMD, raw, query=query, has_cursor=has_cursor
         )
@@ -2021,6 +2053,8 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(*cmd)
 
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(SPELLCHECK_CMD, res)
 
     @deprecated_function(
@@ -2057,6 +2091,8 @@ class AsyncSearchCommands(SearchCommands):
         cmd = [CONFIG_CMD, "GET", option]
         res = {}
         res = await self.execute_command(*cmd)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         return self._parse_results(CONFIG_CMD, res)
 
     async def load_document(self, id, field_encodings: Optional[Dict[str, Any]] = None):

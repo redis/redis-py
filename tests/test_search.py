@@ -4043,6 +4043,28 @@ class TestPipeline(SearchTestsBase):
             )
 
     @pytest.mark.redismod
+    def test_parsed_commands_return_the_pipeline(self, client):
+        p = client.ft().pipeline()
+        assert all(res is p for res in _queue_parsed_commands(p))
+        p = client.pipeline()
+        assert all(res is p for res in _queue_parsed_commands(p.ft()))
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    def test_parsed_commands_execute_in_pipeline(self, client):
+        client.ft().create_index((TextField("txt"),))
+        client.hset("doc1", mapping={"txt": "foo bar"})
+        client.ft().synupdate("id1", False, "foo", "bar")
+        p = client.ft().pipeline()
+        p.info()
+        p.aggregate(aggregations.AggregateRequest("*"))
+        p.profile(Query("foo"))
+        p.spellcheck("fo")
+        p.syndump()
+        assert len(p.execute()) == 5
+
+    @pytest.mark.redismod
     @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     def test_aliaslist_in_pipeline(self, client):
@@ -6656,3 +6678,15 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         suggestions = res[b"impornant"]
         assert suggestions
         assert suggestions[0]["suggestion"] == b"important"
+
+
+def _queue_parsed_commands(ft):
+    """Queue the search commands whose replies are parsed by the client."""
+    return [
+        ft.info(),
+        ft.aggregate(aggregations.AggregateRequest("*")),
+        ft.profile(Query("foo")),
+        ft.spellcheck("foo"),
+        ft.config_get("TIMEOUT"),
+        ft.syndump(),
+    ]

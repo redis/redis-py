@@ -2603,6 +2603,28 @@ class TestPipeline(AsyncSearchTestsBase):
             )
 
     @pytest.mark.redismod
+    async def test_parsed_commands_return_the_pipeline(self, decoded_r: redis.Redis):
+        p = decoded_r.ft().pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p))
+        p = decoded_r.pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p.ft()))
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    async def test_parsed_commands_execute_in_pipeline(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("txt"),))
+        await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
+        await decoded_r.ft().synupdate("id1", False, "foo", "bar")
+        p = decoded_r.ft().pipeline()
+        await p.info()
+        await p.aggregate(aggregations.AggregateRequest("*"))
+        p.profile(Query("foo"))
+        await p.spellcheck("fo")
+        p.syndump()
+        assert len(await p.execute()) == 5
+
+    @pytest.mark.redismod
     @skip_if_redis_enterprise()
     async def test_search_through_pipeline_ft_is_decoded(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"),))
@@ -4380,3 +4402,17 @@ def _contains_bytes(value):
     if hasattr(value, "__dict__"):
         return _contains_bytes(vars(value))
     return False
+
+
+async def _queue_parsed_commands(ft):
+    """Queue the search commands whose replies are parsed by the client."""
+    queued = [
+        ft.info(),
+        ft.aggregate(aggregations.AggregateRequest("*")),
+        ft.profile(Query("foo")),
+        ft.spellcheck("foo"),
+        ft.config_get("TIMEOUT"),
+        ft.syndump(),
+    ]
+    # ``profile`` and ``syndump`` are inherited from the sync commands.
+    return [await res if asyncio.iscoroutine(res) else res for res in queued]
