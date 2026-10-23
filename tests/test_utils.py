@@ -273,8 +273,16 @@ class TestExtractExpireFlags:
         assert extract_expire_flags(ex="60") == ["EX", 60]
 
     def test_ex_invalid_raises(self):
-        with pytest.raises(DataError):
+        with pytest.raises(
+            DataError, match="ex must be datetime.timedelta, int, or a digit string"
+        ):
             extract_expire_flags(ex="not-a-number")
+
+    def test_ex_float_raises_lists_accepted_types(self):
+        with pytest.raises(
+            DataError, match="ex must be datetime.timedelta, int, or a digit string"
+        ):
+            extract_expire_flags(ex=1.5)
 
     def test_px_as_int(self):
         assert extract_expire_flags(px=500) == ["PX", 500]
@@ -286,7 +294,9 @@ class TestExtractExpireFlags:
         assert extract_expire_flags(px="500") == ["PX", 500]
 
     def test_px_invalid_raises(self):
-        with pytest.raises(DataError):
+        with pytest.raises(
+            DataError, match="px must be datetime.timedelta, int, or a digit string"
+        ):
             extract_expire_flags(px="not-a-number")
 
     @pytest.mark.parametrize("option", ["ex", "px"])

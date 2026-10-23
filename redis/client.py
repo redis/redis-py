@@ -1738,8 +1738,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
