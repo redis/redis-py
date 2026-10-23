@@ -84,6 +84,8 @@ def test_alter(client):
     assert_resp_response(
         client, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    assert client.ts().alter(1, labels={})
+    assert {} == client.ts().info(1)["labels"]
 
 
 @pytest.mark.redismod
@@ -1608,6 +1610,44 @@ def test_madd_with_insertion_filters(client):
         [(1010, 1.0), (1020, 2.0), (1021, 22.0)],
         [[1010, 1.0], [1020, 2.0], [1021, 22.0]],
     )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_labels_with_insertion_filters_and_on_duplicate(client):
+    ts = client.ts()
+    filters = {
+        "duplicate_policy": "last",
+        "ignore_max_time_diff": 5,
+        "ignore_max_val_diff": 10.0,
+    }
+    labels = {"sensor": "1"}
+
+    assert ts.create("create", labels=labels, **filters)
+    assert labels == ts.info("create")["labels"]
+    assert 1000 == ts.add("create", 1000, 1.0)
+    assert 1000 == ts.add("create", 1004, 3.0)
+
+    assert ts.alter("create", labels={}, **filters)
+    assert {} == ts.info("create")["labels"]
+    assert 1000 == ts.add("create", 1003, 2.0)
+
+    assert 1000 == ts.add("add", 1000, 1.0, labels=labels, **filters)
+    assert labels == ts.info("add")["labels"]
+    assert 1000 == ts.add("add", 1004, 3.0)
+
+    assert 1000 == ts.add("add-dup", 1000, 1.0)
+    assert 1000 == ts.add("add-dup", 1000, 2.0, labels=labels, on_duplicate="last")
+    assert {} == ts.info("add-dup")["labels"]
+
+    assert 1000 == ts.add("add-new", 1000, 1.0, labels=labels, on_duplicate="last")
+    assert labels == ts.info("add-new")["labels"]
+
+    assert 1000 == ts.incrby("incrby", 1.0, timestamp=1000, labels=labels, **filters)
+    assert labels == ts.info("incrby")["labels"]
+
+    assert 1000 == ts.decrby("decrby", 1.0, timestamp=1000, labels=labels, **filters)
+    assert labels == ts.info("decrby")["labels"]
 
 
 @pytest.mark.redismod
