@@ -912,6 +912,22 @@ class TestConnection:
         conn.send_command.assert_not_called()
         conn.read_response.assert_not_called()
 
+    def test_resp3_handshake_skips_health_check_without_auth(self):
+        # Mirrors the auth branch's existing check_health=False: a health-check
+        # PING sent between HELLO and its response would be rejected by a proxy
+        # that gates every command but HELLO/AUTH/QUIT until the handshake
+        # completes, even though a direct server tolerates the extra PING fine.
+        conn = Connection(protocol=3, health_check_interval=15)
+        conn._parser.on_connect = mock.Mock()
+        conn.send_command = mock.Mock()
+        conn.read_response = mock.Mock(return_value={"proto": 3})
+
+        conn.on_connect_check_health()
+
+        assert conn.send_command.call_args_list[0] == mock.call(
+            "HELLO", conn.protocol, check_health=False
+        )
+
     def clear(self, conn):
         conn.retry_on_error.clear()
 
