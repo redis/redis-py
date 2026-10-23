@@ -6744,6 +6744,44 @@ class TestClusterNodeConnectionHandling:
         # Should not raise
         await node.disconnect_free_connections()
 
+    async def test_disconnect_free_connections_not_acquirable_while_closing(
+        self,
+    ) -> None:
+        """
+        Test that a connection being disconnected cannot be acquired until its
+        disconnect completes, and that it is back in _free afterwards.
+        """
+        node = ClusterNode(default_host, 7000, max_connections=2)
+        closing = mock.AsyncMock(spec=Connection)
+        released = mock.AsyncMock(spec=Connection)
+        node._connections = [closing, released]
+        node._free.append(closing)
+
+        disconnect_started = asyncio.Event()
+        finish_disconnect = asyncio.Event()
+
+        async def slow_disconnect() -> None:
+            disconnect_started.set()
+            await finish_disconnect.wait()
+
+        closing.disconnect.side_effect = slow_disconnect
+
+        task = asyncio.create_task(node.disconnect_free_connections())
+        await disconnect_started.wait()
+
+        # The node is at max_connections and the only free one is closing
+        with pytest.raises(MaxConnectionsError):
+            node.acquire_connection()
+        # A connection released meanwhile is acquirable
+        node._free.append(released)
+        assert node.acquire_connection() is released
+        node._free.append(released)
+
+        finish_disconnect.set()
+        await task
+
+        assert list(node._free) == [released, closing]
+
     async def test_execute_command_reuses_closed_remarked_connection_inline(
         self,
     ) -> None:
