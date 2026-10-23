@@ -864,14 +864,18 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
 
         try:
             p = int(protocol)
+            self._protocol_specified_explicitly = True
         except TypeError:
             p = DEFAULT_RESP_VERSION
+            self._protocol_specified_explicitly = False
         except ValueError:
             raise ConnectionError("protocol must be an integer")
         else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
         self.protocol = p
+        self.handshake_metadata = None
+        self._resp2_fallback = False
         self.legacy_responses = legacy_responses
         if parser_class != _AsyncHiredisParser:
             # The Python parsers are protocol-specific; hiredis supports both.
@@ -1165,6 +1169,73 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         """Initialize the connection, authenticate and select a database"""
         await self.on_connect_check_health(check_health=True)
 
+    async def _do_resp2_auth(self, auth_args) -> None:
+        """Authenticate with the original credentials, retrying pre-6.0 AUTH."""
+        # avoid checking health here -- PING will fail if we try
+        # to check the health prior to the AUTH
+        await self.send_command("AUTH", *auth_args, check_health=False)
+        try:
+            auth_response = await self.read_response()
+        except AuthenticationWrongNumberOfArgsError:
+            # a username and password were specified but the Redis
+            # server seems to be < 6.0.0 which expects a single password
+            # arg. retry auth with just the password.
+            await self.send_command("AUTH", auth_args[-1], check_health=False)
+            auth_response = await self.read_response()
+
+        if str_if_bytes(auth_response) != "OK":
+            raise AuthenticationError("Invalid Username or Password")
+
+    async def _fallback_to_resp2(
+        self, error: ResponseError, parser, auth_args=None
+    ) -> None:
+        """Handle HELLO failure by falling back to RESP2.
+
+        Validates the error is a recoverable "unknown command" or "NOPROTO",
+        checks that fallback is allowed (not explicitly configured, no
+        RESP3-dependent features active), downgrades parser and protocol,
+        emits a warning, and optionally re-authenticates via standalone AUTH.
+
+        Args:
+            error: The ResponseError from the failed HELLO command.
+            parser: The original parser (for preserving EXCEPTION_CLASSES).
+            auth_args: Original credentials to authenticate after downgrade.
+
+        Raises:
+            ResponseError: If the error is not recoverable or fallback
+                is not permitted.
+        """
+        err_msg = str(error).lower().removeprefix("err ")
+        if not (
+            err_msg in ("unknown command", "noproto")
+            or err_msg.startswith(("unknown command ", "noproto "))
+        ):
+            raise error
+        if self._protocol_specified_explicitly or (
+            self.maint_notifications_config
+            and self.maint_notifications_config.enabled is True
+        ):
+            raise error
+        logger.warning(
+            "Server/proxy at %s does not support HELLO (RESP%s). "
+            "Falling back to RESP2. To silence this warning, "
+            "set protocol=2 explicitly or upgrade your "
+            "server/proxy. Module commands (JSON, Search, TimeSeries, Bloom, "
+            "vector sets) do not adapt their response parsers after automatic "
+            "fallback; set protocol=2 explicitly before using them.",
+            self._host_error(),
+            self.protocol,
+        )
+        if isinstance(self._parser, _AsyncRESP3Parser):
+            self.set_parser(_AsyncRESP2Parser)
+            self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
+            self._parser.on_connect(self)
+        self.protocol = 2
+        self._resp2_fallback = True
+        self.handshake_metadata = {}
+        if auth_args:
+            await self._do_resp2_auth(auth_args)
+
     async def on_connect_check_health(self, check_health: bool = True) -> None:
         # A fresh socket is a new server session: no prepared HIMPORT fieldsets.
         self._reset_himport_state()
@@ -1188,35 +1259,26 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
+            hello_auth_args = auth_args
             if len(auth_args) == 1:
-                auth_args = ["default", auth_args[0]]
+                hello_auth_args = ("default", auth_args[0])
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             await self.send_command(
-                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+                "HELLO", self.protocol, "AUTH", *hello_auth_args, check_health=False
             )
-            response = await self.read_response()
-            if response.get(b"proto") != int(self.protocol) and response.get(
-                "proto"
-            ) != int(self.protocol):
-                raise ConnectionError("Invalid RESP version")
+            try:
+                self.handshake_metadata = await self.read_response()
+                if self.handshake_metadata.get(b"proto") != int(
+                    self.protocol
+                ) and self.handshake_metadata.get("proto") != int(self.protocol):
+                    raise ConnectionError("Invalid RESP version")
+            except ResponseError as e:
+                await self._fallback_to_resp2(e, parser, auth_args=auth_args)
         # avoid checking health here -- PING will fail if we try
         # to check the health prior to the AUTH
         elif auth_args:
-            await self.send_command("AUTH", *auth_args, check_health=False)
-
-            try:
-                auth_response = await self.read_response()
-            except AuthenticationWrongNumberOfArgsError:
-                # a username and password were specified but the Redis
-                # server seems to be < 6.0.0 which expects a single password
-                # arg. retry auth with just the password.
-                # https://github.com/andymccurdy/redis-py/issues/1274
-                await self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = await self.read_response()
-
-            if str_if_bytes(auth_response) != "OK":
-                raise AuthenticationError("Invalid Username or Password")
+            await self._do_resp2_auth(auth_args)
 
         # if resp version is specified, switch to it
         elif check_protocol_version(self.protocol, 3):
@@ -1226,11 +1288,15 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             await self.send_command("HELLO", self.protocol, check_health=check_health)
-            response = await self.read_response()
-            # if response.get(b"proto") != self.protocol and response.get(
-            #     "proto"
-            # ) != self.protocol:
-            #     raise ConnectionError("Invalid RESP version")
+            try:
+                self.handshake_metadata = await self.read_response()
+                if (
+                    self.handshake_metadata.get(b"proto") != self.protocol
+                    and self.handshake_metadata.get("proto") != self.protocol
+                ):
+                    raise ConnectionError("Invalid RESP version")
+            except ResponseError as e:
+                await self._fallback_to_resp2(e, parser)
 
         # Activate maintenance notifications for this connection
         # if enabled in the configuration
