@@ -352,11 +352,32 @@ runs:
     - name: Debug
       if: failure()
       run: |
+        echo "::group::Docker containers"
+        docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+        echo "::endgroup::"
+
+        for container in $(docker ps -a --format '{{.Names}}'); do
+          echo "::group::Container ${container}"
+          docker inspect -f 'status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} finished_at={{.State.FinishedAt}}' "${container}"
+          docker logs --tail 200 "${container}" 2>&1
+          echo "::endgroup::"
+        done
+
+        # Each server logs to dockers/<service>/node-*/redis.log through the
+        # /redis/work bind mount; a crash report ("REDIS BUG REPORT") lands at the end.
+        for log in $(sudo find dockers -name redis.log | sort); do
+          echo "::group::${log}"
+          sudo tail -n 500 "${log}"
+          echo "::endgroup::"
+        done
+
+        echo "::group::Kernel OOM killer"
+        sudo dmesg | grep -iE 'out of memory|oom-kill|killed process' || echo "No OOM kills found"
+        echo "::endgroup::"
+
         sudo apt-get install -y redis-tools
-        echo "Docker Containers:"
-        docker ps
         echo "Cluster nodes:"
-        redis-cli -p 16379 CLUSTER NODES
+        redis-cli -p 16379 CLUSTER NODES || true
       shell: bash
 
     - name: Upload test results and profiling data
