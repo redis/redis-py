@@ -489,12 +489,26 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
                 event.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token):
+        first_error = None
         for pool in self._event.connection_pools:
-            pool.re_auth_callback(token)
+            try:
+                pool.re_auth_callback(token)
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error
 
     async def _re_auth_async(self, token):
+        first_error = None
         for pool in self._event.connection_pools:
-            await pool.re_auth_callback(token)
+            try:
+                await pool.re_auth_callback(token)
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error
 
     def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)
@@ -560,6 +574,7 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
 
     async def _re_auth(self, token: TokenInterface):
         nodes = self._event.nodes
+        first_error = None
         # Iterate a snapshot: a topology refresh can add and remove nodes while
         # a node is being re-authenticated. A node that is no longer the one cached
         # under its key is skipped: it is being closed, even if a later refresh
@@ -567,7 +582,13 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
         # with the current credentials and need no AUTH.
         for key, node in tuple(nodes.items()):
             if nodes.get(key) is node:
-                await node.re_auth_callback(token)
+                try:
+                    await node.re_auth_callback(token)
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
+        if first_error is not None:
+            raise first_error
 
     async def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)

@@ -4349,19 +4349,32 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         with self._lock:
             for conn in self._available_connections:
-                conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if first_error is not None:
+            raise first_error
 
     def _get_pool_lock(self):
         return self._lock
