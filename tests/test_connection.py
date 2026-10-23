@@ -1860,6 +1860,80 @@ class TestUnitCacheProxyConnection:
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
+    def test_drain_of_another_connection_holds_no_cache_lock(
+        self, mock_cache, mock_connection
+    ):
+        """
+        The drain takes the pool lock, and an invalidation it reads runs the owner's
+        callback under the owner's cache lock. Holding this connection's cache lock across
+        it orders a cache lock before the pool lock, so two connections draining each other,
+        or a ``pool.disconnect()`` reaching this one, deadlock.
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.return_value = cache_entry
+        mock_connection.can_read.return_value = False
+
+        pool_lock = threading.RLock()
+        proxy_connection = CacheProxyConnection(mock_connection, mock_cache, pool_lock)
+        acquired = []
+
+        def read_invalidation(**kwargs):
+            cache_lock_available = False
+            pool_lock_available = False
+
+            def probe_locks():
+                nonlocal cache_lock_available, pool_lock_available
+                # The sending thread must still hold the pool lock during this probe.
+                pool_lock_available = pool_lock.acquire(blocking=False)
+                if pool_lock_available:
+                    pool_lock.release()
+                cache_lock_available = proxy_connection._cache_lock.acquire(
+                    blocking=False
+                )
+                if cache_lock_available:
+                    proxy_connection._cache_lock.release()
+
+            other = threading.Thread(target=probe_locks)
+            other.start()
+            other.join(timeout=5)
+            assert not other.is_alive()
+            assert not pool_lock_available
+            acquired.append(cache_lock_available)
+            return None
+
+        another_conn.read_response.side_effect = read_invalidation
+
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
+        assert acquired == [True]
+        mock_connection.send_command.assert_not_called()
+        assert proxy_connection.read_response() == b"bar"
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
     def test_sends_command_when_cache_entry_invalidated_during_drain(
         self, mock_cache, mock_connection
     ):

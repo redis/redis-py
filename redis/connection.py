@@ -2285,21 +2285,26 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             command=command, redis_keys=keys, redis_args=args
         )
 
+        # Drain the connection that cached the entry so invalidations do not accumulate
+        # on idle connections. This must run outside our cache lock: the drain takes the
+        # pool lock, and invalidations call the owner's callback under its cache lock.
+        # Holding ours would order a cache lock before the pool lock and another after it,
+        # deadlocking connections draining each other or a pool.disconnect() holding the
+        # pool lock while waiting for ours.
         with self._cache_lock:
-            # We have to trigger invalidation processing in case if
-            # it was cached by another connection to avoid
-            # queueing invalidations in stale connections.
-            #
             # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
             # is overwritten by our own placeholder below, so draining cannot change the
             # result - while its ``connection_ref`` socket may hold the owner's reply pair,
             # or another command's reply if the placeholder was stranded, and the drain
             # (which returns non-push replies too) would consume either one.
             entry = self._cache.get(self._current_command_cache_key)
-            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                with self._pool_lock:
-                    self._drain_invalidations(entry.connection_ref)
+        drained = entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS
+        if drained:
+            with self._pool_lock:
+                self._drain_invalidations(entry.connection_ref)
 
+        with self._cache_lock:
+            if drained:
                 # Re-check: the entry may have been invalidated during the drain, or filled
                 # in by the connection that was fetching it.
                 entry = self._cache.get(self._current_command_cache_key)
