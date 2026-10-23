@@ -93,6 +93,26 @@ class TestCloseConnectionOnActiveDatabaseChanged:
             node.disconnect_free_connections.assert_awaited_once_with()
 
     @pytest.mark.asyncio
+    async def test_cluster_includes_startup_nodes_once(self):
+        old_database = MagicMock()
+        cached, seed = MagicMock(), MagicMock()
+        for node in (cached, seed):
+            node.disconnect_free_connections = AsyncMock()
+        nodes_manager = old_database.client.nodes_manager
+        nodes_manager.nodes_cache = {"node": cached}
+        # A seed kept as a separate instance with the same name, and a seed that
+        # is the very instance of the topology cache
+        nodes_manager.startup_nodes = {"node": seed, "shared": cached}
+
+        await CloseConnectionOnActiveDatabaseChanged().listen(
+            AsyncActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
+        )
+
+        for node in (cached, seed):
+            node.update_active_connections_for_reconnect.assert_called_once_with()
+            node.disconnect_free_connections.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
     async def test_cluster_tolerates_nodes_cache_change(self):
         old_database = MagicMock()
         nodes_cache = old_database.client.nodes_manager.nodes_cache = {}

@@ -54,6 +54,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
+        # Removed databases, kept so that close() still closes their clients
+        self._removed_databases: List[SyncDatabase] = []
         self._health_checks = (
             config.default_health_checks()
             if not config.health_checks
@@ -289,6 +291,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Removes a database from the database list.
         """
         weight = self._databases.remove(database)
+        # The client is left open for in-flight commands when the database
+        # was the active one, so it is closed with the others on close()
+        self._removed_databases.append(database)
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
         if (
@@ -554,9 +559,22 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             self._bg_scheduler.stop()
 
         # Close every database client: a failover leaves the previous active
-        # database's client open, so its in-flight commands can complete.
-        for database, _ in self._databases:
-            database.client.close()
+        # database's client open, so its in-flight commands can complete. A
+        # failing client must not leave the later ones open, so the first error
+        # is raised only after every client was closed.
+        error = None
+        databases = [database for database, _ in self._databases]
+        databases.extend(self._removed_databases)
+        # A removed database is only kept to be closed here
+        self._removed_databases.clear()
+        for database in databases:
+            try:
+                database.client.close()
+            except Exception as e:
+                if error is None:
+                    error = e
+        if error is not None:
+            raise error
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

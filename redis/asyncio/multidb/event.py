@@ -81,9 +81,16 @@ class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
                 finally:
                     pool._set_in_maintenance(False)
         else:
-            # Snapshot the nodes: a topology refresh can change the cache
-            # while this loop awaits.
-            for node in list(client.nodes_manager.nodes_cache.values()):
+            # Snapshot the nodes: a topology refresh can change the caches
+            # while this loop awaits. The seed nodes are separate instances
+            # with their own connections, so they are visited too, once each.
+            nodes_manager = client.nodes_manager
+            nodes = {
+                id(node): node
+                for cache in (nodes_manager.nodes_cache, nodes_manager.startup_nodes)
+                for node in cache.values()
+            }
+            for node in nodes.values():
                 node.update_active_connections_for_reconnect()
                 await node.disconnect_free_connections()
 
