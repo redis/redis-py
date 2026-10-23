@@ -104,9 +104,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         # Close health check connection pools
         await self._health_check_policy.close()
 
-        # Close database client
-        if self.command_executor.active_database:
-            await self.command_executor.active_database.client.aclose()
+        # Close every database client: a failover leaves the previous active
+        # database's client open, so its in-flight commands can complete.
+        for database, _ in self._databases:
+            await database.client.aclose()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.aclose()

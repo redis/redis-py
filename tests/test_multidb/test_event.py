@@ -71,3 +71,25 @@ class TestCloseConnectionOnActiveDatabaseChanged:
             pool = node.redis_connection.connection_pool
             pool.disconnect.assert_not_called()
             assert pool.mock_calls == EXPECTED_POOL_CALLS
+
+    def test_cluster_tolerates_nodes_cache_change(self):
+        old_database = MagicMock()
+        nodes_cache = old_database.client.nodes_manager.nodes_cache = {}
+        nodes = [MagicMock(), MagicMock()]
+        for i, node in enumerate(nodes):
+            nodes_cache[f"node{i}"] = node
+
+        # A topology refresh on another thread adds a node meanwhile
+        def add_node():
+            nodes_cache["new"] = MagicMock()
+
+        pool = nodes[0].redis_connection.connection_pool
+        pool.disconnect_free_connections.side_effect = add_node
+
+        CloseConnectionOnActiveDatabaseChanged().listen(
+            ActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
+        )
+
+        for node in nodes:
+            pool = node.redis_connection.connection_pool
+            pool.disconnect_free_connections.assert_called_once_with()

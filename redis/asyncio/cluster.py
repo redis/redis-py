@@ -2298,11 +2298,18 @@ class ClusterNode:
         The connections remain in the pool and will reconnect on next use.
         """
         if self._free:
-            # Take a snapshot to avoid issues if _free changes during await
-            await asyncio.gather(
-                *(connection.disconnect() for connection in tuple(self._free)),
-                return_exceptions=True,
-            )
+            # Take the connections out of _free while they close, so
+            # acquire_connection cannot hand one out mid-disconnect, and put
+            # them back behind any connection released meanwhile.
+            connections = tuple(self._free)
+            self._free.clear()
+            try:
+                await asyncio.gather(
+                    *(connection.disconnect() for connection in connections),
+                    return_exceptions=True,
+                )
+            finally:
+                self._free.extend(connections)
 
     def _mark_free_connections_for_reconnect_on_error(self, error: Exception) -> bool:
         """

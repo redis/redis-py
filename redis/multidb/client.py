@@ -553,8 +553,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 pass
             self._bg_scheduler.stop()
 
-        if self.command_executor.active_database:
-            self.command_executor.active_database.client.close()
+        # Close every database client: a failover leaves the previous active
+        # database's client open, so its in-flight commands can complete.
+        for database, _ in self._databases:
+            database.client.close()
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

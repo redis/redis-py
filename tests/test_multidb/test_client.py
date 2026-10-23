@@ -92,6 +92,41 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    def test_close_closes_every_database_client(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A failover leaves the previous active database's client open so its
+        in-flight commands can complete, so close() must close every database
+        client, not only the active one.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            client.initialize()
+            client.set_active_database(mock_db2)
+            mock_db1.client.close.assert_not_called()
+
+            client.close()
+
+        for db in (mock_db, mock_db1, mock_db2):
+            db.client.close.assert_called_once_with()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     @pytest.mark.parametrize(
         "maint_config, expected_wait",
         [

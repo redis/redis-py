@@ -81,7 +81,9 @@ class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
                 finally:
                     pool._set_in_maintenance(False)
         else:
-            for node in client.nodes_manager.nodes_cache.values():
+            # Snapshot the nodes: a topology refresh can change the cache
+            # while this loop awaits.
+            for node in list(client.nodes_manager.nodes_cache.values()):
                 node.update_active_connections_for_reconnect()
                 await node.disconnect_free_connections()
 

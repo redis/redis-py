@@ -71,7 +71,9 @@ class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
         if isinstance(client, Redis):
             self._free_pool_connections(client.connection_pool)
         else:
-            for node in client.nodes_manager.nodes_cache.values():
+            # Snapshot the nodes: a topology refresh on another thread can
+            # change the cache while this loop runs.
+            for node in list(client.nodes_manager.nodes_cache.values()):
                 self._free_pool_connections(node.redis_connection.connection_pool)
 
     @staticmethod

@@ -92,6 +92,28 @@ class TestCloseConnectionOnActiveDatabaseChanged:
             node.update_active_connections_for_reconnect.assert_called_once_with()
             node.disconnect_free_connections.assert_awaited_once_with()
 
+    @pytest.mark.asyncio
+    async def test_cluster_tolerates_nodes_cache_change(self):
+        old_database = MagicMock()
+        nodes_cache = old_database.client.nodes_manager.nodes_cache = {}
+        nodes = [MagicMock(), MagicMock()]
+        for i, node in enumerate(nodes):
+            node.disconnect_free_connections = AsyncMock()
+            nodes_cache[f"node{i}"] = node
+
+        # A topology refresh adds a node while the listener awaits
+        async def add_node():
+            nodes_cache["new"] = MagicMock()
+
+        nodes[0].disconnect_free_connections.side_effect = add_node
+
+        await CloseConnectionOnActiveDatabaseChanged().listen(
+            AsyncActiveDatabaseChanged(old_database, MagicMock(), MagicMock())
+        )
+
+        for node in nodes:
+            node.disconnect_free_connections.assert_awaited_once_with()
+
 
 @pytest.mark.fixed_client
 class TestMultiDbPubSubShardedMethods:
