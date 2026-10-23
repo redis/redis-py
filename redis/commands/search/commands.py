@@ -3,6 +3,7 @@ import time
 from typing import Any, Dict, List, Optional, Set, Union
 
 from redis._parsers.helpers import pairs_to_dict
+from redis.asyncio.client import Pipeline as AsyncioPipeline
 from redis.client import NEVER_DECODE, Pipeline
 from redis.commands.search.hybrid_query import (
     CombineResultsMethod,
@@ -1862,7 +1863,7 @@ class AsyncSearchCommands(SearchCommands):
         For more information see `FT.ALIASLIST <https://redis.io/commands/ft.aliaslist>`_.
         """  # noqa
         res = await self.execute_command(ALIAS_LIST_CMD, self.index_name)
-        if isinstance(res, Pipeline):
+        if isinstance(res, (Pipeline, AsyncioPipeline)):
             return res
         return self._parse_results(ALIAS_LIST_CMD, res)
 
@@ -1895,7 +1896,7 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 
-        if isinstance(res, Pipeline):
+        if isinstance(res, (Pipeline, AsyncioPipeline)):
             return res
 
         return self._parse_results(
@@ -1957,7 +1958,7 @@ class AsyncSearchCommands(SearchCommands):
 
         res = await self.execute_command(*pieces, **options)
 
-        if isinstance(res, Pipeline):
+        if isinstance(res, (Pipeline, AsyncioPipeline)):
             return res
 
         return self._parse_results(HYBRID_CMD, res, **options)
