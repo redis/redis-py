@@ -1313,6 +1313,13 @@ def test_info_resp3_bytes_keys():
         assert info.labels == {"currentLabel": "currentData"}
 
 
+@pytest.mark.fixed_client
+def test_info_resp3_keeps_null_labels():
+    # Server-free: a decoded RESP3 map keeps a literal "null" label as is.
+    info = TSInfo({"labels": {"null": "null", "currentLabel": "currentData"}})
+    assert info.labels == {"null": "null", "currentLabel": "currentData"}
+
+
 @pytest.mark.redismod
 @pytest.mark.fixed_client
 @pytest.mark.parametrize(
