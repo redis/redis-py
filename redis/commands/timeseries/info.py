@@ -1,5 +1,5 @@
 from ..helpers import nativestr
-from .utils import list_to_dict
+from .utils import _nativestr_dict, list_to_dict
 
 # Mapping from RESP3 camelCase field names to the legacy snake_case
 # attribute names. Used so callers can fetch the same value with either
@@ -78,10 +78,10 @@ class TSInfo:
         https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
         if isinstance(args, dict):
-            # RESP3 wire: response is a native map.
-            response = args
+            # RESP3 wire: response is a native map (bytes keys when not decoded).
+            response = {nativestr(k): v for k, v in args.items()}
             self.rules = response.get("rules") or {}
-            self.labels = response.get("labels") or {}
+            self.labels = _nativestr_dict(response.get("labels") or {})
         else:
             # RESP2 wire: flat list of alternating key-value pairs.
             response = dict(zip(map(nativestr, args[::2]), args[1::2]))
