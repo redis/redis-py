@@ -317,24 +317,10 @@ class OCSPVerifier:
         the validity of OCSP revocation status.
         """
 
-        # validate the certificate
-        try:
-            cert, issuer_url, ocsp_server = self.components_from_socket()
-            if issuer_url is None:
-                raise ConnectionError("no issuers found in certificate chain")
-            return self.check_certificate(ocsp_server, cert, issuer_url)
-        except AuthorizationError:
-            # The direct connection is a second, separate handshake, so it may
-            # be given another certificate than the one on our socket. Checking
-            # that one instead would vouch for a certificate never examined.
-            direct_cert, issuer_url, ocsp_server = (
-                self.components_from_direct_connection()
-            )
-            if direct_cert != cert:
-                raise ConnectionError(
-                    "certificate from the direct connection does not match "
-                    "the certificate on the socket"
-                )
-            if issuer_url is None:
-                raise ConnectionError("no issuers found in certificate chain")
-            return self.check_certificate(ocsp_server, cert, issuer_url)
+        # validate the certificate. An UNAUTHORIZED response fails closed:
+        # OCSP error statuses are unsigned, and asking again about the same
+        # certificate would send the responder the identical request.
+        cert, issuer_url, ocsp_server = self.components_from_socket()
+        if issuer_url is None:
+            raise ConnectionError("no issuers found in certificate chain")
+        return self.check_certificate(ocsp_server, cert, issuer_url)
