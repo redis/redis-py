@@ -419,15 +419,16 @@ def truncate_text(txt, max_length=100):
 
 # Commands whose arguments can carry credentials.
 _CREDENTIAL_COMMANDS = frozenset(
-    {"AUTH", "HELLO", "MIGRATE", "ACL SETUSER", "CONFIG SET"}
+    {"AUTH", "HELLO", "MIGRATE", "ACL SETUSER", "CONFIG SET", "SENTINEL SET"}
 )
 
 
 def command_text(command):
     """
     Render a command for an error message, replacing the arguments of commands
-    that can carry credentials (AUTH, HELLO, MIGRATE, ACL SETUSER, CONFIG SET)
-    with a placeholder, so passwords do not end up in exceptions and logs.
+    that can carry credentials (AUTH, HELLO, MIGRATE, ACL SETUSER, CONFIG SET,
+    SENTINEL SET) with a placeholder, so passwords do not end up in exceptions
+    and logs.
     """
     parts = [safe_str(arg) for arg in command]
     name_len = 0
