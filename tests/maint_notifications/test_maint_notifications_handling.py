@@ -3193,6 +3193,50 @@ def test_completed_listener_closing_the_pool_reports_completion_once():
 
 
 @pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_mid_close_reports_each_handoff_once():
+    """
+    close() walks a snapshot of the pending handoffs. A completion listener that
+    closes the pool while the first one is cleaned up re-enters close(), which
+    settles the rest; the outer walk must skip them instead of cleaning them up
+    and reporting their completion a second time.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent) and (
+                sum(isinstance(e, MaintenanceCompletedEvent) for e in events) == 1
+            ):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+
+    pool.close()
+
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert sorted(e.notification.id for e in completed) == [1, 2]
+
+
+@pytest.mark.fixed_client
 def test_pool_close_disconnects_even_when_moving_cleanup_fails():
     pool = _moving_pool()
     handler = pool._maint_notifications_pool_handler

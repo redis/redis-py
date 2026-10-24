@@ -1047,6 +1047,10 @@ class MaintNotificationsPoolHandler:
             # stay in its connection kwargs, and forget the handoffs so the
             # server can redeliver a still-active MOVING to the reused pool.
             for notification in pending_handoffs:
+                # A completion listener that closes the pool re-enters this
+                # method and settles the remaining handoffs: skip those
+                if notification not in self._pending_handoffs:
+                    continue
                 if not self.handle_node_moved_notification(notification):
                     # Closing ends the relaxation of a superseded handoff too
                     self._dispatch_handoff_event(
