@@ -376,7 +376,8 @@ class TestPipeline:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
-    def test_exec_error_in_pipeline_redacts_credentials(self, r):
+    def test_exec_error_in_pipeline_redacts_credentials(self, r, request):
+        request.addfinalizer(lambda: r.acl_deluser("redis-py-user"))
         with r.pipeline(transaction=False) as pipe:
             pipe.acl_setuser(
                 "redis-py-user",

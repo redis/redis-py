@@ -218,16 +218,19 @@ class TestPipeline:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     async def test_exec_error_in_pipeline_redacts_credentials(self, r):
-        async with r.pipeline(transaction=False) as pipe:
-            pipe.acl_setuser(
-                "redis-py-user",
-                enabled=True,
-                passwords=["+pipeline-secret"],
-                commands=["+nosuchcommand"],
-            )
+        try:
+            async with r.pipeline(transaction=False) as pipe:
+                pipe.acl_setuser(
+                    "redis-py-user",
+                    enabled=True,
+                    passwords=["+pipeline-secret"],
+                    commands=["+nosuchcommand"],
+                )
 
-            with pytest.raises(redis.ResponseError) as ex:
-                await pipe.execute()
+                with pytest.raises(redis.ResponseError) as ex:
+                    await pipe.execute()
+        finally:
+            await r.acl_deluser("redis-py-user")
 
         assert "pipeline-secret" not in str(ex.value)
         assert str(ex.value).startswith(

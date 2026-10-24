@@ -356,6 +356,10 @@ class TestCommandText:
             (("ACL", "SETUSER", "user", ">secret"), "ACL SETUSER <REDACTED>"),
             (("CONFIG SET", "requirepass", "secret"), "CONFIG SET <REDACTED>"),
             (("config", "set", "masterauth", "secret"), "config set <REDACTED>"),
+            (
+                ("SENTINEL SET", "mymaster", "auth-pass", "secret"),
+                "SENTINEL SET <REDACTED>",
+            ),
         ],
     )
     def test_credential_command_arguments_redacted(self, command, expected):
