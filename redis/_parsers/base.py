@@ -1,7 +1,16 @@
 import logging
+import sys
 from abc import ABC, abstractmethod
 from asyncio import IncompleteReadError, StreamReader
+from contextlib import asynccontextmanager
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
+
+# the functionality is available in 3.11.x but has a major issue before
+# 3.11.3. See https://github.com/redis/redis-py/issues/2633
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 from redis.maint_notifications import (
     MaintenanceNotification,
@@ -212,7 +221,14 @@ class _RESPBase(BaseParser):
 class AsyncBaseParser(BaseParser):
     """Base parsing class for the python-backed async parser"""
 
-    __slots__ = "_stream", "_read_size", "_connected"
+    __slots__ = (
+        "_stream",
+        "_read_size",
+        "_connected",
+        "_read_timeout",
+        "_apply_read_timeout",
+        "_active_read_timeout",
+    )
 
     def __init__(self, socket_read_size: int):
         self._stream: Optional[StreamReader] = None
@@ -223,6 +239,39 @@ class AsyncBaseParser(BaseParser):
         # ConnectionError. A parser that has never connected would otherwise
         # raise AttributeError from those guards, which no retry layer acts on.
         self._connected: bool = False
+        # Per-read timeout state, driven by the connection for the duration
+        # of one read_response() call (see Connection.read_response):
+        # _apply_read_timeout is set when the read falls back to
+        # socket_timeout, and _read_timeout is the current deadline value,
+        # which a maintenance notification may relax or restore mid-response
+        # (see AbstractConnection.update_current_socket_timeout). While a
+        # single stream read is in flight, its timeout context is exposed as
+        # _active_read_timeout so the connection can reschedule it. Reads
+        # with an explicit caller timeout do not apply per-read deadlines.
+        self._read_timeout: Optional[float] = None
+        self._apply_read_timeout: bool = False
+        self._active_read_timeout = None
+
+    @asynccontextmanager
+    async def _read_timeout_context(self):
+        """Bound a single stream read by the per-read socket timeout.
+
+        The sync client applies socket_timeout to each individual recv();
+        async reads do the same by wrapping each stream read in its own
+        timeout context instead of wrapping the whole response. The context
+        is entered even when the current value is None (a blocking socket
+        timeout), so a maintenance restore can still impose a deadline on a
+        read that started while the timeout was relaxed.
+        """
+        if not self._apply_read_timeout:
+            yield
+            return
+        async with async_timeout(self._read_timeout) as active_timeout:
+            self._active_read_timeout = active_timeout
+            try:
+                yield
+            finally:
+                self._active_read_timeout = None
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
@@ -621,13 +670,49 @@ class _AsyncRESPBase(AsyncBaseParser):
         else:
             tail = self._buffer[self._pos :]
             try:
-                data = await self._stream.readexactly(want - len(tail))
+                data = await self._read_exactly(want - len(tail))
             except IncompleteReadError as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
             result = (tail + data)[:-2]
-            self._chunks.append(data)
+            # No _chunks append here: _read_exactly already recorded each
+            # piece in the resume state as it was read.
         self._pos += want
         return result
+
+    async def _read_exactly(self, length: int) -> bytes:
+        """Read exactly `length` bytes from the stream.
+
+        The reads use StreamReader.read, which returns as soon as any
+        bytes are available, mirroring the sync SocketBuffer, whose recv()
+        does the same; readexactly would instead wait for a whole piece
+        even when bytes keep arriving. Each read is bounded by its own
+        socket_timeout window (see _read_timeout_context), so a large
+        payload whose pieces keep arriving does not time out merely
+        because the whole payload takes longer than socket_timeout to
+        arrive.
+
+        Every piece is added to self._chunks as soon as it is read, not
+        only once the whole payload has arrived: the pieces are already
+        off the stream at that point, so if an explicit caller timeout
+        cancels the read mid-payload (e.g. PubSub.get_message(timeout=...)
+        returning None and keeping the connection), the next
+        read_response() must replay them from the resume state instead of
+        losing them and parsing the saved header against a stream that
+        starts mid-payload.
+        """
+        chunks = []
+        remaining = length
+        while remaining > 0:
+            async with self._read_timeout_context():
+                chunk = await self._stream.read(remaining)
+            if not chunk:
+                # EOF before `length` bytes: report like readexactly did,
+                # so callers keep raising ConnectionError.
+                raise IncompleteReadError(b"".join(chunks), length)
+            chunks.append(chunk)
+            self._chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     async def _readline(self) -> bytes:
         """
@@ -639,7 +724,11 @@ class _AsyncRESPBase(AsyncBaseParser):
             result = self._buffer[self._pos : found]
         else:
             tail = self._buffer[self._pos :]
-            data = await self._stream.readline()
+            # Each line gets a fresh socket_timeout window, like each read
+            # in _read_exactly: the deadline must not be shared across all
+            # the lines of one response.
+            async with self._read_timeout_context():
+                data = await self._stream.readline()
             if not data.endswith(b"\r\n"):
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
             result = (tail + data)[:-2]
