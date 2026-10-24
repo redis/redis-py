@@ -153,12 +153,8 @@ def setup_async_recorder(metrics_collector, mock_instruments):
     recorder.reset_collector()
     get_observables_registry_instance().clear()
 
-    # Patch _get_or_create_collector to return our collector with mocked instruments
-    with patch.object(
-        recorder,
-        "_get_or_create_collector",
-        return_value=metrics_collector,
-    ):
+    # Install our collector with mocked instruments directly: the recording helpers read this variable.
+    with patch.object(recorder, "_async_metrics_collector", metrics_collector):
         yield mock_instruments
 
     # Reset after test
@@ -542,12 +538,8 @@ class TestHidePubSubChannelNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        # Note: _get_or_create_collector is now sync, _get_config is still async
-        with patch.object(
-            recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        # Note: _get_or_create_collector is sync, _get_config is still async
+        with patch.object(recorder, "_async_metrics_collector", collector):
             with patch.object(
                 recorder,
                 "_get_config",
@@ -649,12 +641,8 @@ class TestRecordStreamingLagFromResponse:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        # Note: _get_or_create_collector is now sync, _get_config is still async
-        with patch.object(
-            recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        # Note: _get_or_create_collector is sync, _get_config is still async
+        with patch.object(recorder, "_async_metrics_collector", collector):
             with patch.object(
                 recorder,
                 "_get_config",
@@ -896,11 +884,10 @@ class TestRecorderDisabled:
         """Test that recording does nothing when collector is None."""
         recorder.reset_collector()
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            recorder,
-            "_get_or_create_collector",
-            return_value=None,
+        # Note: _get_or_create_collector is sync
+        with (
+            patch.object(recorder, "_async_metrics_collector", None),
+            patch.object(recorder, "_async_collector_resolved", True),
         ):
             # Should not raise any exception
             await recorder.record_operation_duration(
@@ -916,11 +903,10 @@ class TestRecorderDisabled:
         """Test is_enabled returns False when collector is None."""
         recorder.reset_collector()
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            recorder,
-            "_get_or_create_collector",
-            return_value=None,
+        # Note: _get_or_create_collector is sync
+        with (
+            patch.object(recorder, "_async_metrics_collector", None),
+            patch.object(recorder, "_async_collector_resolved", True),
         ):
             assert await recorder.is_enabled() is False
 
@@ -930,11 +916,10 @@ class TestRecorderDisabled:
         """Test that all record functions are safe to call when disabled."""
         recorder.reset_collector()
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            recorder,
-            "_get_or_create_collector",
-            return_value=None,
+        # Note: _get_or_create_collector is sync
+        with (
+            patch.object(recorder, "_async_metrics_collector", None),
+            patch.object(recorder, "_async_collector_resolved", True),
         ):
             # None of these should raise
             mock_pool = MagicMock()
@@ -955,6 +940,117 @@ class TestRecorderDisabled:
             await recorder.record_pubsub_message(PubSubDirection.PUBLISH)
             await recorder.record_streaming_lag(0.1, "stream", "group")
 
+        recorder.reset_collector()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.asyncio
+class TestCollectorResolution:
+    """The collector lookup runs once per observability configuration.
+
+    The recording helpers run on every command, so a miss - observability is
+    disabled - is cached as well. ObservabilityInstance.init() and
+    reset_collector() drop that cache so a later enable still collects.
+    """
+
+    async def test_disabled_path_resolves_the_collector_once(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        for _ in range(5):
+            await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+            await recorder.record_connection_count("pool", ConnectionState.IDLE, 1)
+
+        assert len(lookups) == 1
+        recorder.reset_collector()
+
+    async def test_reset_collector_resolves_again(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 1
+
+        recorder.reset_collector()
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 2
+        recorder.reset_collector()
+
+    async def test_init_drops_a_cached_miss(self, monkeypatch):
+        """init() must invalidate the recorder's cached collector.
+
+        Both recorders cache the resolved collector, including the answer
+        "observability is disabled", so that a disabled recording stays cheap.
+        Once cached, that answer is only ever replaced by dropping the cache,
+        so if init() did not drop it a recorder that ran before init() would
+        stay silent for the rest of the process.
+        """
+        recorder.reset_collector()
+
+        # Prime both caches the way a recording call before init() would: a
+        # miss is cached by setting the "resolved" flag with no collector.
+        recorder._async_metrics_collector = None
+        recorder._async_collector_resolved = True
+
+        recorder.get_observability_instance().init(OTelConfig())
+
+        assert recorder._async_collector_resolved is False, (
+            "init() must drop the recorder's cached miss, or the recorder "
+            "stays silent after observability is enabled"
+        )
+        assert recorder._async_metrics_collector is None
+        recorder.reset_collector()
+
+    async def test_resolution_spanning_a_reset_is_not_cached_as_a_miss(
+        self, monkeypatch
+    ):
+        """A resolution that spans a reset must not leave the cache resolved.
+
+        The async twin of the sync test: the resolving call sets
+        ``_async_collector_resolved`` *before* it consults the provider manager
+        and assigns the collector only on a hit, so a resolution that a reset
+        replaced cannot re-set the flag the reset just cleared and cache its miss
+        on top of the fresh cache.
+        """
+        recorder.reset_collector()
+
+        state = {"resets": 0}
+
+        def resolver_cycling_through_a_reset():
+            # The reset lands while this resolution is in flight, i.e. after the
+            # flag was set and before an answer is published.
+            recorder.reset_collector()
+            state["resets"] += 1
+            return None
+
+        monkeypatch.setattr(
+            recorder, "_get_or_create_collector", resolver_cycling_through_a_reset
+        )
+
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+
+        assert state["resets"] == 1, "the reset must land inside the resolution"
+        assert recorder._async_metrics_collector is None
+        assert recorder._async_collector_resolved is False, (
+            "the resolution spanned a reset, so its answer describes the "
+            "configuration that was replaced. Caching it (the flag left set, or "
+            "an assigned collector) is the stale miss that keeps metrics off "
+            "until the next init"
+        )
         recorder.reset_collector()
 
 
@@ -1012,7 +1108,7 @@ class TestRecordConnectionCount:
                 mock_meter_with_counter, mock_config_with_connection_basic
             )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_async_metrics_collector", collector):
             # Reset mock call counts to avoid pollution from external code
             # paths (e.g., connection pool operations in other tests) that may
             # have called record_connection_count on our mock collector.
