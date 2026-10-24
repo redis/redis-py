@@ -3305,6 +3305,12 @@ class MaintNotificationsAbstractConnectionPool:
             self._maint_notifications_pool_handler = None
             self._oss_cluster_maint_notifications_handler = None
 
+    def _on_close(self) -> None:
+        """Hook invoked from the pool's ``close()`` before the pool is shut down."""
+        handler = getattr(self, "_maint_notifications_pool_handler", None)
+        if handler is not None:
+            handler.cancel_scheduled_tasks()
+
     @property
     @abstractmethod
     def connection_kwargs(self) -> Dict[str, Any]:
@@ -4333,7 +4339,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
-        self.disconnect()
+        try:
+            self._on_close()
+        finally:
+            self.disconnect()
 
     def __enter__(self: _CP) -> _CP:
         return self
