@@ -101,6 +101,7 @@ from redis.utils import (
     SSL_AVAILABLE,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
@@ -2212,7 +2213,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def annotate_exception(
         self, exception: Exception, number: int, command: Iterable[object]
     ) -> None:
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
             f"of pipeline caused error: {exception.args[0]}"

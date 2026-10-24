@@ -216,6 +216,28 @@ class TestPipeline:
             assert await r.get("z") == b"zzz"
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.0.0")
+    async def test_exec_error_in_pipeline_redacts_credentials(self, r):
+        try:
+            async with r.pipeline(transaction=False) as pipe:
+                pipe.acl_setuser(
+                    "redis-py-user",
+                    enabled=True,
+                    passwords=["+pipeline-secret"],
+                    commands=["+nosuchcommand"],
+                )
+
+                with pytest.raises(redis.ResponseError) as ex:
+                    await pipe.execute()
+        finally:
+            await r.acl_deluser("redis-py-user")
+
+        assert "pipeline-secret" not in str(ex.value)
+        assert str(ex.value).startswith(
+            "Command # 1 (ACL SETUSER <REDACTED>) of pipeline caused error: "
+        )
+
+    @pytest.mark.onlynoncluster
     async def test_parse_error_raised_transaction(self, r):
         async with r.pipeline() as pipe:
             pipe.multi()

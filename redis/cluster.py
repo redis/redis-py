@@ -109,6 +109,7 @@ from redis.typing import (
 )
 from redis.utils import (
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     dict_merge,
@@ -5602,7 +5603,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
