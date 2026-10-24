@@ -1669,6 +1669,31 @@ def test_set_file(client):
         client.json().set_file("test2", Path.root_path(), nojsonfile.name)
 
 
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_set_file_reads_utf8(tmp_path, monkeypatch, encoding):
+    # JSON files are UTF-8, so set_file must not decode them with the locale
+    # encoding (cp1252, cp932, ... on Windows), and a UTF-8 BOM must not break
+    # parsing. set is stubbed so this runs without a server.
+    import json
+
+    obj = {"name": "café", "city": "東京"}
+    jsonfile = tmp_path / "data.json"
+    jsonfile.write_text(json.dumps(obj, ensure_ascii=False), encoding=encoding)
+
+    json_client = Redis().json()
+    captured = []
+
+    def fake_set(name, path, value, **kwargs):
+        captured.append(value)
+        return True
+
+    monkeypatch.setattr(json_client, "set", fake_set)
+
+    assert json_client.set_file("test", Path.root_path(), str(jsonfile))
+    assert captured == [obj]
+
+
 @pytest.mark.redismod
 def test_set_path(client):
     import json

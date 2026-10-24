@@ -300,7 +300,7 @@ class AsyncJSON(_JSONBase):
         """
 
         def _read_file(fp: str) -> dict:
-            with open(fp) as f:
+            with open(fp, "rb") as f:
                 return loads(f.read())
 
         file_content = await asyncio.to_thread(_read_file, file_name)
