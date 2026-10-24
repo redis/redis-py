@@ -213,6 +213,39 @@ async def test_send_packed_command_times_out_when_writer_stalls():
     conn.disconnect.assert_awaited()
 
 
+@pytest.mark.parametrize(
+    "factory",
+    [
+        pytest.param(make_resp2_connection, id="resp2"),
+        pytest.param(make_resp3_connection, id="resp3"),
+    ],
+)
+async def test_explicit_timeout_mid_bulk_read_preserves_bytes(factory):
+    # Regression test: an explicit timeout interrupting a large bulk read
+    # (the PubSub.get_message(timeout=...) path) returns None and keeps
+    # the connection. The pieces _read_exactly already pulled off the
+    # stream must survive in the parser's _chunks resume state, so the
+    # next read_response() replays them and returns the full, correct
+    # reply instead of parsing the saved header against a stream that
+    # starts mid-payload.
+    conn, reader = factory()
+    # Header plus the first two read-size slices of the payload arrive
+    # promptly; the rest is withheld, so the explicit timeout fires
+    # mid-payload, after whole pieces have been consumed from the stream.
+    reader.feed_data(BULK_WIRE[: READ_SIZE * 2])
+
+    response = await conn.read_response(timeout=SOCKET_TIMEOUT / 2)
+
+    assert response is None
+    conn.disconnect.assert_not_awaited()
+
+    feeder = asyncio.create_task(feed_in_pieces(reader, BULK_WIRE[READ_SIZE * 2 :]))
+    response = await conn.read_response()
+    await feeder
+
+    assert response == PAYLOAD
+
+
 async def test_send_packed_command_within_socket_timeout_succeeds():
     # A slow but responsive writer (drain completes within socket_timeout)
     # must not be timed out.
