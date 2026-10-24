@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import pytest
 import redis
 from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, RedisError
+from redis.exceptions import AuthorizationError, ConnectionError, RedisError
 from redis.retry import Retry
 
 from .conftest import (
@@ -912,12 +912,9 @@ class TestOCSPCertificateBinding:
             self._stapled_connection(port, ca)._connect()
         assert "was not issued by" in str(e.value)
 
-    def _unauthorized_then_direct(self, monkeypatch, direct_cert_is_socket_cert):
-        """Run OCSPVerifier.is_valid against a socket presenting a certificate
-        whose first ocsp query is answered UNAUTHORIZED. The direct connection
-        presents either that same certificate or another one from the same CA,
-        and every later ocsp query is answered GOOD for the certificate it
-        names."""
+    def test_unauthorized_ocsp_fails_closed(self, monkeypatch):
+        # An unsigned UNAUTHORIZED status must not let the check move on to a
+        # certificate fetched over a second handshake, GOOD as that one may be.
         import base64
         from urllib.parse import urlparse
 
@@ -930,7 +927,6 @@ class TestOCSPCertificateBinding:
         ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
         cert, _ = self._make_certificate("node", 111, signing_key=ca_key, aia=True)
         other, _ = self._make_certificate("other", 999, signing_key=ca_key, aia=True)
-        direct = cert if direct_cert_is_socket_cert else other
         unauthorized = ocsp.OCSPResponseBuilder.build_unsuccessful(
             ocsp.OCSPResponseStatus.UNAUTHORIZED
         ).public_bytes(serialization.Encoding.DER)
@@ -967,23 +963,16 @@ class TestOCSPCertificateBinding:
                 return cert.public_bytes(serialization.Encoding.DER)
 
         monkeypatch.setattr(redis.ocsp.requests, "get", get)
+        direct_fetches = []
+
+        def get_server_certificate(addr, ca_certs=None):
+            direct_fetches.append(addr)
+            return other.public_bytes(serialization.Encoding.PEM).decode()
+
         monkeypatch.setattr(
-            redis.ocsp.ssl,
-            "get_server_certificate",
-            lambda addr, ca_certs=None: direct.public_bytes(
-                serialization.Encoding.PEM
-            ).decode(),
+            redis.ocsp.ssl, "get_server_certificate", get_server_certificate
         )
-        return redis.ocsp.OCSPVerifier(Socket(), "localhost", 6666).is_valid()
-
-    def test_unauthorized_ocsp_retries_with_direct_connection(self, monkeypatch):
-        assert self._unauthorized_then_direct(monkeypatch, True) is True
-
-    def test_unauthorized_ocsp_rejects_other_certificate_on_direct_connection(
-        self, monkeypatch
-    ):
-        # An unsigned UNAUTHORIZED status must not let the check move on to a
-        # certificate the socket never presented, GOOD as that one may be.
-        with pytest.raises(ConnectionError) as e:
-            self._unauthorized_then_direct(monkeypatch, False)
-        assert "does not match" in str(e.value)
+        with pytest.raises(AuthorizationError):
+            redis.ocsp.OCSPVerifier(Socket(), "localhost", 6666).is_valid()
+        assert direct_fetches == []
+        assert queries == [cert.serial_number]
