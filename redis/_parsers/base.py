@@ -674,26 +674,43 @@ class _AsyncRESPBase(AsyncBaseParser):
             except IncompleteReadError as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
             result = (tail + data)[:-2]
-            self._chunks.append(data)
+            # No _chunks append here: _read_exactly already recorded each
+            # piece in the resume state as it was read.
         self._pos += want
         return result
 
     async def _read_exactly(self, length: int) -> bytes:
         """Read exactly `length` bytes from the stream.
 
-        The bytes are pulled in _read_size pieces, mirroring the sync
-        SocketBuffer, which reads with recv(_read_size). Each piece is
-        bounded by its own socket_timeout window (see
-        _read_timeout_context), so a large payload whose pieces keep
-        arriving does not time out merely because the whole payload takes
-        longer than socket_timeout to arrive.
+        The reads use StreamReader.read, which returns as soon as any
+        bytes are available, mirroring the sync SocketBuffer, whose recv()
+        does the same; readexactly would instead wait for a whole piece
+        even when bytes keep arriving. Each read is bounded by its own
+        socket_timeout window (see _read_timeout_context), so a large
+        payload whose pieces keep arriving does not time out merely
+        because the whole payload takes longer than socket_timeout to
+        arrive.
+
+        Every piece is added to self._chunks as soon as it is read, not
+        only once the whole payload has arrived: the pieces are already
+        off the stream at that point, so if an explicit caller timeout
+        cancels the read mid-payload (e.g. PubSub.get_message(timeout=...)
+        returning None and keeping the connection), the next
+        read_response() must replay them from the resume state instead of
+        losing them and parsing the saved header against a stream that
+        starts mid-payload.
         """
         chunks = []
         remaining = length
         while remaining > 0:
             async with self._read_timeout_context():
-                chunk = await self._stream.readexactly(min(remaining, self._read_size))
+                chunk = await self._stream.read(remaining)
+            if not chunk:
+                # EOF before `length` bytes: report like readexactly did,
+                # so callers keep raising ConnectionError.
+                raise IncompleteReadError(b"".join(chunks), length)
             chunks.append(chunk)
+            self._chunks.append(chunk)
             remaining -= len(chunk)
         return b"".join(chunks)
 
