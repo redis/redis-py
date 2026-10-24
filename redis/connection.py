@@ -2298,17 +2298,22 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # or another command's reply if the placeholder was stranded, and the drain
             # (which returns non-push replies too) would consume either one.
             entry = self._cache.get(self._current_command_cache_key)
-        drained = entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS
+            drained = entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS
+        candidate = entry
         if drained:
             with self._pool_lock:
                 self._drain_invalidations(entry.connection_ref)
 
         with self._cache_lock:
             if drained:
-                # Re-check: the entry may have been invalidated during the drain, or filled
-                # in by the connection that was fetching it.
+                # Re-check: the drained entry may have been invalidated or replaced.
                 entry = self._cache.get(self._current_command_cache_key)
 
+            # A hit requires this very entry object to have been drained. A placeholder
+            # promoted while we were not looking was never drained; a replacement filled
+            # during the drain may belong to another connection with pending invalidations.
+            # Neither is trusted, even if it is VALID by the time we check here.
+            #
             # Whether this read is served locally is decided here, once, and the value is
             # carried to ``read_response`` - which must not re-derive it from cache state.
             # Two things can happen to the entry between the two calls, and re-deriving
@@ -2323,7 +2328,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # An IN_PROGRESS entry is somebody else's fetch in flight and carries no value to
             # serve, so it is not a hit: fall through and send. Returning without sending
             # would leave ``read_response`` reading a reply that was never requested.
-            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
+            if (
+                drained
+                and entry is candidate
+                and entry.status != CacheEntryStatus.IN_PROGRESS
+            ):
                 cached_value = entry.cache_value
                 self._current_command_cache_key = None
                 is_hit = True

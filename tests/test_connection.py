@@ -41,6 +41,7 @@ from redis.cache import (
 from redis.connection import (
     CacheProxyConnection,
     Connection,
+    ConnectionInterface,
     HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -3040,6 +3041,138 @@ class TestCacheEntryLifecycle:
     """
 
     # ---------------------------------------------------------------- the hit decision
+
+    @pytest.mark.parametrize("remove_entry", [False, True], ids=["queued", "removed"])
+    def test_an_entry_promoted_before_the_final_cache_lock_is_not_a_hit(
+        self, proxy_factory, mock_connection, remove_entry
+    ):
+        """An initially IN_PROGRESS entry cannot become a hit without its own drain."""
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        owner_connection = Mock(
+            spec=ConnectionInterface,
+            retry="mock",
+            host="mock",
+            port=6379,
+            db=0,
+            credential_provider=UsernamePasswordCredentialProvider(),
+            _event_dispatcher=EventDispatcher(),
+        )
+        owner_connection.can_read.return_value = False
+        owner = CacheProxyConnection(owner_connection, cache, proxy._pool_lock)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+
+        replies = iter([b"old", None])
+
+        def read_owner_reply(**kwargs):
+            reply = next(replies)
+            if reply is None:
+                owner._on_invalidation_callback(["invalidate", [b"foo"]])
+            return reply
+
+        owner_connection.read_response.side_effect = read_owner_reply
+        owner.send_command("GET", "foo", keys=["foo"])
+        candidate = cache.get(cache_key)
+        assert candidate.status is CacheEntryStatus.IN_PROGRESS
+        # The reply is followed by an invalidation queued on the owner's socket.
+        owner_connection.can_read.side_effect = [True, False]
+        mock_connection.read_response.return_value = b"new"
+
+        waiting = threading.Event()
+        resume = threading.Event()
+        errors = []
+        real_cache_lock = proxy._cache_lock
+
+        def send_command():
+            try:
+                proxy.send_command("GET", "foo", keys=["foo"])
+            except BaseException as error:
+                errors.append(error)
+
+        with patch.object(proxy, "_cache_lock") as cache_lock:
+
+            def acquire_cache_lock():
+                # Eligibility and the candidate lookup precede the final hit decision.
+                # Stop after ``drained`` is computed, before that third lock is acquired.
+                if cache_lock.__enter__.call_count == 3:
+                    waiting.set()
+                    assert resume.wait(timeout=5)
+                return real_cache_lock.__enter__()
+
+            cache_lock.__enter__.side_effect = acquire_cache_lock
+            cache_lock.__exit__.side_effect = real_cache_lock.__exit__
+            sender = threading.Thread(target=send_command)
+            sender.start()
+            try:
+                assert waiting.wait(timeout=5)
+                # Use the real read path: it promotes the same object B retained in place.
+                assert owner.read_response() == b"old"
+                assert cache.get(cache_key) is candidate
+                assert candidate.status is CacheEntryStatus.VALID
+                if remove_entry:
+                    owner._process_pending_invalidations()
+                    assert cache.get(cache_key) is None
+            finally:
+                resume.set()
+                sender.join(timeout=5)
+
+            assert not sender.is_alive()
+            assert errors == []
+
+        # Even a removed entry remains VALID through B's retained reference. Neither
+        # that object nor the still-cached one is trusted without draining its owner.
+        assert proxy.read_response() == b"new"
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        assert owner_connection.read_response.call_count == (2 if remove_entry else 1)
+
+    def test_an_entry_replaced_during_the_drain_is_not_a_hit(
+        self, proxy_factory, mock_connection
+    ):
+        """Draining one entry's owner does not make a replacement safe to serve."""
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        owner = Mock()
+        owner.can_read.side_effect = [True, False]
+        candidate = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"old",
+            status=CacheEntryStatus.VALID,
+            connection_ref=owner,
+        )
+        replacement_owner = Mock()
+        replacement_owner.can_read.side_effect = [True, False]
+        replacement = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"replacement",
+            status=CacheEntryStatus.VALID,
+            connection_ref=replacement_owner,
+        )
+        cache.set(candidate)
+        mock_connection.read_response.return_value = b"new"
+
+        def replace_during_drain(**kwargs):
+            cache.delete_by_redis_keys([b"foo"])
+            cache.set(replacement)
+            return None
+
+        owner.read_response.side_effect = replace_during_drain
+
+        # A drained-only check would serve the replacement, although its owner's
+        # invalidations were never read. Equal hashes do not prove identity either.
+        with patch.object(CacheEntry, "__hash__", return_value=0):
+            assert candidate == replacement
+            assert candidate is not replacement
+            proxy.send_command("GET", "foo", keys=["foo"])
+
+        assert proxy.read_response() == b"new"
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        owner.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
+        replacement_owner.read_response.assert_not_called()
 
     def test_another_connection_filling_our_placeholder_does_not_skip_our_reply(
         self, proxy_factory, mock_connection
