@@ -4270,10 +4270,16 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             f"{connection}, {connection.extract_connection_details()}"
                         )
                     connection.disconnect()
+                try:
+                    self._event_dispatcher.dispatch(
+                        AfterConnectionReleasedEvent(connection)
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error dispatching AfterConnectionReleasedEvent for {connection}: {e}"
+                    )
+                    connection.disconnect()
                 self._available_connections.append(connection)
-                self._event_dispatcher.dispatch(
-                    AfterConnectionReleasedEvent(connection)
-                )
 
                 # Record state transition: USED -> IDLE
                 pool_name = get_pool_name(self)

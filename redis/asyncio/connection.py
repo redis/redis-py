@@ -3269,11 +3269,17 @@ class ConnectionPool(
                     )
                 await connection.disconnect()
 
-            self._available_connections.append(connection)
+            try:
+                await self._event_dispatcher.dispatch_async(
+                    AsyncAfterConnectionReleasedEvent(connection)
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Error dispatching AsyncAfterConnectionReleasedEvent for {connection}: {e}"
+                )
+                await connection.disconnect()
 
-        await self._event_dispatcher.dispatch_async(
-            AsyncAfterConnectionReleasedEvent(connection)
-        )
+            self._available_connections.append(connection)
 
         # Record state transition: USED -> IDLE
         pool_name = get_pool_name(self)

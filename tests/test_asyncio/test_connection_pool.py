@@ -1507,3 +1507,55 @@ class TestAsyncConnectionPoolMetricsRecording:
             mock_record.assert_called_once()
             call_kwargs = mock_record.call_args[1]
             assert call_kwargs["close_reason"] == CloseReason.APPLICATION_CLOSE
+
+
+    @pytest.mark.asyncio
+    async def test_release_deferred_event_runs_before_connection_available(self):
+        """
+        Verify that AsyncAfterConnectionReleasedEvent runs before the connection
+        is made available in _available_connections to prevent race conditions
+        during deferred re-authentication (#4431).
+        """
+        pool = ConnectionPool()
+        conn = MagicMock()
+        conn.should_reconnect.return_value = False
+        conn.disconnect = AsyncMock()
+
+        pool._in_use_connections.add(conn)
+
+        seen_in_available = []
+
+        async def mock_dispatch(event):
+            seen_in_available.append(conn in pool._available_connections)
+
+        pool._event_dispatcher.dispatch_async = mock_dispatch
+
+        await pool.release(conn)
+
+        assert len(seen_in_available) == 1
+        assert seen_in_available[0] is False
+        assert conn in pool._available_connections
+
+    @pytest.mark.asyncio
+    async def test_release_event_dispatch_exception_handled_gracefully(self):
+        """
+        Verify that an exception during AsyncAfterConnectionReleasedEvent dispatch
+        disconnects the connection and does not propagate out of release().
+        """
+        pool = ConnectionPool()
+        conn = MagicMock()
+        conn.should_reconnect.return_value = False
+        conn.disconnect = AsyncMock()
+
+        pool._in_use_connections.add(conn)
+
+        async def failing_dispatch(event):
+            raise ConnectionError("Connection lost during deferred re-auth")
+
+        pool._event_dispatcher.dispatch_async = failing_dispatch
+
+        # Should not raise exception
+        await pool.release(conn)
+
+        conn.disconnect.assert_awaited_once()
+        assert conn in pool._available_connections
