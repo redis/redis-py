@@ -699,6 +699,36 @@ class TestRecordStreamingLagFromResponse:
         assert call_args[0][0] >= 0.0
         assert call_args[0][0] < 1.0  # Should be less than 1 second
 
+    async def test_record_streaming_lag_from_response_unified_format(
+        self, setup_async_recorder
+    ):
+        """Test unified response format (dict with list of (id, fields) tuples)."""
+        instruments = setup_async_recorder
+
+        import time
+
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = {
+            "test-stream": [
+                (message_id, {"field": "value"}),
+            ]
+        }
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        call_args = instruments.stream_lag.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
+        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert call_args[0][0] >= 0.0
+        assert call_args[0][0] < 1.0
+
     async def test_record_streaming_lag_from_response_resp2_format(
         self, setup_async_recorder
     ):

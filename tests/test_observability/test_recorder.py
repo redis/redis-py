@@ -911,6 +911,31 @@ class TestHideStreamNames:
         # Stream name should NOT be in attributes when hidden
         assert REDIS_CLIENT_STREAM_NAME not in attrs
 
+    def test_record_streaming_lag_from_response_unified_format(self, setup_recorder):
+        """Test recording streaming lag from unified response format (dict of list of tuples)."""
+        instruments = setup_recorder
+        import time
+
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        # Unified format: {stream: [(message_id, fields)]}
+        response = {
+            "test-stream": [
+                (message_id, {"field": "value"}),
+            ]
+        }
+
+        from redis.observability.recorder import record_streaming_lag_from_response
+
+        record_streaming_lag_from_response(response=response, consumer_group="my-group")
+
+        instruments.stream_lag.record.assert_called_once()
+        call_args = instruments.stream_lag.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
+        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+
 
 @pytest.mark.fixed_client
 class TestRecorderDisabled:
