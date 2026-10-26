@@ -1,5 +1,6 @@
 import copy
 import functools
+import ipaddress
 import logging
 import os
 import socket
@@ -2975,7 +2976,9 @@ class SSLConnection(Connection):
                 "- not both."
             )
 
+        sock.settimeout(self.socket_connect_timeout)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        sslsock.settimeout(self.socket_timeout)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
@@ -2997,10 +3000,27 @@ class SSLConnection(Connection):
 
             #  need another socket
             con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
+            # Send the same SNI as sslsock so the probe is given the same
+            # certificate. ssl sends none for an IP address, so neither do we.
+            try:
+                ipaddress.ip_address(self.host)
+            except ValueError:
+                con.set_tlsext_host_name(self.host.encode())
             con.request_ocsp()
             con.connect((self.host, self.port))
             con.do_handshake()
             con.shutdown()
+
+            # The staple was validated on a second connection, so it only
+            # vouches for sslsock if both presented the same certificate.
+            staple_cert = OpenSSL.crypto.dump_certificate(
+                OpenSSL.crypto.FILETYPE_ASN1, con.get_peer_certificate()
+            )
+            if staple_cert != sslsock.getpeercert(True):
+                sslsock.close()
+                raise ConnectionError(
+                    "ocsp stapled certificate does not match the connection certificate"
+                )
             return sslsock
 
         # pure ocsp validation
@@ -3101,6 +3121,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_validate_ocsp": to_bool,
+    "ssl_validate_ocsp_stapled": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "ssl_min_version": int,
@@ -4327,19 +4349,32 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         with self._lock:
             for conn in self._available_connections:
-                conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if first_error is not None:
+            raise first_error
 
     def _get_pool_lock(self):
         return self._lock
@@ -4385,18 +4420,18 @@ class BlockingConnectionPool(ConnectionPool):
     """
     Thread-safe blocking connection pool::
 
-        >>> from redis.client import Redis
+        >>> from redis import Redis, BlockingConnectionPool
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default
-    :py:class:`~redis.ConnectionPool` implementation, in that,
+    :py:class:`~redis.connection.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple redis clients (safely across threads if required).
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a :py:class:`~redis.ConnectionError` (as the default
-    :py:class:`~redis.ConnectionPool` implementation does), it
+    raising a :py:class:`~redis.exceptions.MaxConnectionsError` (as the default
+    :py:class:`~redis.connection.ConnectionPool` implementation does), it
     makes the client wait ("blocks") for a specified number of seconds until
     a connection becomes available.
 
