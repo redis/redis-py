@@ -1219,6 +1219,27 @@ def test_format_error_message(conn, error, expected_message):
 
 
 @pytest.mark.fixed_client
+def test_ssl_handshake_uses_socket_connect_timeout():
+    conn = SSLConnection(
+        socket_timeout=0.05, socket_connect_timeout=4, ssl_cert_reqs="none"
+    )
+    handshake_timeouts = []
+    ssl_sock = MagicMock()
+
+    def wrap_socket(context, sock, **kwargs):
+        handshake_timeouts.append(sock.gettimeout())
+        return ssl_sock
+
+    with socket.socket() as sock:
+        sock.settimeout(conn.socket_timeout)
+        with patch.object(ssl.SSLContext, "wrap_socket", wrap_socket):
+            assert conn._wrap_socket_with_ssl(sock) is ssl_sock
+
+    assert handshake_timeouts == [4]
+    ssl_sock.settimeout.assert_called_once_with(0.05)
+
+
+@pytest.mark.fixed_client
 def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
@@ -4246,14 +4267,8 @@ class TestConnectionPoolMetricCount:
         conn = pool.get_connection()
         pool.release(conn)
 
-        # Simulate destruction (what __del__ / reset does)
-        idle_count = len(pool._available_connections)
-        if idle_count:
-            mock_rec(
-                pool_name=pn,
-                connection_state=ConnectionState.IDLE,
-                counter=-idle_count,
-            )
+        # Destroy the pool's connections through the pool's own teardown path.
+        pool.reset()
 
         calls = _pool_metric_calls(mock_rec, pn)
         idle_net, used_net = _net(calls)

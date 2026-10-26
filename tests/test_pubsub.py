@@ -3260,7 +3260,7 @@ class TestClusterPubSubSlotMigration:
             nonlocal worker
             worker = threading.Thread(target=pubsub.reinitialize_shard_subscriptions)
             worker.start()
-            pubsub.pending_unsubscribe_shard_channels.add(channel)
+            old_ps.pending_unsubscribe_shard_channels.add(channel)
 
         old_ps.sunsubscribe.side_effect = sunsubscribe
 
@@ -3269,6 +3269,172 @@ class TestClusterPubSubSlotMigration:
 
         new_ps.ssubscribe.assert_not_called()
         assert channel in pubsub.pending_unsubscribe_shard_channels
+
+    def test_reinitialize_moves_channel_after_reconnect_drops_pending_unsubscribe(
+        self,
+    ):
+        """
+        A reconnect between ``sunsubscribe`` and its confirmation clears the
+        per-node pending set and replays ``SSUBSCRIBE``, but the cluster-level
+        set kept the channel. Reconciliation skipped it, so it stayed on the
+        old owner after a slot migration.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        # on_connect cleared the per-node pending set and re-subscribed.
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_called_once_with(channel)
+        new_ps.ssubscribe.assert_called_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert channel not in pubsub.pending_unsubscribe_shard_channels
+
+    def test_reinitialize_retries_revived_channel_after_failed_attach(self):
+        """
+        Moving a channel a reconnect subscribed again sends ``SUNSUBSCRIBE`` to
+        the old node before it attaches to the new owner. If the attach fails,
+        the stale cluster-level pending entry must not make the next pass skip
+        the channel as a user unsubscribe.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = lambda *_: (
+            old_ps.pending_unsubscribe_shard_channels.add(channel)
+        )
+        new_ps = self._make_node_pubsub()
+        new_ps.ssubscribe.side_effect = [ConnectionError("new owner is down"), None]
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        with pytest.raises(ConnectionError):
+            pubsub.reinitialize_shard_subscriptions()
+        pubsub.reinitialize_shard_subscriptions()
+
+        assert new_ps.ssubscribe.call_count == 2
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert channel not in pubsub.pending_unsubscribe_shard_channels
+
+    def test_reinitialize_skips_channel_whose_unsubscribe_the_node_confirmed(self):
+        """
+        The per-node pubsub drops the channel when it reads the ``SUNSUBSCRIBE``
+        confirmation, before ``get_sharded_message`` updates the cluster-level
+        state. A pass running in between must not subscribe it again.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub()
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        new_ps.ssubscribe.assert_not_called()
+        assert channel in pubsub.pending_unsubscribe_shard_channels
+
+    def test_reinitialize_skips_channel_confirmed_during_the_check(self):
+        """
+        The reader thread can apply a ``SUNSUBSCRIBE`` confirmation while a
+        pass checks whether the node subscribed the channel again. Seeing the
+        channel still held but no longer pending must not make the pass
+        subscribe it again.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        # A real PubSub, not a mock: handle_message's bookkeeping order is
+        # part of what is under test.
+        old_ps = PubSub.__new__(PubSub)
+        old_ps.channels = {}
+        old_ps.patterns = {}
+        old_ps.ignore_subscribe_messages = False
+        old_ps.subscribed_event = threading.Event()
+        old_ps.subscribed_event.set()
+        old_ps.sunsubscribe = mock.Mock()
+        old_ps.reset = mock.Mock()
+        confirmed = False
+
+        def confirm():
+            nonlocal confirmed
+            if not confirmed:
+                confirmed = True
+                old_ps.handle_message(
+                    ["sunsubscribe", channel, 0], ignore_subscribe_messages=False
+                )
+
+        class _ConfirmingDict(dict):
+            def __contains__(self, item):
+                present = super().__contains__(item)
+                confirm()
+                return present
+
+        class _ConfirmingSet(set):
+            def __contains__(self, item):
+                present = super().__contains__(item)
+                confirm()
+                return present
+
+        old_ps.shard_channels = _ConfirmingDict({channel: None})
+        old_ps.pending_unsubscribe_shard_channels = _ConfirmingSet({channel})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        pubsub.reinitialize_shard_subscriptions()
+
+        new_ps.ssubscribe.assert_not_called()
+        assert channel in pubsub.pending_unsubscribe_shard_channels
+
+    def test_sunsubscribe_keeps_tracking_for_channel_resubscribed_on_reconnect(self):
+        """
+        A ``sunsubscribe`` for a channel the per-node pubsub still holds is not
+        the confirmation of a user unsubscribe, even when a reconnect left the
+        channel in the cluster-level pending set, so the channel stays tracked.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.get_message.return_value = {"type": "sunsubscribe", "channel": channel}
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+
+        message = pubsub.get_sharded_message(target_node=old_node)
+
+        assert message is not None
+        assert channel in pubsub.shard_channels
+        assert pubsub._shard_channel_to_node[channel] == old_node.name
 
     def test_reinitialize_reattaches_when_owner_lost_the_subscription(self):
         """

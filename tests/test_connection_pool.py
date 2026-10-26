@@ -1045,6 +1045,15 @@ class TestSSLConnectionURLParsing:
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
         assert pool.get_connection().check_hostname is True
 
+    def test_ocsp_options(self):
+        pool = redis.ConnectionPool.from_url(
+            "rediss://my.host?ssl_validate_ocsp=True&ssl_validate_ocsp_stapled=False"
+        )
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {"ssl_validate_ocsp": True, "ssl_validate_ocsp_stapled": False},
+        )
+
     def test_ssl_flags_config_parsing(self):
         class DummyConnectionPool(redis.ConnectionPool):
             def get_connection(self):
