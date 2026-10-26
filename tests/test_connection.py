@@ -3043,7 +3043,7 @@ class TestCacheEntryLifecycle:
     # ---------------------------------------------------------------- the hit decision
 
     @pytest.mark.parametrize("remove_entry", [False, True], ids=["queued", "removed"])
-    def test_an_entry_promoted_before_the_final_cache_lock_is_not_a_hit(
+    def test_an_entry_promoted_during_a_miss_is_not_a_hit(
         self, proxy_factory, mock_connection, remove_entry
     ):
         """An initially IN_PROGRESS entry cannot become a hit without its own drain."""
@@ -3082,7 +3082,7 @@ class TestCacheEntryLifecycle:
         waiting = threading.Event()
         resume = threading.Event()
         errors = []
-        real_cache_lock = proxy._cache_lock
+        real_cache_set = cache.set
 
         def send_command():
             try:
@@ -3090,23 +3090,25 @@ class TestCacheEntryLifecycle:
             except BaseException as error:
                 errors.append(error)
 
-        with patch.object(proxy, "_cache_lock") as cache_lock:
+        def set_cache_entry(entry):
+            # The miss path installs its placeholder right after classifying the
+            # entry as IN_PROGRESS. Stop between the two, while the original
+            # placeholder is still the one in the cache.
+            if (
+                entry.cache_key == cache_key
+                and entry.status is CacheEntryStatus.IN_PROGRESS
+                and entry.connection_ref is mock_connection
+            ):
+                waiting.set()
+                assert resume.wait(timeout=5)
+            return real_cache_set(entry)
 
-            def acquire_cache_lock():
-                # Eligibility and the candidate lookup precede the final hit decision.
-                # Stop after ``drained`` is computed, before that third lock is acquired.
-                if cache_lock.__enter__.call_count == 3:
-                    waiting.set()
-                    assert resume.wait(timeout=5)
-                return real_cache_lock.__enter__()
-
-            cache_lock.__enter__.side_effect = acquire_cache_lock
-            cache_lock.__exit__.side_effect = real_cache_lock.__exit__
+        with patch.object(cache, "set", side_effect=set_cache_entry):
             sender = threading.Thread(target=send_command)
             sender.start()
             try:
                 assert waiting.wait(timeout=5)
-                # Use the real read path: it promotes the same object B retained in place.
+                # Promote the original entry before our miss replaces it.
                 assert owner.read_response() == b"old"
                 assert cache.get(cache_key) is candidate
                 assert candidate.status is CacheEntryStatus.VALID
@@ -3120,8 +3122,8 @@ class TestCacheEntryLifecycle:
             assert not sender.is_alive()
             assert errors == []
 
-        # Even a removed entry remains VALID through B's retained reference. Neither
-        # that object nor the still-cached one is trusted without draining its owner.
+        # Promotion, with or without subsequent removal, cannot turn this
+        # already-decided miss into a hit.
         assert proxy.read_response() == b"new"
         mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
         assert owner_connection.read_response.call_count == (2 if remove_entry else 1)
