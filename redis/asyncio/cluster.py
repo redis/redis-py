@@ -998,7 +998,11 @@ class RedisCluster(
             return await self.initialize()
         except BaseException:
             # If initialization fails, decrement the counter to keep it in sync
-            await asyncio.shield(self._decrement_usage())
+            # Collect cleanup errors inside the shield so they cannot replace
+            # the initialization error or go unhandled after another cancellation.
+            await asyncio.shield(
+                asyncio.gather(self._decrement_usage(), return_exceptions=True)
+            )
             raise
 
     async def _increment_usage(self) -> int:

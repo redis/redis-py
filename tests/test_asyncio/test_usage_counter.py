@@ -1,4 +1,5 @@
 import asyncio
+import gc
 from unittest.mock import AsyncMock
 
 import pytest
@@ -156,6 +157,72 @@ async def test_failed_context_entry_preserves_active_context(client, monkeypatch
         close.assert_not_awaited()
 
     close.assert_awaited_once()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_failed_context_entry_preserves_error_when_close_fails(
+    client, monkeypatch, error_type
+):
+    error = error_type("initialization")
+    monkeypatch.setattr(client, "initialize", AsyncMock(side_effect=error))
+    close = AsyncMock(side_effect=OSError("closing"))
+    monkeypatch.setattr(client, "aclose", close)
+
+    with pytest.raises(error_type) as exc_info:
+        async with client:
+            pytest.fail("Failed initialization must not enter the context")
+
+    assert exc_info.value is error
+    assert client._usage_counter == 0
+    close.assert_awaited_once()
+
+
+@pytest.mark.fixed_client
+async def test_repeated_entry_cancellation_consumes_cleanup_error(client, monkeypatch):
+    initializing = asyncio.Event()
+    closing = asyncio.Event()
+    finish_close = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def initialize():
+        initializing.set()
+        await asyncio.Event().wait()
+
+    async def close():
+        asyncio.current_task().add_done_callback(lambda _: cleanup_finished.set())
+        closing.set()
+        await finish_close.wait()
+        raise OSError("closing")
+
+    monkeypatch.setattr(client, "initialize", initialize)
+    close_mock = AsyncMock(side_effect=close)
+    monkeypatch.setattr(client, "aclose", close_mock)
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled = []
+    loop.set_exception_handler(lambda loop, context: unhandled.append(context))
+    task = asyncio.create_task(client.__aenter__())
+    try:
+        await initializing.wait()
+        task.cancel()
+        await closing.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Fail cleanup after the cancelled caller has stopped awaiting it.
+        finish_close.set()
+        await cleanup_finished.wait()
+        gc.collect()
+
+        assert client._usage_counter == 0
+        close_mock.assert_awaited_once()
+        assert not unhandled
+    finally:
+        finish_close.set()
+        await asyncio.gather(task, return_exceptions=True)
+        loop.set_exception_handler(previous_handler)
 
 
 @pytest.mark.fixed_client
