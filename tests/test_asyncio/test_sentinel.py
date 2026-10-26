@@ -130,6 +130,16 @@ async def test_discover_master_error(sentinel):
 
 
 @pytest.mark.onlynoncluster
+async def test_dead_pool(sentinel):
+    master = sentinel.master_for("mymaster", db=9)
+    conn = await master.connection_pool.get_connection()
+    await conn.disconnect()
+    del master
+    await conn.connect()
+    await conn.disconnect()
+
+
+@pytest.mark.onlynoncluster
 async def test_discover_master_sentinel_down(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_down.add(("foo", 26379))
@@ -359,7 +369,7 @@ async def test_repr_correctly_represents_connection_object(sentinel):
         str(connection)
         == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"  # noqa: E501
     )
-    assert connection.connection_pool == pool
+    assert connection.connection_pool is pool.proxy
     await pool.release(connection)
 
     del pool
