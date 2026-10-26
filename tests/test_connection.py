@@ -4215,6 +4215,32 @@ def _net(calls):
 
 
 @pytest.mark.fixed_client
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@patch("redis.connection.record_connection_count")
+def test_same_process_pool_reset_balances_connection_counts(mock_rec, pool_class):
+    pool = pool_class(connection_class=_DummyConnection, max_connections=2)
+    pool_name = get_pool_name(pool)
+    idle = pool.get_connection()
+    pool.get_connection()
+    pool.release(idle)
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (1, 1)
+
+    pool.reset()
+    assert get_pool_name(pool) == pool_name
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+    pool.reset()
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+    connection = pool.get_connection()
+    pool.release(connection)
+    pool_ref = weakref.ref(pool)
+    del pool
+    gc.collect()
+    assert pool_ref() is None
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+
+@pytest.mark.fixed_client
 class TestConnectionPoolMetricCount:
     """Tests for db.client.connection.count UpDownCounter accuracy.
 
@@ -4278,8 +4304,8 @@ class TestConnectionPoolMetricCount:
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
         """release() of a connection the pool no longer owns (e.g. inherited by
-        a forked child) must not record connection.count. Fork-time accounting
-        is owned by reset()/__del__; recording here would double-count."""
+        a forked child) must not record connection.count. Accounting for inherited
+        connections belongs to the parent process."""
         pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
 
         conn = pool.get_connection()
@@ -4337,8 +4363,8 @@ class TestBlockingConnectionPoolMetricCount:
 
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
-        """Unowned (inherited-across-fork) release must not record; fork-time
-        accounting is owned by reset()/__del__."""
+        """Unowned (inherited-across-fork) release must not record; accounting
+        for inherited connections belongs to the parent process."""
         pool = self._pool()
         mock_rec.reset_mock()
 
