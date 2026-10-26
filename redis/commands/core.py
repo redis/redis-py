@@ -2405,7 +2405,8 @@ class ManagementCommands(CommandsProtocol):
             metrics: List of metrics to track. Supported values: [HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
             duration: Automatically stop the collection after `duration` seconds
             sample_ratio: Commands are sampled with probability 1/ratio (1 means no sampling)
-            slots: Only track keys on the specified hash slots
+            slots: Only track keys on the specified hash slots; an empty list is
+                treated as not given
 
         For more information, see https://redis.io/commands/hotkeys-start
         """
@@ -2428,7 +2429,7 @@ class ManagementCommands(CommandsProtocol):
             args.extend(["SAMPLE", sample_ratio])
 
         # Add optional SLOTS
-        if slots is not None:
+        if slots:
             args.append("SLOTS")
             args.append(len(slots))
             args.extend(slots)
@@ -2470,22 +2471,23 @@ class ManagementCommands(CommandsProtocol):
     @overload
     def hotkeys_get(
         self: SyncClientProtocol, **kwargs
-    ) -> list[dict[str | bytes, Any]]: ...
+    ) -> list[dict[str | bytes, Any]] | None: ...
 
     @overload
     def hotkeys_get(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[dict[str | bytes, Any]]]: ...
+    ) -> Awaitable[list[dict[str | bytes, Any]] | None]: ...
 
     def hotkeys_get(
         self, **kwargs
     ) -> Union[
-        Awaitable[list[dict[str | bytes, Any]]],
-        list[dict[str | bytes, Any]],
+        Awaitable[list[dict[str | bytes, Any]] | None],
+        list[dict[str | bytes, Any]] | None,
     ]:
         """
         Retrieve the result of the ongoing collection session (if any),
         or the last collection session (if any).
+        Returns None if there is no collection session.
 
         HOTKEYS GET response is wrapped in an array for aggregation support.
         Each node returns a single-element array, allowing multiple node

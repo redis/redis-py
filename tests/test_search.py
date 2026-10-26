@@ -3359,6 +3359,50 @@ class TestSearchWithJsonIndex(SearchTestsBase):
 class TestProfile(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
+    @pytest.mark.fixed_client
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("6.3.0")
+    @pytest.mark.parametrize(
+        "protocol,legacy_responses",
+        [(None, True), (None, False), (2, True), (2, False), (3, False)],
+    )
+    @pytest.mark.parametrize("limited", [False, True])
+    @pytest.mark.parametrize("with_scores", [False, True])
+    def test_profile_field_encodings(
+        self, request, stack_url, protocol, legacy_responses, limited, with_scores
+    ):
+        options = {"decode_responses": False, "legacy_responses": legacy_responses}
+        if protocol is not None:
+            options["protocol"] = protocol
+        client = _get_client(redis.Redis, request, from_url=stack_url, **options)
+        client.flushdb()
+        client.ft().create_index((TextField("title"),))
+        binary = b"\x00\x01\x82\xff"
+        client.hset(
+            "doc:1", mapping={"title": "hello", "vector": binary, "label": b"caf\xe9"}
+        )
+        self.waitForIndex(client, "idx")
+        query = (
+            Query("hello")
+            .return_field("vector", as_field="embedding", decode_field=False)
+            .return_field("label", encoding="latin-1")
+            .return_field("title")
+        )
+        if with_scores:
+            query.with_scores()
+
+        result, profile = client.ft().profile(query, limited=limited)
+
+        assert result.total == 1
+        assert result.docs[0].embedding == binary
+        assert result.docs[0].label == "café"
+        assert result.docs[0].title == "hello"
+        if with_scores:
+            assert isinstance(result.docs[0].score, float)
+        assert profile.info
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     @skip_if_server_version_gte("7.9.0")
     @skip_if_server_version_lt("6.3.0")
@@ -6385,7 +6429,8 @@ class TestHybridSearch(SearchTestsBase):
             assert res["warnings"] == []
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4")
+    @skip_if_server_version_gte("8.11")
     def test_hybrid_search_query_with_cursor(self, client):
         # Create index and add data
         self._create_hybrid_search_index(client)

@@ -1425,6 +1425,13 @@ class TestRedisCommands:
             )
 
     @pytest.mark.onlynoncluster
+    def test_hotkeys_start_empty_slots_omits_slots(self, r):
+        """Test HOTKEYS START does not send SLOTS for an empty slots list"""
+        with mock.patch.object(r, "execute_command", return_value=b"OK") as cmd:
+            r.hotkeys_start(metrics=[HotkeysMetricsTypes.CPU], slots=[])
+        cmd.assert_called_once_with("HOTKEYS", "START", "METRICS", 1, "CPU")
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
     @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_parameters(self, r):
@@ -1491,15 +1498,21 @@ class TestRedisCommands:
         result = r.hotkeys_reset()
         assert result == b"OK"
 
-        # Try to get results after reset - should fail or return empty
+        # No session exists after reset
+        assert r.hotkeys_get() is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
+    def test_hotkeys_get_no_session(self, r):
+        """Test HOTKEYS GET when there is no collection session"""
         try:
-            result_after = r.hotkeys_get()
-            # If it doesn't fail, verify the data is cleared
-            # The response might indicate no session exists
-            assert result_after != result_before
+            r.hotkeys_stop()
         except Exception:
-            # Expected - no session exists after reset
             pass
+        r.hotkeys_reset()
+
+        assert r.hotkeys_get() is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
