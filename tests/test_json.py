@@ -1694,6 +1694,25 @@ def test_set_file_reads_utf8(tmp_path, monkeypatch, encoding):
     assert captured == [obj]
 
 
+@pytest.mark.fixed_client
+def test_set_path_skips_non_utf8_file(tmp_path, monkeypatch):
+    # set_file reads bytes, so a file that isn't UTF-8/16/32 raises
+    # UnicodeDecodeError. set_path must record it as failed and keep going.
+    # set is stubbed so this runs without a server.
+    import json
+
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    bad = tmp_path / "bad.json"
+    bad.write_bytes(b"\x80\x81 not utf-8")
+
+    json_client = Redis().json()
+    monkeypatch.setattr(json_client, "set", lambda *args, **kwargs: True)
+
+    result = json_client.set_path(Path.root_path(), str(tmp_path))
+    assert result == {str(good): True, str(bad): False}
+
+
 @pytest.mark.redismod
 def test_set_path(client):
     import json

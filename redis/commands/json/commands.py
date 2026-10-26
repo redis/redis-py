@@ -723,7 +723,7 @@ class JSONCommands:
                         fpha=fpha,
                     )
                     set_files_result[file_path] = True
-                except JSONDecodeError:
+                except (JSONDecodeError, UnicodeDecodeError):
                     set_files_result[file_path] = False
 
         return set_files_result
