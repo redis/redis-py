@@ -1656,7 +1656,7 @@ class PubSub:
         number or None to wait indefinitely.
         """
         response = await self.parse_response(block=(timeout is None), timeout=timeout)
-        if response:
+        if response is not None:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
@@ -1682,6 +1682,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
