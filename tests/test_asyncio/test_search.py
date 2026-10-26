@@ -2616,13 +2616,15 @@ class TestPipeline(AsyncSearchTestsBase):
         await decoded_r.ft().create_index((TextField("txt"),))
         await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
         await decoded_r.ft().synupdate("id1", False, "foo", "bar")
+        await decoded_r.ft().sugadd("ac", Suggestion("hello"))
         p = decoded_r.ft().pipeline()
         await p.info()
         await p.aggregate(aggregations.AggregateRequest("*"))
         p.profile(Query("foo"))
         await p.spellcheck("fo")
         p.syndump()
-        assert len(await p.execute()) == 5
+        await p.sugget("ac", "he")
+        assert len(await p.execute()) == 6
 
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
@@ -4412,7 +4414,10 @@ async def _queue_parsed_commands(ft):
         ft.profile(Query("foo")),
         ft.spellcheck("foo"),
         ft.config_get("TIMEOUT"),
+        ft.config_set("TIMEOUT", "100"),
         ft.syndump(),
+        ft.sugget("ac", "he"),
+        ft.sugget("ac", "he", with_scores=True),
     ]
     # ``profile`` and ``syndump`` are inherited from the sync commands.
     return [await res if asyncio.iscoroutine(res) else res for res in queued]

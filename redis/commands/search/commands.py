@@ -1638,6 +1638,8 @@ class SearchCommands:
         """  # noqa
         cmd = [CONFIG_CMD, "SET", option, value]
         raw = self.execute_command(*cmd)
+        if isinstance(raw, _PIPELINE_TYPES):
+            return raw
         return raw == "OK"
 
     @deprecated_function(
@@ -1816,6 +1818,8 @@ class SearchCommands:
             args.append(WITHPAYLOADS)
 
         res = self.execute_command(*args)
+        if isinstance(res, _PIPELINE_TYPES):
+            return res
         results = []
         if not res:
             return results
@@ -2073,6 +2077,8 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         cmd = [CONFIG_CMD, "SET", option, value]
         raw = await self.execute_command(*cmd)
+        if isinstance(raw, _PIPELINE_TYPES):
+            return raw
         return raw == "OK"
 
     @deprecated_function(
@@ -2188,6 +2194,8 @@ class AsyncSearchCommands(SearchCommands):
             args.append(WITHPAYLOADS)
 
         ret = await self.execute_command(*args)
+        if isinstance(ret, _PIPELINE_TYPES):
+            return ret
         results = []
         if not ret:
             return results

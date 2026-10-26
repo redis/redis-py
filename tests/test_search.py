@@ -4056,13 +4056,15 @@ class TestPipeline(SearchTestsBase):
         client.ft().create_index((TextField("txt"),))
         client.hset("doc1", mapping={"txt": "foo bar"})
         client.ft().synupdate("id1", False, "foo", "bar")
+        client.ft().sugadd("ac", Suggestion("hello"))
         p = client.ft().pipeline()
         p.info()
         p.aggregate(aggregations.AggregateRequest("*"))
         p.profile(Query("foo"))
         p.spellcheck("fo")
         p.syndump()
-        assert len(p.execute()) == 5
+        p.sugget("ac", "he")
+        assert len(p.execute()) == 6
 
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
@@ -6688,5 +6690,8 @@ def _queue_parsed_commands(ft):
         ft.profile(Query("foo")),
         ft.spellcheck("foo"),
         ft.config_get("TIMEOUT"),
+        ft.config_set("TIMEOUT", "100"),
         ft.syndump(),
+        ft.sugget("ac", "he"),
+        ft.sugget("ac", "he", with_scores=True),
     ]
