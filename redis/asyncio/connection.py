@@ -3463,14 +3463,15 @@ class BlockingConnectionPool(ConnectionPool):
         serialize their pool mutations through ``self._lock`` so they cannot
         interleave with a MOVING notification handler that is currently
         rewriting pool state under the same lock. Outside of maintenance the
-        mutations skip the lock, since their critical sections are pure-Python
-        and already atomic under asyncio's single-threaded scheduling.
+        mutations also wait for other pool operations, such as reauthentication,
+        that hold the lock. When the lock is free they can skip acquiring it,
+        since their critical sections do not suspend the current task.
         """
         self._in_maintenance = in_maintenance
 
     @contextlib.asynccontextmanager
     async def _maybe_pool_lock(self) -> AsyncIterator[None]:
-        if self._in_maintenance:
+        if self._in_maintenance or self._lock.locked():
             async with self._lock:
                 yield
         else:
