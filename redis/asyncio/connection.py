@@ -3345,19 +3345,32 @@ class ConnectionPool(
             conn.retry = retry
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         async with self._lock:
             for conn in self._available_connections:
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
