@@ -2268,6 +2268,11 @@ class AsyncMaintNotificationsAbstractConnectionPool:
         if self._maint_notifications_pool_handler is not None:
             await self._maint_notifications_pool_handler.cancel_scheduled_tasks()
 
+    def _on_reuse(self) -> None:
+        """Hook invoked when a connection is requested from the pool."""
+        if self._maint_notifications_pool_handler is not None:
+            self._maint_notifications_pool_handler.reopen()
+
     @property
     @abstractmethod
     def connection_kwargs(self) -> dict[str, Any]:
@@ -3155,6 +3160,7 @@ class ConnectionPool(
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Get a connected connection from the pool"""
+        self._on_reuse()
         # Track connection count before to detect if a new connection is created
         async with self._lock:
             connections_before = len(self._available_connections) + len(
@@ -3483,6 +3489,7 @@ class BlockingConnectionPool(ConnectionPool):
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
+        self._on_reuse()
         # Start timing for wait time observability
         start_time_acquired = time.monotonic()
 

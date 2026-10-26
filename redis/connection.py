@@ -3312,6 +3312,20 @@ class MaintNotificationsAbstractConnectionPool:
         if handler is not None:
             handler.cancel_scheduled_tasks()
 
+    def _on_reuse(self) -> None:
+        """Hook invoked when a connection is requested from the pool."""
+        handler = getattr(self, "_maint_notifications_pool_handler", None)
+        if handler is not None:
+            handler.reopen()
+
+    def _on_reset_after_fork(self) -> None:
+        """Hook invoked by ``reset()``; acts only in a forked child process."""
+        handler = getattr(self, "_maint_notifications_pool_handler", None)
+        # reset() also runs from __init__, where there is no pid yet
+        pid = getattr(self, "pid", None)
+        if handler is not None and pid is not None and pid != os.getpid():
+            handler.reset_after_fork()
+
     @property
     @abstractmethod
     def connection_kwargs(self) -> Dict[str, Any]:
@@ -4060,6 +4074,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._available_connections = []
         self._in_use_connections = set()
 
+        self._on_reset_after_fork()
+
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
         # can call _checkpid() which compares self.pid and os.getpid() without
@@ -4157,6 +4173,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         # Start timing for observability
         self._checkpid()
+        self._on_reuse()
         is_created = False
 
         with self._lock:
@@ -4347,6 +4364,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
+        # A forked child must not touch the handler state inherited from the
+        # parent: reset it first (the lock may be held by a parent thread).
+        self._checkpid()
         try:
             self._on_close()
         finally:
@@ -4543,6 +4563,8 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
+        self._on_reset_after_fork()
+
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
         # can call _checkpid() which compares self.pid and os.getpid() without
@@ -4632,6 +4654,7 @@ class BlockingConnectionPool(ConnectionPool):
         start_time_acquired = time.monotonic()
         # Make sure we haven't changed process.
         self._checkpid()
+        self._on_reuse()
         is_created = False
 
         # Try and get a connection from the pool. If one isn't available within
