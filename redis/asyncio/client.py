@@ -1738,8 +1738,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -2186,13 +2186,20 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         )
 
         response = []
-        for args, options in commands:
-            try:
-                response.append(
-                    await self.parse_response(connection, args[0], **options)
-                )
-            except ResponseError as e:
-                response.append(e)
+        try:
+            for args, options in commands:
+                try:
+                    response.append(
+                        await self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    response.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            await connection.disconnect(nowait=True)
+            raise
 
         # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
         # raised regardless of raise_on_error as it was before folding -- only now

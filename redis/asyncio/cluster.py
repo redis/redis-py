@@ -2298,11 +2298,18 @@ class ClusterNode:
         The connections remain in the pool and will reconnect on next use.
         """
         if self._free:
-            # Take a snapshot to avoid issues if _free changes during await
-            await asyncio.gather(
-                *(connection.disconnect() for connection in tuple(self._free)),
-                return_exceptions=True,
-            )
+            # Take the connections out of _free while they close, so
+            # acquire_connection cannot hand one out mid-disconnect, and put
+            # them back behind any connection released meanwhile.
+            connections = tuple(self._free)
+            self._free.clear()
+            try:
+                await asyncio.gather(
+                    *(connection.disconnect() for connection in connections),
+                    return_exceptions=True,
+                )
+            finally:
+                self._free.extend(connections)
 
     def _mark_free_connections_for_reconnect_on_error(self, error: Exception) -> bool:
         """
@@ -2483,6 +2490,7 @@ class ClusterNode:
                 self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         tmp_queue = collections.deque()
         try:
             while self._free:
@@ -2495,20 +2503,32 @@ class ClusterNode:
                     # a socket here only to authenticate could raise and stop
                     # the token renewal
                     continue
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
@@ -5237,7 +5257,10 @@ class ClusterPubSub(PubSub):
             # intentionally runs outside the lock so reconciliation is not
             # stalled by long polls.
             async with self._shard_state_lock:
-                if message["channel"] in self.pending_unsubscribe_shard_channels:
+                if (
+                    message["channel"] in self.pending_unsubscribe_shard_channels
+                    and message["channel"] not in pubsub.shard_channels
+                ):
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
                     self.shard_channels.pop(message["channel"], None)
@@ -5369,8 +5392,22 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                old_name = self._shard_channel_to_node.get(channel)
                 if channel in self.pending_unsubscribe_shard_channels:
-                    continue
+                    # A reconnect clears the per-node pending set and replays
+                    # SSUBSCRIBE, so a channel the node still holds without a
+                    # pending unsubscribe is subscribed again, not leaving, and
+                    # its cluster-level entry is stale. Check the pending set
+                    # first: handle_message drops the channel before its
+                    # pending entry.
+                    old_pubsub = self.node_pubsub_mapping.get(old_name)
+                    if (
+                        old_pubsub is None
+                        or channel in old_pubsub.pending_unsubscribe_shard_channels
+                        or channel not in old_pubsub.shard_channels
+                    ):
+                        continue
+                    self.pending_unsubscribe_shard_channels.discard(channel)
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
@@ -5382,7 +5419,6 @@ class ClusterPubSub(PubSub):
                     # slots-cache change notification.
                     uncovered.append(channel)
                     continue
-                old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
                     owner = self.node_pubsub_mapping.get(new_node.name)
                     if owner is not None and channel in owner.shard_channels:

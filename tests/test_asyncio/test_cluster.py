@@ -6312,6 +6312,26 @@ class TestNodesManager:
         assert "Next token renewal scheduled" in caplog.text
 
     @staticmethod
+    def _streaming_credential_provider():
+        class FakeStreamingCredentialProvider(StreamingCredentialProvider):
+            def __init__(self) -> None:
+                self.on_next_callback = None
+
+            def get_credentials(self):
+                return "default", "token"
+
+            def on_next(self, callback) -> None:
+                self.on_next_callback = callback
+
+            def on_error(self, callback) -> None:
+                pass
+
+            def is_streaming(self) -> bool:
+                return False
+
+        return FakeStreamingCredentialProvider()
+
+    @staticmethod
     def _re_auth_connection(
         marked: bool, error: Optional[Exception] = None, connected: bool = True
     ):
@@ -6369,6 +6389,28 @@ class TestNodesManager:
         with pytest.raises(ConnectionError):
             await node.re_auth_callback(mock.Mock())
 
+        other.send_command.assert_awaited_once()
+        assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_stops_at_authentication_error(self) -> None:
+        """
+        A rejected token is rejected by every connection, so the first
+        AuthenticationError stops the re-authentication. Every connection
+        stays in the free queue.
+        """
+        node = ClusterNode(default_host, 7000)
+        failing = self._re_auth_connection(False)
+        failing.retry = Retry(NoBackoff(), 3)
+        failing.read_response.side_effect = AuthenticationError("expired")
+        other = self._re_auth_connection(False)
+        node._free.extend([failing, other])
+
+        with pytest.raises(AuthenticationError, match="expired"):
+            await node.re_auth_callback(mock.Mock())
+
+        failing.read_response.assert_awaited_once()
+        other.send_command.assert_not_awaited()
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
@@ -6380,23 +6422,6 @@ class TestNodesManager:
         re-authenticated neither breaks the loop nor re-authenticates the
         removed node.
         """
-
-        class FakeStreamingCredentialProvider(StreamingCredentialProvider):
-            def __init__(self) -> None:
-                self.on_next_callback = None
-
-            def get_credentials(self):
-                return "default", "token"
-
-            def on_next(self, callback) -> None:
-                self.on_next_callback = callback
-
-            def on_error(self, callback) -> None:
-                pass
-
-            def is_streaming(self) -> bool:
-                return False
-
         re_authed = []
         nodes: Dict[str, Any] = {}
 
@@ -6415,7 +6440,7 @@ class TestNodesManager:
         for name in ("a", "b", "c"):
             nodes[name] = FakeNode(name)
 
-        credential_provider = FakeStreamingCredentialProvider()
+        credential_provider = self._streaming_credential_provider()
         RegisterReAuthForAsyncClusterNodes().listen(
             AfterAsyncClusterInstantiationEvent(nodes, credential_provider)
         )
@@ -6423,6 +6448,35 @@ class TestNodesManager:
         await credential_provider.on_next_callback(Mock())
 
         assert re_authed == ["a", "b"]
+
+    @pytest.mark.fixed_client
+    async def test_failed_re_auth_does_not_stop_the_other_nodes(self) -> None:
+        """
+        A node whose re-authentication raises does not stop the remaining nodes
+        from being re-authenticated. The first error is raised afterwards.
+        """
+        re_authed = []
+
+        class FakeNode:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def re_auth_callback(self, token) -> None:
+                re_authed.append(self.name)
+                if self.name != "c":
+                    raise AuthenticationError(self.name)
+
+        nodes = {name: FakeNode(name) for name in ("a", "b", "c")}
+
+        credential_provider = self._streaming_credential_provider()
+        RegisterReAuthForAsyncClusterNodes().listen(
+            AfterAsyncClusterInstantiationEvent(nodes, credential_provider)
+        )
+
+        with pytest.raises(AuthenticationError, match="a"):
+            await credential_provider.on_next_callback(Mock())
+
+        assert re_authed == ["a", "b", "c"]
 
     @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
@@ -6743,6 +6797,44 @@ class TestClusterNodeConnectionHandling:
 
         # Should not raise
         await node.disconnect_free_connections()
+
+    async def test_disconnect_free_connections_not_acquirable_while_closing(
+        self,
+    ) -> None:
+        """
+        Test that a connection being disconnected cannot be acquired until its
+        disconnect completes, and that it is back in _free afterwards.
+        """
+        node = ClusterNode(default_host, 7000, max_connections=2)
+        closing = mock.AsyncMock(spec=Connection)
+        released = mock.AsyncMock(spec=Connection)
+        node._connections = [closing, released]
+        node._free.append(closing)
+
+        disconnect_started = asyncio.Event()
+        finish_disconnect = asyncio.Event()
+
+        async def slow_disconnect() -> None:
+            disconnect_started.set()
+            await finish_disconnect.wait()
+
+        closing.disconnect.side_effect = slow_disconnect
+
+        task = asyncio.create_task(node.disconnect_free_connections())
+        await disconnect_started.wait()
+
+        # The node is at max_connections and the only free one is closing
+        with pytest.raises(MaxConnectionsError):
+            node.acquire_connection()
+        # A connection released meanwhile is acquirable
+        node._free.append(released)
+        assert node.acquire_connection() is released
+        node._free.append(released)
+
+        finish_disconnect.set()
+        await task
+
+        assert list(node._free) == [released, closing]
 
     async def test_execute_command_reuses_closed_remarked_connection_inline(
         self,

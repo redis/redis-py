@@ -109,6 +109,13 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
         ext = responder_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
         if ext is None or x509.oid.ExtendedKeyUsageOID.OCSP_SIGNING not in ext.value:
             raise ConnectionError("delegate not authorized for ocsp signing")
+        # A delegate normally carries id-pkix-ocsp-nocheck, so it is never
+        # checked for revocation and its validity period is all that bounds
+        # how long its key is trusted.
+        if not (
+            responder_cert.not_valid_before <= now <= responder_cert.not_valid_after
+        ):
+            raise ConnectionError("delegate certificate is outside its validity period")
         cert_to_validate = responder_cert
 
     if validate:
