@@ -84,6 +84,21 @@ class CSCReason(Enum):
     INVALIDATION = "invalidation"
 
 
+class CSCRefreshResult(Enum):
+    """
+    The outcome of one refresh after an invalidation.
+
+    Each value names its own counter, ``redis.client.csc.refresh.<value>``, rather than an
+    attribute value: the counter names are shared by every Redis client.
+    """
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    DISCARDED = "discarded"
+    REJECTED = "rejected"
+    RATE_LIMITED = "rate_limited"
+
+
 class GeoFailoverReason(Enum):
     AUTOMATIC = "automatic"
     MANUAL = "manual"

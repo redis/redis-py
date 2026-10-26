@@ -2,8 +2,11 @@ import logging
 import time
 from time import sleep
 from typing import Callable
+from unittest.mock import MagicMock
 
+from redis.cache import CacheConfig, CacheKey, DefaultCache
 from redis.commands.metadata import RequestPolicy, ResponsePolicy
+from redis.observability.attributes import CSCRefreshResult
 
 
 def wait_for_condition(
@@ -53,6 +56,62 @@ def wait_for_condition(
             raise AssertionError(error_message)
         attempt += 1
         sleep(check_interval)
+
+
+def get_cache_key(*keys) -> CacheKey:
+    """The cache key of a ``GET`` - or, given several keys, a ``GET`` naming them all."""
+    return CacheKey(command="GET", redis_keys=keys, redis_args=("GET", *keys))
+
+
+def wait_for_refreshes(refresher, error_message="refreshes never completed") -> None:
+    """
+    Wait until a ``CacheRefresher`` has nothing pending.
+
+    An invalidation submits its keys inside the read that picked it up, so by the time that
+    read returns they are pending. Empty means every accepted refresh has finished or was
+    cancelled; callers assert which by what the cache holds.
+    """
+    wait_for_condition(
+        lambda: not refresher._pending, timeout=2, error_message=error_message
+    )
+
+
+class FakeRefresherPool:
+    """
+    The pool surface a ``CacheRefresher`` uses, recording what it is asked for.
+
+    Hands out ``connection``: a mock by default, whose refresh round trip can be held or
+    failed through its ``send_command`` and ``read_response``, or a real proxy a test
+    assigns.
+    """
+
+    def __init__(self, cache=None):
+        self.cache = cache if cache is not None else DefaultCache(CacheConfig())
+        self.connection = MagicMock()
+        self.connection._refresh_entry.side_effect = self._refresh_entry
+        # What the mock connection reports for a refresh that did not raise.
+        self.refresh_result = CSCRefreshResult.SUCCESS
+        self.get_connection_error = None
+        # Every connection in use and the pool at its limit.
+        self.full = False
+        self.released = []
+
+    def _get_connection(self, if_available=False):
+        assert if_available, "a refresh must never wait for a pool connection"
+        if self.full:
+            return None
+        if self.get_connection_error is not None:
+            error, self.get_connection_error = self.get_connection_error, None
+            raise error
+        return self.connection
+
+    def release(self, connection):
+        self.released.append(connection)
+
+    def _refresh_entry(self, cache_key, is_current=None):
+        self.connection.send_command(*cache_key.redis_args, keys=cache_key.redis_keys)
+        self.connection.read_response()
+        return self.refresh_result
 
 
 def get_expected_command_policies(changes_in_defaults={}):
