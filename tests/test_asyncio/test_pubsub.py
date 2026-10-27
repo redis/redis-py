@@ -2583,6 +2583,7 @@ class TestClusterPubSubSlotMigration:
         new_ps = self._make_node_pubsub()
         pubsub.node_pubsub_mapping[old_node.name] = old_ps
         pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        old_ps.pending_unsubscribe_shard_channels = {channel}
         pubsub.shard_channels = {channel: None}
         pubsub.pending_unsubscribe_shard_channels = {channel}
         pubsub._shard_channel_to_node = {channel: old_node.name}
@@ -2607,7 +2608,7 @@ class TestClusterPubSubSlotMigration:
         pubsub.cluster._initialize = True
         pubsub.cluster.get_node_from_key.return_value = new_node
         old_ps.sunsubscribe.side_effect = lambda *_: (
-            pubsub.pending_unsubscribe_shard_channels.add(channel)
+            old_ps.pending_unsubscribe_shard_channels.add(channel)
         )
         reconcile_task = None
 
@@ -2625,6 +2626,118 @@ class TestClusterPubSubSlotMigration:
 
         new_ps.ssubscribe.assert_not_awaited()
         assert channel in pubsub.pending_unsubscribe_shard_channels
+
+    async def test_reinitialize_moves_channel_after_reconnect_drops_pending_unsubscribe(
+        self,
+    ):
+        """
+        A reconnect between ``sunsubscribe`` and its confirmation clears the
+        per-node pending set and replays ``SSUBSCRIBE``, but the cluster-level
+        set kept the channel. Reconciliation skipped it, so it stayed on the
+        old owner after a slot migration.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        # on_connect cleared the per-node pending set and re-subscribed.
+        old_ps = self._make_node_pubsub({channel: None})
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        await pubsub.reinitialize_shard_subscriptions()
+
+        old_ps.sunsubscribe.assert_awaited_once_with(channel)
+        new_ps.ssubscribe.assert_awaited_once_with(channel)
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert channel not in pubsub.pending_unsubscribe_shard_channels
+
+    async def test_reinitialize_retries_revived_channel_after_failed_attach(self):
+        """
+        Moving a channel a reconnect subscribed again sends ``SUNSUBSCRIBE`` to
+        the old node before it attaches to the new owner. If the attach fails,
+        the stale cluster-level pending entry must not make the next pass skip
+        the channel as a user unsubscribe.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.sunsubscribe.side_effect = lambda *_: (
+            old_ps.pending_unsubscribe_shard_channels.add(channel)
+        )
+        new_ps = self._make_node_pubsub()
+        new_ps.ssubscribe.side_effect = [ConnectionError("new owner is down"), None]
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        with pytest.raises(ConnectionError):
+            await pubsub.reinitialize_shard_subscriptions()
+        await pubsub.reinitialize_shard_subscriptions()
+
+        assert new_ps.ssubscribe.await_count == 2
+        assert pubsub._shard_channel_to_node[channel] == new_node.name
+        assert channel not in pubsub.pending_unsubscribe_shard_channels
+
+    async def test_reinitialize_skips_channel_whose_unsubscribe_the_node_confirmed(
+        self,
+    ):
+        """
+        The per-node pubsub drops the channel when it reads the ``SUNSUBSCRIBE``
+        confirmation, before ``get_sharded_message`` updates the cluster-level
+        state. A pass running in between must not subscribe it again.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        new_node = self._make_node("127.0.0.1:7001")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub()
+        new_ps = self._make_node_pubsub()
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.node_pubsub_mapping[new_node.name] = new_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+        pubsub.cluster.get_node_from_key.return_value = new_node
+
+        await pubsub.reinitialize_shard_subscriptions()
+
+        new_ps.ssubscribe.assert_not_awaited()
+        assert channel in pubsub.pending_unsubscribe_shard_channels
+
+    async def test_sunsubscribe_keeps_tracking_for_channel_resubscribed_on_reconnect(
+        self,
+    ):
+        """
+        A ``sunsubscribe`` for a channel the per-node pubsub still holds is not
+        the confirmation of a user unsubscribe, even when a reconnect left the
+        channel in the cluster-level pending set, so the channel stays tracked.
+        """
+        pubsub = self._make_cluster_pubsub()
+        old_node = self._make_node("127.0.0.1:7000")
+        channel = b"foo"
+        old_ps = self._make_node_pubsub({channel: None})
+        old_ps.get_message.return_value = {"type": "sunsubscribe", "channel": channel}
+        pubsub.node_pubsub_mapping[old_node.name] = old_ps
+        pubsub.shard_channels = {channel: None}
+        pubsub.pending_unsubscribe_shard_channels = {channel}
+        pubsub._shard_channel_to_node = {channel: old_node.name}
+
+        message = await pubsub.get_sharded_message(target_node=old_node)
+
+        assert message is not None
+        assert channel in pubsub.shard_channels
+        assert pubsub._shard_channel_to_node[channel] == old_node.name
 
     async def test_reinitialize_reattaches_when_owner_lost_the_subscription(self):
         """
@@ -2880,7 +2993,8 @@ class TestClusterPubSubSlotMigration:
             finished.set()
 
         pubsub.shard_channels = {b"foo": None}
-        pubsub.cluster.nodes_manager.initialize = _refresh
+        # The repair runs the refresh through the cluster client
+        pubsub.cluster.initialize = _refresh
         pubsub._schedule_topology_repair()
         (task,) = list(pubsub._topology_repair_tasks)
         await started.wait()
@@ -3620,12 +3734,15 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        pubsub.cluster.nodes_manager.initialize = AsyncMock()
+        # The repair runs the refresh through the cluster client
+        pubsub.cluster.initialize = AsyncMock()
 
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 1
+        assert pubsub.cluster.initialize.await_count == 1
+        # Asked for on the client, so a failed refresh stays asked for
+        pubsub.cluster._request_refresh.assert_called_once_with()
         assert pubsub._unreachable_nodes == {"127.0.0.1:7000"}
 
         # Second failure inside the throttle window must not refresh again.
@@ -3633,7 +3750,7 @@ class TestClusterPubSubSlotMigration:
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 1
+        assert pubsub.cluster.initialize.await_count == 1
 
         # Once the window expires the next failure asks again.
         pubsub._next_topology_repair = (
@@ -3643,7 +3760,7 @@ class TestClusterPubSubSlotMigration:
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
         await asyncio.gather(*pubsub._topology_repair_tasks, return_exceptions=True)
-        assert pubsub.cluster.nodes_manager.initialize.await_count == 2
+        assert pubsub.cluster.initialize.await_count == 2
 
     async def test_failed_poll_does_not_refresh_without_shard_channels(self):
         """Nothing to reconcile means nothing to refresh the topology for."""
@@ -3652,12 +3769,13 @@ class TestClusterPubSubSlotMigration:
         bad.get_message.side_effect = ConnectionError("node is gone")
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
-        pubsub.cluster.nodes_manager.initialize = AsyncMock()
+        pubsub.cluster.initialize = AsyncMock()
 
         with pytest.raises(ConnectionError):
             await pubsub._sharded_message_generator(timeout=0.01)
 
-        pubsub.cluster.nodes_manager.initialize.assert_not_awaited()
+        pubsub.cluster.initialize.assert_not_awaited()
+        assert pubsub.cluster._initialize is False
 
     async def test_successful_poll_clears_the_unreachable_mark(self):
         """A node that answers again must not keep the migration fast path."""

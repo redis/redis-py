@@ -1219,6 +1219,27 @@ def test_format_error_message(conn, error, expected_message):
 
 
 @pytest.mark.fixed_client
+def test_ssl_handshake_uses_socket_connect_timeout():
+    conn = SSLConnection(
+        socket_timeout=0.05, socket_connect_timeout=4, ssl_cert_reqs="none"
+    )
+    handshake_timeouts = []
+    ssl_sock = MagicMock()
+
+    def wrap_socket(context, sock, **kwargs):
+        handshake_timeouts.append(sock.gettimeout())
+        return ssl_sock
+
+    with socket.socket() as sock:
+        sock.settimeout(conn.socket_timeout)
+        with patch.object(ssl.SSLContext, "wrap_socket", wrap_socket):
+            assert conn._wrap_socket_with_ssl(sock) is ssl_sock
+
+    assert handshake_timeouts == [4]
+    ssl_sock.settimeout.assert_called_once_with(0.05)
+
+
+@pytest.mark.fixed_client
 def test_network_connection_failure():
     # Match only the stable part of the error message across OS
     exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
@@ -4194,6 +4215,32 @@ def _net(calls):
 
 
 @pytest.mark.fixed_client
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@patch("redis.connection.record_connection_count")
+def test_same_process_pool_reset_balances_connection_counts(mock_rec, pool_class):
+    pool = pool_class(connection_class=_DummyConnection, max_connections=2)
+    pool_name = get_pool_name(pool)
+    idle = pool.get_connection()
+    pool.get_connection()
+    pool.release(idle)
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (1, 1)
+
+    pool.reset()
+    assert get_pool_name(pool) == pool_name
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+    pool.reset()
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+    connection = pool.get_connection()
+    pool.release(connection)
+    pool_ref = weakref.ref(pool)
+    del pool
+    gc.collect()
+    assert pool_ref() is None
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+
+@pytest.mark.fixed_client
 class TestConnectionPoolMetricCount:
     """Tests for db.client.connection.count UpDownCounter accuracy.
 
@@ -4246,14 +4293,8 @@ class TestConnectionPoolMetricCount:
         conn = pool.get_connection()
         pool.release(conn)
 
-        # Simulate destruction (what __del__ / reset does)
-        idle_count = len(pool._available_connections)
-        if idle_count:
-            mock_rec(
-                pool_name=pn,
-                connection_state=ConnectionState.IDLE,
-                counter=-idle_count,
-            )
+        # Destroy the pool's connections through the pool's own teardown path.
+        pool.reset()
 
         calls = _pool_metric_calls(mock_rec, pn)
         idle_net, used_net = _net(calls)
@@ -4263,8 +4304,8 @@ class TestConnectionPoolMetricCount:
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
         """release() of a connection the pool no longer owns (e.g. inherited by
-        a forked child) must not record connection.count. Fork-time accounting
-        is owned by reset()/__del__; recording here would double-count."""
+        a forked child) must not record connection.count. Accounting for inherited
+        connections belongs to the parent process."""
         pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
 
         conn = pool.get_connection()
@@ -4322,8 +4363,8 @@ class TestBlockingConnectionPoolMetricCount:
 
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
-        """Unowned (inherited-across-fork) release must not record; fork-time
-        accounting is owned by reset()/__del__."""
+        """Unowned (inherited-across-fork) release must not record; accounting
+        for inherited connections belongs to the parent process."""
         pool = self._pool()
         mock_rec.reset_mock()
 

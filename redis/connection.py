@@ -1,7 +1,9 @@
 import copy
 import functools
+import ipaddress
 import logging
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -2976,7 +2978,9 @@ class SSLConnection(Connection):
                 "- not both."
             )
 
+        sock.settimeout(self.socket_connect_timeout)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
+        sslsock.settimeout(self.socket_timeout)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
@@ -2998,10 +3002,27 @@ class SSLConnection(Connection):
 
             #  need another socket
             con = OpenSSL.SSL.Connection(staple_ctx, socket.socket())
+            # Send the same SNI as sslsock so the probe is given the same
+            # certificate. ssl sends none for an IP address, so neither do we.
+            try:
+                ipaddress.ip_address(self.host)
+            except ValueError:
+                con.set_tlsext_host_name(self.host.encode())
             con.request_ocsp()
             con.connect((self.host, self.port))
             con.do_handshake()
             con.shutdown()
+
+            # The staple was validated on a second connection, so it only
+            # vouches for sslsock if both presented the same certificate.
+            staple_cert = OpenSSL.crypto.dump_certificate(
+                OpenSSL.crypto.FILETYPE_ASN1, con.get_peer_certificate()
+            )
+            if staple_cert != sslsock.getpeercert(True):
+                sslsock.close()
+                raise ConnectionError(
+                    "ocsp stapled certificate does not match the connection certificate"
+                )
             return sslsock
 
         # pure ocsp validation
@@ -3102,6 +3123,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_validate_ocsp": to_bool,
+    "ssl_validate_ocsp_stapled": to_bool,
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "ssl_min_version": int,
@@ -3283,6 +3306,12 @@ class MaintNotificationsAbstractConnectionPool:
         else:
             self._maint_notifications_pool_handler = None
             self._oss_cluster_maint_notifications_handler = None
+
+    def _on_close(self) -> None:
+        """Hook invoked from the pool's ``close()`` before the pool is shut down."""
+        handler = getattr(self, "_maint_notifications_pool_handler", None)
+        if handler is not None:
+            handler.cancel_scheduled_tasks()
 
     @property
     @abstractmethod
@@ -3944,8 +3973,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._lock = threading.RLock()
 
         # Generate unique pool ID for observability (matches go-redis behavior)
-        import secrets
-
         self._pool_id = secrets.token_hex(4)
 
         MaintNotificationsAbstractConnectionPool.__init__(
@@ -4000,10 +4027,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
+        is_fork = hasattr(self, "pid") and self.pid != os.getpid()
+        if is_fork:
+            # Inherited connections were counted by the parent, not this process.
+            self._pool_id = secrets.token_hex(4)
+
         # Record metrics for connections being removed before clearing
         # (only if attributes exist - they won't during __init__)
-        if hasattr(self, "_available_connections") and hasattr(
-            self, "_in_use_connections"
+        if (
+            not is_fork
+            and hasattr(self, "_available_connections")
+            and hasattr(self, "_in_use_connections")
         ):
             with self._lock:
                 idle_count = len(self._available_connections)
@@ -4041,6 +4075,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def __del__(self) -> None:
         """Clean up connection pool and record metrics when garbage collected."""
         try:
+            if getattr(self, "pid", None) != os.getpid():
+                return
             if not hasattr(self, "_available_connections") or not hasattr(
                 self, "_in_use_connections"
             ):
@@ -4279,7 +4315,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     # The connection was checked out by this process, so
                     # decrement USED, which was counted in get_connection().
                     # Connections inherited across a fork are skipped here,
-                    # their accounting is handled by reset()/__del__.
+                    # their accounting belongs to the parent process.
                     record_connection_count(
                         pool_name=get_pool_name(self),
                         connection_state=ConnectionState.USED,
@@ -4312,7 +4348,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
-        self.disconnect()
+        try:
+            self._on_close()
+        finally:
+            self.disconnect()
 
     def __enter__(self: _CP) -> _CP:
         return self
@@ -4328,19 +4367,32 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         with self._lock:
             for conn in self._available_connections:
-                conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if first_error is not None:
+            raise first_error
 
     def _get_pool_lock(self):
         return self._lock
@@ -4386,18 +4438,18 @@ class BlockingConnectionPool(ConnectionPool):
     """
     Thread-safe blocking connection pool::
 
-        >>> from redis.client import Redis
+        >>> from redis import Redis, BlockingConnectionPool
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default
-    :py:class:`~redis.ConnectionPool` implementation, in that,
+    :py:class:`~redis.connection.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple redis clients (safely across threads if required).
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a :py:class:`~redis.ConnectionError` (as the default
-    :py:class:`~redis.ConnectionPool` implementation does), it
+    raising a :py:class:`~redis.exceptions.MaxConnectionsError` (as the default
+    :py:class:`~redis.connection.ConnectionPool` implementation does), it
     makes the client wait ("blocks") for a specified number of seconds until
     a connection becomes available.
 
@@ -4435,6 +4487,11 @@ class BlockingConnectionPool(ConnectionPool):
         )
 
     def reset(self):
+        is_fork = hasattr(self, "pid") and self.pid != os.getpid()
+        if is_fork:
+            # Inherited connections were counted by the parent, not this process.
+            self._pool_id = secrets.token_hex(4)
+
         # Create and fill up a thread safe queue with ``None`` values.
         try:
             if self._in_maintenance:
@@ -4445,7 +4502,8 @@ class BlockingConnectionPool(ConnectionPool):
             # Note: Access pool.queue directly to avoid deadlock since we may
             # already hold self._lock (which is non-reentrant)
             if (
-                hasattr(self, "_connections")
+                not is_fork
+                and hasattr(self, "_connections")
                 and self._connections
                 and hasattr(self, "pool")
             ):
@@ -4500,6 +4558,8 @@ class BlockingConnectionPool(ConnectionPool):
     def __del__(self) -> None:
         """Clean up connection pool and record metrics when garbage collected."""
         try:
+            if getattr(self, "pid", None) != os.getpid():
+                return
             # Note: Access pool.queue directly to avoid potential deadlock
             # if GC runs while the lock is held by the same thread
             if (
@@ -4677,7 +4737,7 @@ class BlockingConnectionPool(ConnectionPool):
                 # rejects a connection checked out by this process, stop
                 # tracking it and decrement USED, which was counted in
                 # get_connection(). Connections inherited across a fork are
-                # skipped here, their accounting is handled by reset()/__del__.
+                # skipped here, their accounting belongs to the parent process.
                 if connection.pid == self.pid:
                     try:
                         self._connections.remove(connection)

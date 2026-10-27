@@ -2604,6 +2604,28 @@ class TestPipeline(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_redis_enterprise()
+    async def test_search_through_pipeline_ft_is_decoded(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("txt"),))
+        await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
+        p = decoded_r.pipeline()
+        await p.ft().search(Query("foo bar"))
+        res = await p.execute()
+        assert not _contains_bytes(res[0])
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist_through_pipeline_ft(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistpipeidx")
+        await index.create_index((TextField("txt"),))
+        await index.aliasadd("alias1")
+        p = decoded_r.pipeline()
+        await p.ft("aliaslistpipeidx").aliaslist()
+        res = await p.execute()
+        assert set(res[0]) == {"alias1"}
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     async def test_aliaslist_in_pipeline(self, decoded_r: redis.Redis):
         index = decoded_r.ft("aliaslistpipeidx")
@@ -4294,7 +4316,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["warnings"] == []
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4")
+    @skip_if_server_version_gte("8.11")
     async def test_hybrid_search_query_with_cursor(self, decoded_r):
         # Create index and add data
         await self._create_hybrid_search_index(decoded_r)
@@ -4344,3 +4367,16 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert len(vsim_res_from_cursor.rows) == 5
         elif expects_resp3_shape(decoded_r):
             assert len(vsim_res_from_cursor[0]["results"]) == 5
+
+
+def _contains_bytes(value):
+    """Whether a parsed reply still holds undecoded bytes anywhere."""
+    if isinstance(value, bytes):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_bytes(k) or _contains_bytes(v) for k, v in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_bytes(v) for v in value)
+    if hasattr(value, "__dict__"):
+        return _contains_bytes(vars(value))
+    return False
