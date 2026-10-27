@@ -1398,6 +1398,34 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
+    def test_topology_refresh_keeps_cached_entries(self, r):
+        """
+        The cache is shared by every node pool and is emptied whenever one of
+        its connections disconnects, so a refresh that keeps the topology must
+        not recycle any connection.
+        """
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        # The constructor disconnects the connections of the first CLUSTER
+        # SLOTS to enable maintenance notifications on them, and their first
+        # reconnect empties the cache. Use every node once first, so the refresh
+        # below meets only connections that are already set up.
+        r.ping(target_nodes=r.ALL_NODES)
+        r.set("foo", "bar")
+        assert r.get("foo") in [b"bar", "bar"]
+        key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        assert cache.get(key) is not None
+
+        r.nodes_manager.initialize()
+
+        assert cache.get(key) is not None
+        assert r.get("foo") in [b"bar", "bar"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": DefaultCache(CacheConfig(max_size=128))}],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
     def test_a_user_sent_client_tracking_or_reset_is_refused(self, r):
         # Every node connection of a cached cluster is a cache proxy, so the guard covers
         # the fan-out of ``client_tracking_off`` and the cluster pipeline as well.

@@ -955,6 +955,13 @@ class TestRedisCommands:
             )
 
     @pytest.mark.onlynoncluster
+    async def test_hotkeys_start_empty_slots_omits_slots(self, r: redis.Redis):
+        """Test HOTKEYS START does not send SLOTS for an empty slots list"""
+        with patch.object(r, "execute_command", AsyncMock(return_value=b"OK")) as cmd:
+            await r.hotkeys_start(metrics=[HotkeysMetricsTypes.CPU], slots=[])
+        cmd.assert_called_once_with("HOTKEYS", "START", "METRICS", 1, "CPU")
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
     @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_all_parameters(self, r: redis.Redis):
@@ -1021,15 +1028,21 @@ class TestRedisCommands:
         result = await r.hotkeys_reset()
         assert result == b"OK"
 
-        # Try to get results after reset - should fail or return empty
+        # No session exists after reset
+        assert await r.hotkeys_get() is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
+    async def test_hotkeys_get_no_session(self, r: redis.Redis):
+        """Test HOTKEYS GET when there is no collection session"""
         try:
-            result_after = await r.hotkeys_get()
-            # If it doesn't fail, verify the data is cleared
-            # The response might indicate no session exists
-            assert result_after != result_before
+            await r.hotkeys_stop()
         except Exception:
-            # Expected - no session exists after reset
             pass
+        await r.hotkeys_reset()
+
+        assert await r.hotkeys_get() is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
@@ -6686,8 +6699,7 @@ class TestRedisCommands:
             # If the following is not done, further Timout operations will fail,
             # because the timeout won't catch its Cancelled Error if the task
             # has a pending cancel.  Python documentation probably should reflect this.
-            if sys.version_info >= (3, 11):
-                asyncio.current_task().uncancel()
+            asyncio.current_task().uncancel()
             # if all is well, we can continue.  The following should not hang.
             await r.set("status", "down")
 
