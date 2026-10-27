@@ -1655,7 +1655,7 @@ class PubSub:
 
         response = self.parse_response(block=(timeout is None), timeout=timeout)
 
-        if response is not None:
+        if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
 

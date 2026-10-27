@@ -1656,7 +1656,7 @@ class PubSub:
         number or None to wait indefinitely.
         """
         response = await self.parse_response(block=(timeout is None), timeout=timeout)
-        if response is not None:
+        if response:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 

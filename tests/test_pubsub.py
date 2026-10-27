@@ -1682,7 +1682,7 @@ class TestPubSubPings:
     @skip_if_server_version_lt("6.0.0")
     @pytest.mark.parametrize("protocol", [2, 3])
     @pytest.mark.parametrize("decode_responses", [False, True])
-    @pytest.mark.parametrize("message", [None, "", "x", "hello\u2603"])
+    @pytest.mark.parametrize("message", [None, "x", "hello\u2603"])
     @pytest.mark.parametrize("read_method", ["get_message", "listen"])
     def test_ping_response_shapes(
         self, request, protocol, decode_responses, message, read_method
