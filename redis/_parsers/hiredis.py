@@ -17,6 +17,7 @@ from .base import (
     AsyncPushNotificationsParser,
     BaseParser,
     PushNotificationsParser,
+    async_timeout,
 )
 from .socket import (
     NONBLOCKING_EXCEPTION_ERROR_NUMBERS,
@@ -372,9 +373,21 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
     async def read_from_socket(self):
         # Each socket read is bounded by its own socket_timeout window (see
-        # AsyncBaseParser._read_timeout_context), matching the sync parser,
-        # where the OS socket timeout applies to every recv().
-        async with self._read_timeout_context():
+        # AsyncBaseParser._should_arm_read_timeout), matching the sync
+        # parser, where the OS socket timeout applies to every recv().
+        # StreamReader.read returns as soon as any bytes are buffered, so
+        # it can only wait while the buffer is empty and the stream is not
+        # at EOF; only then is the timeout armed.
+        if self._should_arm_read_timeout(
+            not self._stream._buffer and not self._stream.at_eof()
+        ):
+            async with async_timeout(self._read_timeout) as active_timeout:
+                self._active_read_timeout = active_timeout
+                try:
+                    buffer = await self._stream.read(self._read_size)
+                finally:
+                    self._active_read_timeout = None
+        else:
             buffer = await self._stream.read(self._read_size)
         if not buffer or not isinstance(buffer, bytes):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
