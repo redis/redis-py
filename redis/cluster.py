@@ -2282,7 +2282,9 @@ class RedisCluster(
                 ):
                     # The refresh also queries the node the error pointed to
                     self.nodes_manager._request_refresh(
-                        additional_startup_nodes_info=[(e.host, e.port)]
+                        additional_startup_nodes_info=[
+                            self.nodes_manager.remap_host_port(e.host, e.port)
+                        ]
                     )
                     # Reset the counter
                     self.reinitialize_counter = 0
@@ -2338,7 +2340,9 @@ class RedisCluster(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"
                     )
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirect_addr = get_node_name(
+                    *self.nodes_manager.remap_host_port(e.host, e.port)
+                )
                 asking = True
 
                 self._record_command_metric(
@@ -2773,8 +2777,11 @@ class NodesManager:
         Update the slot's node with the redirected one
         """
         node_changed = False
+        # The redirect carries the address the node advertises, like
+        # CLUSTER SLOTS does, so it needs the same remapping to be reachable
+        host, port = self.remap_host_port(e.host, e.port)
         with self._lock:
-            redirected_node = self.get_node(host=e.host, port=e.port)
+            redirected_node = self.get_node(host=host, port=port)
             if redirected_node is not None:
                 # The node already exists
                 if redirected_node.server_type is not PRIMARY:
@@ -2782,7 +2789,7 @@ class NodesManager:
                     redirected_node.server_type = PRIMARY
             else:
                 # This is a new node, we will add it to the nodes cache
-                redirected_node = ClusterNode(e.host, e.port, PRIMARY)
+                redirected_node = ClusterNode(host, port, PRIMARY)
                 self.nodes_cache[redirected_node.name] = redirected_node
 
             slot_nodes = self.slots_cache[e.slot_id]

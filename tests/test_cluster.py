@@ -997,6 +997,62 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_address_remap_applies_to_redirects(self, request, master_host):
+        """
+        A MOVED or ASK redirect names the address the node advertises, so the
+        retry must go through address_remap like the CLUSTER SLOTS addresses do
+        """
+        # Not the ports of the other remap tests: their listeners may still be open
+        offset = 2000
+        n = 6
+        hostname, master_port = master_host
+        ports = [master_port + i for i in range(n)]
+
+        def address_remap(address):
+            host, port = address
+            if int(port) in ports:
+                host, port = "127.0.0.1", int(port) + offset
+            return host, port
+
+        proxies = [
+            NodeProxy(("127.0.0.1", port + offset), (hostname, port)) for port in ports
+        ]
+        for p in proxies:
+            p.start()
+        try:
+            r = _get_client(
+                RedisCluster, request, flushdb=False, address_remap=address_remap
+            )
+            try:
+                slot = r.keyslot("foo")
+                owner = r.nodes_manager.get_node_from_slot(slot)
+                other = next(p for p in r.get_primaries() if p.name != owner.name)
+                # The address the redirected-to node advertises, not its proxy
+                redirect_port = other.port - offset
+                for redirect_error in (AskError, MovedError):
+                    with patch.object(Redis, "parse_response") as parse_response:
+
+                        def redirect_effect(connection, *args, **options):
+                            def ok_response(connection, *args, **options):
+                                assert (connection.host, connection.port) == (
+                                    "127.0.0.1",
+                                    other.port,
+                                )
+                                return "MOCK_OK"
+
+                            parse_response.side_effect = ok_response
+                            raise redirect_error(f"{slot} {hostname}:{redirect_port}")
+
+                        parse_response.side_effect = redirect_effect
+
+                        assert r.execute_command("SET", "foo", "bar") == "MOCK_OK"
+            finally:
+                r.close()
+        finally:
+            for p in proxies:
+                p.close()
+
 
 @pytest.mark.fixed_client
 class TestRedisClusterObjMocked:
@@ -6149,6 +6205,34 @@ class TestNodesManager:
         nm.move_slot(MovedError("0 127.0.0.1:7000"))
 
         listener.listen.assert_not_called()
+
+    @pytest.mark.fixed_client
+    def test_move_slot_remaps_redirect_address(self):
+        """
+        move_slot() must apply address_remap to the redirect address, which is
+        the one the node advertises, and never cache the unmapped address.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return host, port + 1000
+
+        r = get_mocked_redis_client(
+            host=default_host, port=default_port, address_remap=address_remap
+        )
+        nm = r.nodes_manager
+        # Default layout: slot 0 -> 127.0.0.1:7000, cached as 127.0.0.1:8000.
+        # Redirect to the primary of a different shard, by its advertised address.
+        nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8001"]
+        assert "127.0.0.1:7001" not in nm.nodes_cache
+
+        # A node not in the cache yet is added under its remapped address.
+        nm.move_slot(MovedError("0 127.0.0.1:7006"))
+
+        assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8006"]
+        assert "127.0.0.1:7006" not in nm.nodes_cache
 
     @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes(self):

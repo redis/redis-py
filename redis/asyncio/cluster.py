@@ -1840,7 +1840,9 @@ class RedisCluster(
                 ):
                     # The refresh also queries the node the error pointed to
                     self._request_refresh(
-                        additional_startup_nodes_info=[(e.host, e.port)]
+                        additional_startup_nodes_info=[
+                            self.nodes_manager.remap_host_port(e.host, e.port)
+                        ]
                     )
                     # Reset the counter
                     self.reinitialize_counter = 0
@@ -1856,7 +1858,9 @@ class RedisCluster(
                     connection=target_node,
                 )
             except AskError as e:
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirect_addr = get_node_name(
+                    *self.nodes_manager.remap_host_port(e.host, e.port)
+                )
                 asking = True
                 await self._record_command_metric(
                     command_name=command,
@@ -2690,7 +2694,10 @@ class NodesManager:
 
     async def move_slot(self, e: AskError | MovedError):
         node_changed = False
-        redirected_node = self.get_node(host=e.host, port=e.port)
+        # The redirect carries the address the node advertises, like
+        # CLUSTER SLOTS does, so it needs the same remapping to be reachable
+        host, port = self.remap_host_port(e.host, e.port)
+        redirected_node = self.get_node(host=host, port=port)
         if redirected_node:
             # The node already exists
             if redirected_node.server_type != PRIMARY:
@@ -2698,9 +2705,7 @@ class NodesManager:
                 redirected_node.server_type = PRIMARY
         else:
             # This is a new node, we will add it to the nodes cache
-            redirected_node = ClusterNode(
-                e.host, e.port, PRIMARY, **self.connection_kwargs
-            )
+            redirected_node = ClusterNode(host, port, PRIMARY, **self.connection_kwargs)
             self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
         slot_nodes = self.slots_cache[e.slot_id]
         if redirected_node not in slot_nodes:
