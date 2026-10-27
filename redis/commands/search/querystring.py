@@ -1,6 +1,23 @@
+import re
+
+# Every ASCII character other than a letter, digit or underscore: the punctuation
+# and whitespace RediSearch reads as query syntax or as a token separator inside a
+# ``{...}`` tag set, which a tag value has to escape to be matched literally.
+_TAG_ESCAPE_RE = re.compile(r"[\x00-\x2f\x3a-\x40\x5b-\x5e\x60\x7b-\x7f]")
+
+
+def _escape_tag(tag) -> str:
+    """Escape a tag value so it is matched literally inside a ``{...}`` tag set."""
+    return _TAG_ESCAPE_RE.sub(r"\\\g<0>", str(tag))
+
+
 def tags(*t):
     """
     Indicate that the values should be matched to a tag field
+
+    Each value is matched literally: the punctuation RediSearch reads as query
+    syntax inside a tag set (``|``, ``}``, ``*``, spaces, ...) is escaped, so a
+    value cannot add tags or clauses to the query it is part of.
 
     ### Parameters
 
@@ -122,7 +139,7 @@ class TagValue(Value):
         self.tags = tags
 
     def to_string(self):
-        return "{" + " | ".join(str(t) for t in self.tags) + "}"
+        return "{" + " | ".join(_escape_tag(t) for t in self.tags) + "}"
 
 
 class GeoValue(Value):
