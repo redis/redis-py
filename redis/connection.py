@@ -3312,12 +3312,6 @@ class MaintNotificationsAbstractConnectionPool:
         if handler is not None:
             handler.cancel_scheduled_tasks()
 
-    def _on_reuse(self) -> None:
-        """Hook invoked when a connection is requested from the pool."""
-        handler = getattr(self, "_maint_notifications_pool_handler", None)
-        if handler is not None:
-            handler.reopen()
-
     def _on_reset_after_fork(self) -> None:
         """Hook invoked by ``reset()``; acts only in a forked child process."""
         handler = getattr(self, "_maint_notifications_pool_handler", None)
@@ -4173,7 +4167,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         # Start timing for observability
         self._checkpid()
-        self._on_reuse()
         is_created = False
 
         with self._lock:
@@ -4654,7 +4647,6 @@ class BlockingConnectionPool(ConnectionPool):
         start_time_acquired = time.monotonic()
         # Make sure we haven't changed process.
         self._checkpid()
-        self._on_reuse()
         is_created = False
 
         # Try and get a connection from the pool. If one isn't available within

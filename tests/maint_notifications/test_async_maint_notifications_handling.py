@@ -1888,8 +1888,7 @@ async def test_moving_redelivered_after_aclose_is_applied_again():
         await pool.aclose()
         assert pool.connection_kwargs["host"] == DEFAULT_HOST
 
-        # The pool is reused, and the server redelivers the still-active MOVING
-        pool._on_reuse()
+        # The server redelivers the still-active MOVING to the reused pool
         await handler.handle_notification(notification)
 
     assert pool.connection_kwargs["host"] == MOVED_HOST
@@ -2881,70 +2880,3 @@ async def test_async_other_state_transitions_dispatch_nothing(state, new_state):
 
     assert connection.maintenance_state == new_state
     assert listener.events == []
-
-
-@pytest.mark.fixed_client
-@pytest.mark.asyncio
-async def test_moving_read_by_in_use_connection_after_aclose_is_ignored():
-    pool = ConnectionPool(
-        host=DEFAULT_HOST,
-        port=DEFAULT_PORT,
-        socket_timeout=3,
-        protocol=3,
-        maint_notifications_config=MaintNotificationsConfig(
-            enabled=True, proactive_reconnect=True, relaxed_timeout=10
-        ),
-    )
-    original = dict(pool.connection_kwargs)
-    connection = pool.make_connection()
-    handler = connection._maint_notifications_pool_handler
-    notification = NodeMovingNotification(
-        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
-    )
-
-    await pool.aclose()
-    with mock.patch(
-        "redis.asyncio.maint_notifications.record_connection_handoff",
-        new=AsyncMock(),
-    ):
-        await handler.handle_notification(notification)
-
-    assert pool._maint_notifications_pool_handler._scheduled_tasks == set()
-    assert pool._maint_notifications_pool_handler._pending_handoffs == set()
-    for key in ("host", "socket_timeout"):
-        assert pool.connection_kwargs[key] == original[key]
-
-
-@pytest.mark.fixed_client
-@pytest.mark.asyncio
-async def test_moving_is_applied_again_once_a_closed_pool_is_reused():
-    pool = ConnectionPool(
-        host=DEFAULT_HOST,
-        port=DEFAULT_PORT,
-        socket_timeout=3,
-        protocol=3,
-        maint_notifications_config=MaintNotificationsConfig(
-            enabled=True, proactive_reconnect=True, relaxed_timeout=10
-        ),
-    )
-    notification = NodeMovingNotification(
-        id=1, new_node_host=MOVED_HOST, new_node_port=MOVED_PORT, ttl=60
-    )
-    await pool.aclose()
-
-    with (
-        mock.patch.object(Connection, "connect", new=AsyncMock()),
-        mock.patch.object(Connection, "can_read", new=AsyncMock(return_value=False)),
-    ):
-        connection = await pool.get_connection()
-    with mock.patch(
-        "redis.asyncio.maint_notifications.record_connection_handoff",
-        new=AsyncMock(),
-    ):
-        await connection._maint_notifications_pool_handler.handle_notification(
-            notification
-        )
-
-    assert pool.connection_kwargs["host"] == MOVED_HOST
-    assert pool._maint_notifications_pool_handler._pending_handoffs == {notification}
-    await pool.aclose()

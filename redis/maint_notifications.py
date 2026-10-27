@@ -869,32 +869,22 @@ class MaintNotificationsPoolHandler:
         # The handoffs whose scheduled cleanup has not run yet
         self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = threading.RLock()
-        # Set once the pool has been closed and cleared again when it is
-        # reused. It is shared with the per-connection copies, so a MOVING
-        # read by a connection still in use after close() is ignored.
-        self._closed = threading.Event()
         self.connection = None
 
     def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
-
-    def reopen(self) -> None:
-        """Handle MOVING notifications again after the pool has been reused."""
-        if self._closed.is_set():
-            self._closed.clear()
 
     def reset_after_fork(self) -> None:
         """
         Drop the state inherited from the parent process.
 
         The lock may have been held by a parent thread at fork time, so it is
-        replaced, and so is the closed flag. The timers belong to threads that
+        replaced. The timers belong to threads that
         do not exist in the child: they are cancelled and the pending handoffs
         are cleaned up as ``close()`` does, so the child starts without the
         temporary host and relaxed timeouts of an active MOVING.
         """
         self._lock = threading.RLock()
-        self._closed = threading.Event()
         self.cancel_scheduled_tasks()
         self._processed_notifications.clear()
 
@@ -907,7 +897,6 @@ class MaintNotificationsPoolHandler:
         copy._scheduled_timers = self._scheduled_timers
         copy._pending_handoffs = self._pending_handoffs
         copy._lock = self._lock
-        copy._closed = self._closed
         copy.connection = None
         return copy
 
@@ -933,16 +922,6 @@ class MaintNotificationsPoolHandler:
             return
 
         with self._lock:
-            if self._closed.is_set():
-                # A connection still in use read this after the pool was
-                # closed: scheduling its cleanup now would leave the temporary
-                # host and timeouts on a pool nobody cleans up.
-                logger.debug(
-                    f"Ignoring node MOVING notification {notification}: "
-                    "the pool is closed"
-                )
-                return
-
             if notification in self._processed_notifications:
                 # nothing to do in the connection pool handling
                 # the notification has already been handled or is expired
@@ -1070,7 +1049,6 @@ class MaintNotificationsPoolHandler:
 
     def cancel_scheduled_tasks(self) -> None:
         with self._lock:
-            self._closed.set()
             if not self._scheduled_timers and not self._pending_handoffs:
                 return
             timers = tuple(self._scheduled_timers)

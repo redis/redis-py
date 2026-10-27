@@ -2977,8 +2977,7 @@ def test_moving_redelivered_after_close_is_applied_again():
     pool.close()
     assert pool.connection_kwargs["host"] == "localhost"
 
-    # The pool is reused, and the server redelivers the still-active MOVING
-    pool._on_reuse()
+    # The server redelivers the still-active MOVING to the reused pool
     handler.handle_notification(notification)
 
     assert pool.connection_kwargs["host"] == "1.2.3.4"
@@ -3261,62 +3260,6 @@ def test_pool_close_disconnects_even_when_moving_cleanup_fails():
     # the pool is closed regardless; the handoff stays for a retried close()
     disconnect.assert_called_once_with()
     assert handler._pending_handoffs == {notification}
-
-
-@pytest.mark.fixed_client
-def test_moving_read_by_in_use_connection_after_close_is_ignored():
-    """
-    A connection still in use by another thread can read a MOVING after
-    close() has run the cleanups: it must not schedule a cleanup timer nor
-    change the kwargs of a pool whose handler was already cancelled.
-    """
-    pool = ConnectionPool(
-        host="localhost",
-        socket_timeout=3,
-        protocol=3,
-        maint_notifications_config=MaintNotificationsConfig(
-            enabled=True, proactive_reconnect=True, relaxed_timeout=10
-        ),
-    )
-    original = dict(pool.connection_kwargs)
-    connection = pool.make_connection()
-    handler = connection._maint_notifications_pool_handler
-    notification = NodeMovingNotification(
-        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
-    )
-
-    pool.close()
-    handler.handle_notification(notification)
-
-    assert pool._maint_notifications_pool_handler._scheduled_timers == set()
-    assert pool._maint_notifications_pool_handler._pending_handoffs == set()
-    for key in ("host", "socket_timeout", "socket_connect_timeout"):
-        assert pool.connection_kwargs.get(key) == original.get(key)
-    assert pool.connection_kwargs.get("maintenance_state") != MaintenanceState.MOVING
-
-
-@pytest.mark.fixed_client
-@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-def test_moving_is_applied_again_once_a_closed_pool_is_reused(pool_class):
-    pool = pool_class(
-        host="localhost",
-        protocol=3,
-        maint_notifications_config=MaintNotificationsConfig(
-            enabled=True, proactive_reconnect=True, relaxed_timeout=10
-        ),
-    )
-    notification = NodeMovingNotification(
-        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
-    )
-    pool.close()
-
-    with patch.object(Connection, "connect"), patch.object(Connection, "check_health"):
-        connection = pool.get_connection()
-    connection._maint_notifications_pool_handler.handle_notification(notification)
-
-    assert pool.connection_kwargs["host"] == "1.2.3.4"
-    assert pool._maint_notifications_pool_handler._pending_handoffs == {notification}
-    pool.close()
 
 
 @pytest.mark.fixed_client
