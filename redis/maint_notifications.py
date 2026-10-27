@@ -879,10 +879,10 @@ class MaintNotificationsPoolHandler:
         Drop the state inherited from the parent process.
 
         The lock may have been held by a parent thread at fork time, so it is
-        replaced. The timers belong to threads that
-        do not exist in the child: they are cancelled and the pending handoffs
-        are cleaned up as ``close()`` does, so the child starts without the
-        temporary host and relaxed timeouts of an active MOVING.
+        replaced. The timers belong to threads that do not exist in the child:
+        they are cancelled and the pending handoffs are cleaned up as
+        ``close()`` does, so the child starts without the temporary host and
+        relaxed timeouts of an active MOVING.
         """
         self._lock = threading.RLock()
         self.cancel_scheduled_tasks()
