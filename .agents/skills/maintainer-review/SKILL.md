@@ -135,7 +135,7 @@ Run this pass before any positive PR assessment when a patch changes what an exi
 
 1. List every caller of the changed helper on base and head, including tests that patch or wrap it.
 2. For each caller, state its observable behavior before and after the patch, and label the change as (a) required by the claimed fix, (b) an incidental side effect of where the change was placed, (c) an intended change with its own justification in the PR, or (d) unchanged, because the caller never reaches the changed behavior.
-3. Treat any (b) as a placement finding when the new behavior is not correct for that caller as part of the helper's contract. Request that it move to the caller that needs it, or that the PR justify it as the helper's contract for every caller. When the helper is the owning layer and the behavior is correct for every caller, keep it in the helper and record the change as (c).
+3. Treat every (b) as a finding. If the new behavior is not correct for that caller, request that it move to the caller that needs it. If the helper is the owning layer and the behavior is correct for every caller, it can stay in the helper, but the PR must state and test the change for that caller; only then does it count as (c).
 4. Check that the helper's name, docstring, and return value still describe what it does, and that it still mirrors its counterpart where one exists (for example an increment/decrement or acquire/release pair). A helper that no longer matches its counterpart is a placement finding too.
 
 ##### Mandatory interleaving and ownership pass
