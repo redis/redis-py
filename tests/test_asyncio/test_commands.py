@@ -4975,6 +4975,23 @@ class TestRedisCommands:
         await r.georadius("barcelona", 2.191, 41.433, 1000, store="places_barcelona")
         assert await r.zrange("places_barcelona", 0, -1) == [b"place1"]
 
+    @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize("dest", ["", b""])
+    async def test_georadius_store_empty_destination(self, r: redis.Redis, dest):
+        values = (2.1909389952632, 41.433791470673, "place1") + (
+            2.1873744593677,
+            41.406342043777,
+            "place2",
+        )
+
+        await r.geoadd("barcelona", values)
+        assert await r.georadius("barcelona", 2.191, 41.433, 1000, store=dest) == 1
+        assert await r.zrange(dest, 0, -1) == [b"place1"]
+        await r.delete(dest)
+        assert await r.georadius("barcelona", 2.191, 41.433, 1000, store_dist=dest) == 1
+        assert await r.zrange(dest, 0, -1) == [b"place1"]
+
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     @pytest.mark.onlynoncluster

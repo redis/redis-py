@@ -6674,6 +6674,23 @@ class TestRedisCommands:
         assert r.zrange("places_barcelona", 0, -1) == [b"place1"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("3.2.0")
+    @pytest.mark.parametrize("dest", ["", b""])
+    def test_georadius_store_empty_destination(self, r, dest):
+        values = (2.1909389952632, 41.433791470673, "place1") + (
+            2.1873744593677,
+            41.406342043777,
+            "place2",
+        )
+
+        r.geoadd("barcelona", values)
+        assert r.georadius("barcelona", 2.191, 41.433, 1000, store=dest) == 1
+        assert r.zrange(dest, 0, -1) == [b"place1"]
+        r.delete(dest)
+        assert r.georadius("barcelona", 2.191, 41.433, 1000, store_dist=dest) == 1
+        assert r.zrange(dest, 0, -1) == [b"place1"]
+
+    @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
     def test_georadius_store_dist(self, r):

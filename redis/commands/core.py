@@ -11906,13 +11906,13 @@ class GeoCommands(CommandsProtocol):
             else:
                 raise DataError("GEORADIUS invalid sort")
 
-        if kwargs["store"] and kwargs["store_dist"]:
+        if kwargs["store"] is not None and kwargs["store_dist"] is not None:
             raise DataError("GEORADIUS store and store_dist can't be set together")
 
-        if kwargs["store"]:
+        if kwargs["store"] is not None:
             pieces.extend([b"STORE", kwargs["store"]])
 
-        if kwargs["store_dist"]:
+        if kwargs["store_dist"] is not None:
             pieces.extend([b"STOREDIST", kwargs["store_dist"]])
 
         return self.execute_command(command, *pieces, **kwargs)
