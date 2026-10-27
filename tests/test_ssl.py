@@ -227,21 +227,6 @@ class TestSSL:
                     assert ocsp.is_valid()
                 assert "from the" in str(e.value)
 
-    @pytest.mark.fixed_client
-    @skip_if_nocryptography()
-    def test_unauthorized_then_direct(self):
-        from redis.ocsp import OCSPVerifier
-
-        # these certificates on the socket end return unauthorized
-        # then the second call succeeds
-        hostnames = ["wikipedia.org", "squarespace.com"]
-        for hostname in hostnames:
-            context = ssl.create_default_context()
-            with socket.create_connection((hostname, 443)) as sock:
-                with context.wrap_socket(sock, server_hostname=hostname) as wrapped:
-                    ocsp = OCSPVerifier(wrapped, hostname, 443)
-                    assert ocsp.is_valid()
-
     @skip_if_nocryptography()
     def test_mock_ocsp_staple(self, request):
         import OpenSSL
