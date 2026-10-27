@@ -1492,7 +1492,7 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             "$.vector_emb", as_field="vector_emb", decode_field=False
         )
         assert query._return_fields_decode_as == {"vector_emb": None}
-        assert query.get_args()[:4] == ["*", "RETURN", 3, "$.vector_emb"]
+        assert query.get_args()[:5] == ["*", "RETURN", 1, "$.vector_emb", "AS"]
 
         raw = b"\x00\x01\x82\xff"
         res = Result(
@@ -1510,6 +1510,51 @@ class TestBaseSearchFunctionality(SearchTestsBase):
             field_encodings=query._return_fields_decode_as,
         )
         assert res.docs[0].vector_emb == raw
+
+    @pytest.mark.fixed_client
+    def test_return_field_count_counts_identifiers_not_tokens(self):
+        # FT.SEARCH's RETURN clause is `RETURN <count> <path> [AS <name>] ...`,
+        # where <count> is the number of identifiers that follow. An aliased
+        # field is one identifier but three tokens, so counting tokens made the
+        # client advertise more identifiers than it sent and shifted every
+        # following token into the RETURN list (e.g. `RETURN 2 $.t AS txt`
+        # dropped the alias and swallowed `LIMIT`).
+        assert Query("*").return_field("name").get_args()[:3] == ["*", "RETURN", 1]
+        assert Query("*").return_field("$.t", as_field="txt").get_args()[:3] == [
+            "*",
+            "RETURN",
+            1,
+        ]
+        assert Query("*").return_fields("a", "b").get_args()[:4] == [
+            "*",
+            "RETURN",
+            2,
+            "a",
+        ]
+        assert Query("*").return_field("$.t", as_field="txt").return_field(
+            "other"
+        ).get_args()[:7] == ["*", "RETURN", 2, "$.t", "AS", "txt", "other"]
+
+        # The count has to agree with the number of descriptors actually sent,
+        # and every descriptor is either `<path>` or `<path> AS <name>`.
+        args = (
+            Query("*")
+            .return_fields("a", "b")
+            .return_field("$.c", as_field="C")
+            .get_args()
+        )
+        start = args.index("RETURN") + 1
+        count = args[start]
+        rest = args[start + 1 :]
+        # Walk the descriptors the server would consume and show that they
+        # occupy the whole clause, without reaching into a later option.
+        consumed = 0
+        for _ in range(count):
+            assert rest[consumed] not in ("LIMIT", "DIALECT")
+            consumed += 1
+            if rest[consumed] == "AS":
+                consumed += 2
+        assert rest[consumed:] == ["DIALECT", 2, "LIMIT", 0, 10]
 
     @pytest.mark.redismod
     def test_binary_field_survives_alias_with_decode_field_false(self, client):

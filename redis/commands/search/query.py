@@ -37,6 +37,12 @@ class Query:
         self._in_order: bool = False
         self._sortby: Optional[SortbyField] = None
         self._return_fields: List = []
+        # Number of ``RETURN`` identifiers, which is what the ``count`` leading
+        # the clause counts. It is not ``len(self._return_fields)``: an aliased
+        # field contributes three tokens (``path``, ``AS``, ``property``) but a
+        # single identifier, and the server reads exactly ``count``
+        # ``path [AS property]`` descriptors.
+        self._return_fields_num: int = 0
         self._return_fields_decode_as: dict = {}
         self._summarize_fields: List = []
         self._highlight_fields: List = []
@@ -76,6 +82,7 @@ class Query:
         - **encoding**: The encoding to use when decoding the field
         """
         self._return_fields.append(field)
+        self._return_fields_num += 1
         # The server returns an aliased field under its alias, so the encoding
         # has to be recorded under the name the response will carry.
         self._return_fields_decode_as[field if as_field is None else as_field] = (
@@ -234,7 +241,7 @@ class Query:
             args.append("INORDER")
         if self._return_fields:
             args.append("RETURN")
-            args.append(len(self._return_fields))
+            args.append(self._return_fields_num)
             args += self._return_fields
         if self._sortby:
             if not isinstance(self._sortby, SortbyField):
