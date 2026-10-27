@@ -657,8 +657,20 @@ class AsyncMaintNotificationsAbstractConnection:
         # relaxed/restored timeout, not the one captured when the in-flight
         # response started.
         parser = getattr(self, "_parser", None)
-        if parser is not None and getattr(parser, "_apply_read_timeout", False):
-            parser._read_timeout = timeout
+        if parser is not None:
+            # Also tell the parser whether a maintenance window is open:
+            # while one is, even a None per-read timeout keeps an (empty)
+            # timeout context armed, so the restore at the end of the
+            # window can impose a deadline on a read in flight; outside a
+            # window a None timeout arms nothing. The restore call (-1)
+            # closes the window; any other call made while this connection
+            # is under maintenance opens or keeps it.
+            parser._in_maintenance_window = relaxed_timeout != -1 and (
+                self.maintenance_state
+                in (MaintenanceState.MAINTENANCE, MaintenanceState.MOVING)
+            )
+            if getattr(parser, "_apply_read_timeout", False):
+                parser._read_timeout = timeout
         self._reschedule_active_read_timeout(timeout)
 
     def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
