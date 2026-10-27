@@ -4078,36 +4078,42 @@ class TestHybridSearch(AsyncSearchTestsBase):
             timeout=10,
         )
 
-        expected_results = [
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"15",
-                "price_discount": b"13.5",
-            },
-            {
-                "description": b"red dress",
-                "color": b"red",
-                "price": b"17",
-                "price_discount": b"15.3",
-            },
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"16",
-                "price_discount": b"14.4",
-            },
-        ]
+        # The results fuse the tag match with a KNN ranking over random
+        # vectors, so their order is random; check each returned item instead.
+        expected_discounts = {
+            b"15": b"13.5",
+            b"16": b"14.4",
+            b"17": b"15.3",
+            b"18": b"16.2",
+        }
         if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
             assert len(res.results) == 3
-            assert res.results == expected_results
             assert res.warnings == []
             assert res.execution_time > 0
+            assert any(item["color"] == b"red" for item in res.results)
+            for item in res.results:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
         elif expects_resp3_shape(decoded_r):
             assert len(res["results"]) == 3
-            assert res["results"] == expected_results
             assert res["warnings"] == []
             assert res["execution_time"] > 0
+            assert any(item["color"] == b"red" for item in res["results"])
+            for item in res["results"]:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
