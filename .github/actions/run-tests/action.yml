@@ -157,7 +157,7 @@ runs:
 
           if (( redis_major_version < 7 )); then
             export REDIS_STACK_EXTRA_ARGS="--tls-auth-clients optional --save ''"
-            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"
+            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save '' --unixsocket /redis/work/redis.sock --unixsocketperm 777"
           fi
 
           invoke devenv --endpoints=all-stack

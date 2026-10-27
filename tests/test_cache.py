@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -131,6 +132,16 @@ def tracked_key_count(client) -> int:
     other test uses, from a client that is not itself tracking.
     """
     return int(client.info("stats")["tracking_total_keys"])
+
+
+def cmdstat_get_calls(client) -> int:
+    """
+    Reads how many GET commands the server has run, across all clients.
+
+    Server-wide like ``tracked_key_count``, so callers compare a before/after delta around a
+    read to tell whether it reached the server.
+    """
+    return client.info("commandstats").get("cmdstat_get", {}).get("calls", 0)
 
 
 @pytest.fixture()
@@ -2350,6 +2361,50 @@ class TestSSLCache:
             ).cache_value
             == b"baz"
         )
+
+
+# The standalone test server also listens on this socket, see docker-compose.yml
+UNIX_SOCKET_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "dockers", "standalone", "redis.sock")
+)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.4.0")
+@pytest.mark.skipif(
+    not os.path.exists(UNIX_SOCKET_PATH),
+    reason=f"No Redis Unix socket at {UNIX_SOCKET_PATH}",
+)
+class TestUnixSocketCache:
+    def test_get_from_cache(self):
+        key = f"unix-socket-cache-{uuid.uuid4()}"
+        r = redis.Redis(
+            unix_socket_path=UNIX_SOCKET_PATH, protocol=3, cache_config=CacheConfig()
+        )
+        r2 = redis.Redis(unix_socket_path=UNIX_SOCKET_PATH)
+        try:
+            cache = r.get_cache()
+            r2.set(key, "bar")
+            # get key from redis and save in local cache
+            assert r.get(key) == b"bar"
+            assert (
+                cache.get(
+                    CacheKey(command="GET", redis_keys=(key,), redis_args=("GET", key))
+                ).cache_value
+                == b"bar"
+            )
+            # get key from local cache, without sending GET to the server
+            calls = cmdstat_get_calls(r2)
+            assert r.get(key) == b"bar"
+            assert cmdstat_get_calls(r2) == calls
+            # change key in redis (cause invalidation)
+            r2.set(key, "barbar")
+            assert wait_for_invalidated_value(r, key, [b"barbar"]) == b"barbar"
+        finally:
+            r2.delete(key)
+            r.close()
+            r2.close()
 
 
 @pytest.mark.fixed_client
