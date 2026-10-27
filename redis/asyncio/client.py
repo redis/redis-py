@@ -795,13 +795,9 @@ class Redis(
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
-        except BaseException:
+        except (Exception, asyncio.CancelledError):
             # If initialization fails, decrement the counter to keep it in sync
-            # Collect cleanup errors inside the shield so they cannot replace
-            # the initialization error or go unhandled after another cancellation.
-            await asyncio.shield(
-                asyncio.gather(self._decrement_usage(), return_exceptions=True)
-            )
+            await asyncio.shield(self._decrement_usage())
             raise
 
     async def _increment_usage(self) -> int:
@@ -815,24 +811,31 @@ class Redis(
 
     async def _decrement_usage(self) -> int:
         """
+        Helper coroutine to decrement the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            return self._usage_counter
+
+    async def _release_usage(self) -> None:
+        """
         Decrement the usage counter and close the client on the last exit.
 
         Hold the lock through closing so a new context cannot use connections
         that are still being disconnected by the previous context.
-        Returns the new value of the usage counter.
         """
         async with self._usage_lock:
             self._usage_counter -= 1
             if self._usage_counter == 0:
                 await self.aclose()
-            return self._usage_counter
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
         last exit (counter becomes zero), the client closes its connection pool.
         """
-        await asyncio.shield(self._decrement_usage())
+        await asyncio.shield(self._release_usage())
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
