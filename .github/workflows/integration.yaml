@@ -216,6 +216,11 @@ jobs:
           - 2-unified_responses
           - 3-legacy_responses
           - 3-unified_responses
+        # hiredis 2.x has no Python 3.15 wheel, and its setup.py does not
+        # build on Python 3.15.
+        exclude:
+          - python-version: '3.15'
+            hiredis-version: '<3.0.0'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}; Config:${{matrix.test-config}}${{ matrix.test-config == 'default-legacy_responses' && ' + fixed-clients' || '' }}
