@@ -277,7 +277,7 @@ class TestCachePoolOwnership:
 
     @pytest.mark.parametrize("shared_cache", [False, True])
     def test_checkout_waits_for_an_idle_owner_drain(self, pool, r2, shared_cache):
-        """Queue checkout must join the pool lock before touching the socket."""
+        """Checkout must join the owner's drain lock before touching the socket."""
         key = str(uuid.uuid4())
         r2.set(key, "value")
         borrower_pool = pool
@@ -300,16 +300,16 @@ class TestCachePoolOwnership:
         errors = []
         real_can_read = owner._conn.can_read
         real_ensure = pool.ensure_connection
-        real_pool_lock = pool._lock
+        real_owner_lock = owner._in_use_lock
 
-        class ObservedPoolLock:
+        class ObservedOwnerLock:
             def __enter__(self):
                 if threading.current_thread() is checkout_thread:
                     checkout_attempted.set()
-                return real_pool_lock.__enter__()
+                return real_owner_lock.__enter__()
 
             def __exit__(self, *args):
-                return real_pool_lock.__exit__(*args)
+                return real_owner_lock.__exit__(*args)
 
         def pause_drain(*args, **kwargs):
             if threading.current_thread() is reader:
@@ -343,7 +343,7 @@ class TestCachePoolOwnership:
             with (
                 patch.object(owner._conn, "can_read", side_effect=pause_drain),
                 patch.object(pool, "ensure_connection", side_effect=ensure_connection),
-                patch.object(pool, "_lock", ObservedPoolLock()),
+                patch.object(owner, "_in_use_lock", ObservedOwnerLock()),
             ):
                 reader.start()
                 assert draining.wait(3)
@@ -363,3 +363,75 @@ class TestCachePoolOwnership:
             borrower_pool.release(borrower)
             if shared_cache:
                 borrower_pool.disconnect()
+
+    @pytest.mark.parametrize("operation", ["checkout", "release"])
+    def test_idle_owner_drain_does_not_block_other_connections(
+        self, pool, r2, operation
+    ):
+        key = str(uuid.uuid4())
+        r2.set(key, "value")
+        owner = pool.get_connection()
+        borrower = pool.get_connection()
+        other = pool.get_connection()
+        owner.send_command("GET", key, keys=[key])
+        assert owner.read_response() == b"value"
+        pool.release(owner)
+        if operation == "checkout":
+            # Both pools return the most recently released connection first.
+            pool.release(other)
+
+        draining = threading.Event()
+        finish_drain = threading.Event()
+        finished = threading.Event()
+        errors = []
+        real_can_read = owner._conn.can_read
+
+        def pause_drain(*args, **kwargs):
+            if threading.current_thread() is reader:
+                draining.set()
+                assert finish_drain.wait(5)
+            return real_can_read(*args, **kwargs)
+
+        def read_cached():
+            try:
+                borrower.send_command("GET", key, keys=[key])
+                assert borrower.read_response() == b"value"
+            except BaseException as exc:
+                errors.append(exc)
+
+        def use_other():
+            try:
+                connection = pool.get_connection() if operation == "checkout" else other
+                try:
+                    assert connection is other
+                finally:
+                    pool.release(connection)
+                finished.set()
+            except BaseException as exc:
+                errors.append(exc)
+
+        reader = threading.Thread(target=read_cached, daemon=True)
+        worker = threading.Thread(target=use_other, daemon=True)
+        try:
+            with patch.object(owner._conn, "can_read", side_effect=pause_drain):
+                reader.start()
+                assert draining.wait(3)
+                worker.start()
+                try:
+                    assert finished.wait(3), (
+                        "an unrelated connection waited on the drain"
+                    )
+                    assert not errors
+                finally:
+                    finish_drain.set()
+                    reader.join(3)
+                    worker.join(3)
+                assert not reader.is_alive()
+                assert not worker.is_alive()
+                assert not errors
+        finally:
+            finish_drain.set()
+            reader.join(3)
+            if worker.ident is not None:
+                worker.join(3)
+            pool.release(borrower)

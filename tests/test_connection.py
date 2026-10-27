@@ -1869,10 +1869,10 @@ class TestUnitCacheProxyConnection:
         self, mock_cache, mock_connection
     ):
         """
-        The drain takes the pool lock, and an invalidation it reads runs the owner's
-        callback under the owner's cache lock. Holding this connection's cache lock across
-        it orders a cache lock before the pool lock, so two connections draining each other,
-        or a ``pool.disconnect()`` reaching this one, deadlock.
+        The drain takes the owner's checkout lock, and invalidations run the owner's
+        callback under its cache lock. Holding the borrower's cache lock across it
+        could deadlock two connections draining each other. Unrelated pool operations
+        must remain free to proceed.
         """
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
@@ -1905,10 +1905,13 @@ class TestUnitCacheProxyConnection:
         def read_invalidation(**kwargs):
             cache_lock_available = False
             pool_lock_available = False
+            owner_lock_available = False
 
             def probe_locks():
-                nonlocal cache_lock_available, pool_lock_available
-                # The sending thread must still hold the pool lock during this probe.
+                nonlocal cache_lock_available, pool_lock_available, owner_lock_available
+                owner_lock_available = owner._in_use_lock.acquire(blocking=False)
+                if owner_lock_available:
+                    owner._in_use_lock.release()
                 pool_lock_available = pool_lock.acquire(blocking=False)
                 if pool_lock_available:
                     pool_lock.release()
@@ -1922,7 +1925,8 @@ class TestUnitCacheProxyConnection:
             other.start()
             other.join(timeout=5)
             assert not other.is_alive()
-            assert not pool_lock_available
+            assert not owner_lock_available
+            assert pool_lock_available
             acquired.append(cache_lock_available)
             return None
 

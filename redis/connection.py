@@ -2059,7 +2059,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
     # Bound peer reads when a checked-out owner stops processing invalidations.
-    # Active readers renew this window without extra network requests.
+    # Only the owner's commands renew this window; peer hits do not extend it.
     _BUSY_CACHE_GRACE_SECONDS = 0.1
 
     def __init__(
@@ -2077,8 +2077,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
-        # Only a pool release makes the connection available for another
-        # connection's invalidation drain. Pools update this under _pool_lock.
+        # Checkout and peer invalidation drains share this connection's lock.
+        # Release clears _in_use after the last socket access, before enqueueing.
+        self._in_use_lock = threading.Lock()
         self._in_use = True
         self._busy_cache_deadline = 0.0
         self._cache = cache
@@ -2323,14 +2324,13 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         if candidate is not None:
             # Drain the connection that cached the entry so invalidations do not
             # accumulate on idle connections. This must run outside our cache lock: the
-            # drain takes the pool lock, and invalidations call the owner's callback
-            # under its cache lock. Holding ours would order a cache lock before the
-            # pool lock and another after it, deadlocking connections draining each
-            # other or a pool.disconnect() holding the pool lock while waiting for ours.
+            # drain takes the owner's checkout lock, and invalidations call the
+            # owner's callback under its cache lock. Holding ours could deadlock
+            # two connections draining each other.
             owner = candidate.connection_ref
             can_serve = False
             if isinstance(owner, CacheProxyConnection):
-                with owner._pool_lock:
+                with owner._in_use_lock:
                     if owner is self or not owner._in_use:
                         self._drain_invalidations(owner._conn)
                         can_serve = True
@@ -4220,7 +4220,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 connection = self.make_connection()
                 is_created = True
             self._in_use_connections.add(connection)
-            if isinstance(connection, CacheProxyConnection):
+
+        if isinstance(connection, CacheProxyConnection):
+            # Wait only for this connection's drain, without holding the pool lock.
+            with connection._in_use_lock:
                 connection._in_use = True
 
         # Record state transition for observability
@@ -4728,9 +4731,8 @@ class BlockingConnectionPool(ConnectionPool):
                 self._locked = False
 
         if isinstance(connection, CacheProxyConnection):
-            # Queue checkout is independent of _lock. Join the invalidation
-            # drain's critical section before connect/can_read can use the socket.
-            with self._lock:
+            # Join this connection's drain before connect/can_read uses the socket.
+            with connection._in_use_lock:
                 connection._in_use = True
 
         # Record state transition for observability
@@ -4818,8 +4820,7 @@ class BlockingConnectionPool(ConnectionPool):
                 connection.disconnect()
             # Put the connection back into the pool.
             if isinstance(connection, CacheProxyConnection):
-                with self._lock:
-                    connection._in_use = False
+                connection._in_use = False
             pool_name = get_pool_name(self)
             try:
                 self.pool.put_nowait(connection)
