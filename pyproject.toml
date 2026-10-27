@@ -42,12 +42,12 @@ xxhash = [
 ]
 
 ocsp = [
-    "cryptography>=36.0.1",
-    "pyopenssl>=20.0.1",
+    "cryptography>=41.0.0",
+    "pyopenssl>=23.2.0",
     "requests>=2.31.0",
 ]
 jwt = [
-    "PyJWT>=2.13.0",
+    "PyJWT>=2.15.1",
 ]
 circuit_breaker = [
     "pybreaker>=1.4.0"

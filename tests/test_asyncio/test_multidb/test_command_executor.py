@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -341,6 +341,48 @@ class TestDefaultCommandExecutor:
         mock_fd.register_command_execution.assert_called_once_with(
             ("channel-1", "channel-2")
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_db,mock_db1,mock_db2",
+        [
+            (
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("method", ["unsubscribe", "punsubscribe", "sunsubscribe"])
+    async def test_execute_pubsub_method_awaits_returned_awaitable(
+        self, mock_db, mock_db1, mock_db2, mock_fd, mock_fs, mock_ed, method
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        executor = DefaultCommandExecutor(
+            failure_detectors=[mock_fd],
+            databases=databases,
+            failover_strategy=mock_fs,
+            event_dispatcher=mock_ed,
+            command_retry=Retry(NoBackoff(), 0),
+        )
+
+        await executor.set_active_database(mock_db1, GeoFailoverReason.MANUAL)
+        sent = []
+
+        async def send(*args):
+            sent.append(args)
+            return "sent"
+
+        # asyncio PubSub.unsubscribe/punsubscribe/sunsubscribe are plain
+        # methods that return an awaitable rather than coroutine functions.
+        pubsub = Mock()
+        setattr(pubsub, method, lambda *args: send(*args))
+        executor.active_pubsub = pubsub
+
+        assert await executor.execute_pubsub_method(method, "channel-1") == "sent"
+        assert sent == [("channel-1",)]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

@@ -186,6 +186,22 @@ class TestPipeline:
             assert r["z"] == b"zzz"
 
     @pytest.mark.onlynoncluster
+    def test_callback_error_does_not_leave_replies_on_connection(self, r):
+        # The score callback raises on the first reply, while the BLPOP reply is
+        # still in flight. The next command on the pooled connection must not
+        # read it.
+        r.zadd("z", {"a": float("inf")})
+        r.set("b", "b1")
+        with r.pipeline(transaction=False) as pipe:
+            pipe.zrange("z", 0, -1, withscores=True, score_cast_func=int)
+            pipe.blpop("q", 0.5)
+            with pytest.raises(OverflowError):
+                pipe.execute()
+
+        client = redis.Redis(connection_pool=r.connection_pool)
+        assert client.get("b") == b"b1"
+
+    @pytest.mark.onlynoncluster
     def test_parse_error_raised_transaction(self, r):
         with r.pipeline() as pipe:
             pipe.multi()

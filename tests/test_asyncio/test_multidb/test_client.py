@@ -61,6 +61,122 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    async def test_aclose_closes_every_database_client(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A failover leaves the previous active database's client open so its
+        in-flight commands can complete, so aclose() must close every database
+        client, not only the active one.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            await client.initialize()
+            await client.set_active_database(mock_db2)
+            mock_db1.client.aclose.assert_not_called()
+
+            await client.aclose()
+
+        for db in (mock_db, mock_db1, mock_db2):
+            db.client.aclose.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_aclose_closes_every_database_client_when_one_fails(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A client that fails to close must not leave the later ones open, and
+        aclose() raises the first error once every client was closed.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+        first_error = ConnectionError("first")
+        mock_db1.client.aclose.side_effect = first_error
+        mock_db2.client.aclose.side_effect = ConnectionError("second")
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            await client.initialize()
+
+            with pytest.raises(ConnectionError) as exc_info:
+                await client.aclose()
+
+        assert exc_info.value is first_error
+        for db in (mock_db, mock_db1, mock_db2):
+            db.client.aclose.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_aclose_closes_removed_active_database_client(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        Removing the active database leaves its client open for in-flight
+        commands, so aclose() must still close it although it is no longer in
+        the database list.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            await client.initialize()
+            assert client.command_executor.active_database is mock_db1
+
+            await client.remove_database(mock_db1)
+            assert client.command_executor.active_database is mock_db2
+            mock_db1.client.aclose.assert_not_called()
+
+            await client.aclose()
+            # The removed database is dropped once closed
+            await client.aclose()
+
+        mock_db1.client.aclose.assert_awaited_once_with()
+        for db in (mock_db, mock_db2):
+            assert db.client.aclose.await_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     async def test_cluster_unreachable_error_is_registered_as_retryable(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
