@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import redis
 
+from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
     CacheConfigurationInterface,
@@ -35,6 +36,7 @@ from redis.event import (
 )
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.conftest import (
     _get_client,
@@ -2369,20 +2371,37 @@ UNIX_SOCKET_PATH = os.path.abspath(
 )
 
 
+@pytest.fixture()
+def unix_socket_path():
+    """
+    Returns ``UNIX_SOCKET_PATH``, skipping the test when no server answers on it.
+
+    The socket file alone proves nothing: Docker Desktop for macOS shows the container's
+    socket in ``dockers/standalone/`` but refuses connections to it from the host, and a
+    killed container leaves its socket file behind. Pings without retries, so the skip is
+    immediate.
+    """
+    try:
+        with redis.Redis(
+            unix_socket_path=UNIX_SOCKET_PATH, retry=Retry(NoBackoff(), 0)
+        ) as client:
+            client.ping()
+    except redis.ConnectionError:
+        pytest.skip(f"No Redis server on the Unix socket {UNIX_SOCKET_PATH}")
+
+    return UNIX_SOCKET_PATH
+
+
 @pytest.mark.fixed_client
 @pytest.mark.onlynoncluster
 @skip_if_server_version_lt("7.4.0")
-@pytest.mark.skipif(
-    not os.path.exists(UNIX_SOCKET_PATH),
-    reason=f"No Redis Unix socket at {UNIX_SOCKET_PATH}",
-)
 class TestUnixSocketCache:
-    def test_get_from_cache(self):
+    def test_get_from_cache(self, unix_socket_path):
         key = f"unix-socket-cache-{uuid.uuid4()}"
         r = redis.Redis(
-            unix_socket_path=UNIX_SOCKET_PATH, protocol=3, cache_config=CacheConfig()
+            unix_socket_path=unix_socket_path, protocol=3, cache_config=CacheConfig()
         )
-        r2 = redis.Redis(unix_socket_path=UNIX_SOCKET_PATH)
+        r2 = redis.Redis(unix_socket_path=unix_socket_path)
         try:
             cache = r.get_cache()
             r2.set(key, "bar")
