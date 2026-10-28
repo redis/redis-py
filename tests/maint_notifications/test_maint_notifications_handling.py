@@ -3344,7 +3344,9 @@ def test_pool_close_in_forked_child_does_not_block_on_inherited_pool_lock(
     pool = _moving_pool(pool_class)
     handler = pool._maint_notifications_pool_handler
     handler.handle_notification(
-        NodeMovingNotification(id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60)
+        NodeMovingNotification(
+            id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+        )
     )
     assert handler._pending_handoffs
     holding = threading.Event()
