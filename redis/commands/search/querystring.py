@@ -19,6 +19,16 @@ def tags(*t):
     syntax inside a tag set (``|``, ``}``, ``*``, spaces, ...) is escaped, so a
     value cannot add tags or clauses to the query it is part of.
 
+    Migrating from earlier versions, which inserted values verbatim:
+
+    - Pass values unescaped. A value escaped by hand, e.g. ``"foo\\-bar"``, has
+      its backslash escaped again and no longer matches ``foo-bar``.
+    - A trailing ``*`` is matched as a literal ``*`` rather than as a prefix
+      match. Write the prefix query (``@field:{foo*}``) as a query string.
+    - A ``$name`` parameter placeholder is matched as the literal tag
+      ``$name``. Write ``@field:{$name}`` as a query string and pass the value
+      with ``query_params``.
+
     ### Parameters
 
     - **t**: Tags to search for
