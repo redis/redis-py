@@ -227,7 +227,6 @@ class AsyncBaseParser(BaseParser):
         "_read_timeout",
         "_apply_read_timeout",
         "_active_read_timeout",
-        "_in_maintenance_window",
     )
 
     def __init__(self, socket_read_size: int):
@@ -247,48 +246,11 @@ class AsyncBaseParser(BaseParser):
         # (see AbstractConnection.update_current_socket_timeout). While a
         # single stream read is in flight, its timeout context is exposed as
         # _active_read_timeout so the connection can reschedule it. Reads
-        # with an explicit caller timeout do not apply per-read deadlines.
+        # with an explicit caller timeout do not apply per-read deadlines,
+        # and a None _read_timeout never arms one.
         self._read_timeout: Optional[float] = None
         self._apply_read_timeout: bool = False
         self._active_read_timeout = None
-        # Mirrors whether the connection is inside a maintenance window,
-        # pushed by AbstractConnection.update_current_socket_timeout. While
-        # a window is open, a read whose timeout is None still arms an
-        # (empty) timeout context, so the restore at the end of the window
-        # can impose a deadline on it; outside a window it arms nothing.
-        self._in_maintenance_window: bool = False
-
-    def _should_arm_read_timeout(self, can_wait: bool) -> bool:
-        """Whether a stream read starting now gets a socket_timeout window.
-
-        The sync client applies socket_timeout to each individual recv();
-        async reads do the same by arming a timeout around each stream
-        read instead of around the whole response — but only when the
-        read can actually wait. A read the StreamReader can satisfy from
-        its own buffer (or one on an at-EOF stream) returns at once, so
-        arming a timeout for it would only waste an asyncio.Timeout on
-        work that cannot block: a response made of many small pieces
-        would otherwise arm one per piece instead of one per read that
-        waits. A None timeout likewise arms nothing outside a maintenance
-        window: no deadline could be imposed on the read later, because
-        only the restore at the end of a window reschedules an in-flight
-        read to a real deadline.
-        """
-        if not can_wait or not self._apply_read_timeout:
-            return False
-        return self._read_timeout is not None or self._in_maintenance_window
-
-    def _stream_buffer_has(self, needle: bytes) -> bool:
-        """Whether the bytes the StreamReader already holds contain needle.
-
-        StreamReader's buffer is private and its layout differs across
-        Python versions (a bytearray, or a deque of chunks); a one-byte
-        needle is found exactly either way.
-        """
-        buffer = self._stream._buffer
-        if isinstance(buffer, (bytes, bytearray)):
-            return needle in buffer
-        return any(needle in chunk for chunk in buffer)
 
     @deprecated_function(
         version="8.0.0", reason="Use can_read() instead", name="can_read_destructive"
@@ -687,12 +649,17 @@ class _AsyncRESPBase(AsyncBaseParser):
         else:
             tail = self._buffer[self._pos :]
             try:
-                data = await self._read_exactly(want - len(tail))
+                remaining = want - len(tail)
+                if len(self._stream._buffer) >= remaining:
+                    data = await self._stream.readexactly(remaining)
+                    self._chunks.append(data)
+                else:
+                    data = await self._read_exactly(remaining)
             except IncompleteReadError as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
             result = (tail + data)[:-2]
-            # No _chunks append here: _read_exactly already recorded each
-            # piece in the resume state as it was read.
+            # The bytes read from the stream were recorded in the resume
+            # state by either the buffered fast path or _read_exactly.
         self._pos += want
         return result
 
@@ -703,10 +670,9 @@ class _AsyncRESPBase(AsyncBaseParser):
         bytes are available, mirroring the sync SocketBuffer, whose recv()
         does the same; readexactly would instead wait for a whole piece
         even when bytes keep arriving. Each read that can actually wait
-        is bounded by its own socket_timeout window (see
-        _should_arm_read_timeout), so a large payload whose pieces keep
-        arriving does not time out merely because the whole payload takes
-        longer than socket_timeout to arrive.
+        is bounded by its own socket_timeout window, so a large payload
+        whose pieces keep arriving does not time out merely because the
+        whole payload takes longer than socket_timeout to arrive.
 
         Every piece is added to self._chunks as soon as it is read, not
         only once the whole payload has arrived: the pieces are already
@@ -726,11 +692,14 @@ class _AsyncRESPBase(AsyncBaseParser):
         # Index of this call's first piece in the resume state.
         chunks_start = len(self._chunks)
         while remaining > 0:
-            # StreamReader.read returns as soon as any bytes are buffered,
-            # so it can only wait while the buffer is empty and the stream
-            # is not at EOF; only then is the timeout armed.
-            if self._should_arm_read_timeout(
-                not self._stream._buffer and not self._stream.at_eof()
+            # StreamReader.read returns as soon as any bytes are buffered.
+            # Check the flags first, avoiding private stream access unless
+            # per-read timeouts apply. StreamReader.read can only wait while
+            # its bytearray buffer is empty; only then arm the timeout.
+            if (
+                self._apply_read_timeout
+                and self._read_timeout is not None
+                and not self._stream._buffer
             ):
                 async with async_timeout(self._read_timeout) as active_timeout:
                     self._active_read_timeout = active_timeout
@@ -764,11 +733,14 @@ class _AsyncRESPBase(AsyncBaseParser):
             tail = self._buffer[self._pos :]
             # Each line gets a fresh socket_timeout window, like each read
             # in _read_exactly: the deadline must not be shared across all
-            # the lines of one response. readline can only wait while the
-            # stream buffer holds no line end and the stream is not at
-            # EOF; only then is the timeout armed.
-            if self._should_arm_read_timeout(
-                not self._stream.at_eof() and not self._stream_buffer_has(b"\n")
+            # the lines of one response. Check the flags first to avoid
+            # private stream access when per-read timeouts do not apply.
+            # readline can only wait while the stream's bytearray buffer
+            # holds no line end.
+            if (
+                self._apply_read_timeout
+                and self._read_timeout is not None
+                and b"\n" not in self._stream._buffer
             ):
                 async with async_timeout(self._read_timeout) as active_timeout:
                     self._active_read_timeout = active_timeout

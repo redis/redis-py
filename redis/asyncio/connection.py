@@ -658,29 +658,16 @@ class AsyncMaintNotificationsAbstractConnection:
         # response started.
         parser = getattr(self, "_parser", None)
         if parser is not None:
-            # Also tell the parser whether a maintenance window is open:
-            # while one is, even a None per-read timeout keeps an (empty)
-            # timeout context armed, so the restore at the end of the
-            # window can impose a deadline on a read in flight; outside a
-            # window a None timeout arms nothing. The restore call (-1)
-            # closes the window; any other call made while this connection
-            # is under maintenance opens or keeps it.
-            parser._in_maintenance_window = relaxed_timeout != -1 and (
-                self.maintenance_state
-                in (MaintenanceState.MAINTENANCE, MaintenanceState.MOVING)
-            )
             if getattr(parser, "_apply_read_timeout", False):
                 parser._read_timeout = timeout
         self._reschedule_active_read_timeout(timeout)
 
     def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
-        timeout_context = getattr(self, "_active_read_timeout", None)
-        if timeout_context is None:
-            # Per-read deadlines live on the parser: fall back to the
-            # context of the stream read currently in flight there.
-            timeout_context = getattr(
-                getattr(self, "_parser", None), "_active_read_timeout", None
-            )
+        # Per-read deadlines live on the parser, including the context of
+        # the stream read currently in flight.
+        timeout_context = getattr(
+            getattr(self, "_parser", None), "_active_read_timeout", None
+        )
         if timeout_context is None:
             # No read_response call is currently inside its socket timeout
             # context, so there is no in-flight deadline to relax or restore.
@@ -757,7 +744,6 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         "_reader",
         "_writer",
         "_parser",
-        "_active_read_timeout",
         "_connect_callbacks",
         "_buffer_cutoff",
         "_lock",
@@ -877,7 +863,6 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
         self._socket_read_size = socket_read_size
-        self._active_read_timeout = None
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -1040,9 +1025,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         # deadline lives in the timeout context wrapping the in-flight read
         # (on the parser, which applies socket_timeout per stream read).
         active_read_timeout = None
-        timeout_context = self._active_read_timeout
-        if timeout_context is None:
-            timeout_context = getattr(self._parser, "_active_read_timeout", None)
+        timeout_context = getattr(self._parser, "_active_read_timeout", None)
         if timeout_context is not None:
             try:
                 when = timeout_context.when()
