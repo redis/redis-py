@@ -3241,10 +3241,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             pipe.set("a", int(a) + 1)   # queued, chains
             await pipe.execute()
 
-    The split commands from the note above are the exception: between :meth:`watch`
-    and :meth:`multi`, ``delete``, ``exists`` and ``touch`` return the pipeline and
-    drop the command unsent, so do not use them there. ``mset_nonatomic`` raises
-    ``NotImplementedError`` in a transactional pipeline.
+    The split commands from the note above and ``unlink`` are the exception: between
+    :meth:`watch` and :meth:`multi`, ``delete``, ``exists`` and ``touch`` return the
+    pipeline and ``unlink`` returns ``None``, and all four drop the command unsent, so
+    do not use them there. ``mset_nonatomic`` raises ``NotImplementedError`` in a
+    transactional pipeline.
 
     Outside a transactional pipeline ``watch``, ``unwatch`` and ``discard`` raise
     :class:`~.RedisClusterException`, and the ``himport_*`` methods act on the shared
@@ -3426,7 +3427,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             await pipe.unlink("A")
 
         Outside a transactional block only one key is accepted; more raises
-        :class:`~.RedisClusterException`.
+        :class:`~.RedisClusterException`. Between :meth:`watch` and :meth:`multi`
+        nothing is sent, so do not use it there.
         """
         await self._execution_strategy.unlink(*names)
 
