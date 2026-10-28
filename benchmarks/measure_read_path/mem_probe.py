@@ -3,9 +3,11 @@
 Runs one operation per scenario under tracemalloc and reports the peak
 traced allocation above the starting point, in MiB and as a multiple of the
 payload. Each config runs the same scenarios through the async client and
-through the sync client. tracemalloc slows the run, so these numbers are for
-memory only; use run_bench.py for timing. Memory allocated inside hiredis' C
-reader is not traced, so the hiredis rows understate its peak.
+through the sync client, in --passes runs per tree whose median is reported
+and whose spread is the noise the gate allows for. tracemalloc slows the
+run, so these numbers are for memory only; use run_bench.py for timing.
+Memory allocated inside hiredis' C reader is not traced, so the hiredis rows
+understate its peak.
 
 Run from the repository root:
 
@@ -17,6 +19,7 @@ import argparse
 import asyncio
 import json
 import os
+import statistics
 import subprocess
 import sys
 import time
@@ -102,6 +105,11 @@ def make_sync_client(redis, args):
     return redis.Redis(connection_pool=connection_pool)
 
 
+def values(passes, scenario, key):
+    """One tree's value for scenario and key, one per pass."""
+    return [p[scenario][key] for p in passes]
+
+
 def result(peaks, payload, start_wall):
     peak = min(peaks)  # least-disturbed run
     return {
@@ -182,23 +190,30 @@ def child(argv):
 
 
 def main():
-    # no abbreviations: the child's --tree must not match --trees
+    if "--child" in sys.argv:
+        # before the parent parser, which would take the child's --host,
+        # --port and --db for itself
+        argv = sys.argv[1:]
+        argv.remove("--child")
+        return child(argv)
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        allow_abbrev=False,
     )
     p.add_argument("--trees", nargs="+")
     p.add_argument("--python", default=sys.executable)
     p.add_argument("--host", default="localhost")
     p.add_argument("--port", type=int, default=6379)
     p.add_argument("--db", type=int, default=13)
+    p.add_argument(
+        "--passes",
+        type=int,
+        default=5,
+        help="runs per tree and config; their spread is the noise the gate allows for",
+    )
     p.add_argument("--output-dir", default=os.path.join(HERE, "results"))
     gate.add_gate_args(p)
-    args, rest = p.parse_known_args()
-    if "--child" in rest:
-        rest.remove("--child")
-        return child(rest)
+    args = p.parse_args()
     if not args.trees:
         p.error("--trees is required")
     trees = {k: os.path.abspath(v) for k, v in (t.split("=", 1) for t in args.trees)}
@@ -212,51 +227,57 @@ def main():
         "| config | tree | seconds |",
         "|---|---|---|",
     ]
+    # results[config][tree] -> list of {scenario: result}, one per pass
     results = {}
     total_start = time.perf_counter()
     for client, parser, protocol, timeout in GRID:
         cfg = f"{client}/{parser}/resp{protocol}/timeout={timeout}"
-        res = {}
-        for label, path in trees.items():
-            cmd = [
-                args.python,
-                "-I",
-                os.path.abspath(__file__),
-                "--child",
-                "--tree",
-                path,
-                "--client",
-                client,
-                "--parser",
-                parser,
-                "--protocol",
-                str(protocol),
-                "--socket-timeout",
-                timeout,
-                "--host",
-                args.host,
-                "--port",
-                str(args.port),
-                "--db",
-                str(args.db),
-            ]
-            start = time.perf_counter()
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            if proc.returncode != 0:
-                raise SystemExit(proc.stderr)
-            times.append(f"| {cfg} | {label} | {time.perf_counter() - start:.1f} |")
-            res[label] = json.loads(proc.stdout.strip().splitlines()[-1])
+        res = {label: [] for label in trees}
+        for i in range(args.passes):
+            for label in run_bench.tree_order(trees, i):
+                path = trees[label]
+                cmd = [
+                    args.python,
+                    "-I",
+                    os.path.abspath(__file__),
+                    "--child",
+                    "--tree",
+                    path,
+                    "--client",
+                    client,
+                    "--parser",
+                    parser,
+                    "--protocol",
+                    str(protocol),
+                    "--socket-timeout",
+                    timeout,
+                    "--host",
+                    args.host,
+                    "--port",
+                    str(args.port),
+                    "--db",
+                    str(args.db),
+                ]
+                start = time.perf_counter()
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                if proc.returncode != 0:
+                    raise SystemExit(proc.stderr)
+                times.append(f"| {cfg} | {label} | {time.perf_counter() - start:.1f} |")
+                res[label].append(json.loads(proc.stdout.strip().splitlines()[-1]))
         results[cfg] = res
-        for sc in next(iter(res.values())):
+        for sc in res[next(iter(trees))][0]:
             cells = []
             for t in trees:
-                m = res[t][sc]
-                x = f", {m['peak_x_payload']}x" if m["peak_x_payload"] else ""
-                cells.append(f"{m['peak_mib']} MiB{x}")
+                peak = statistics.median(values(res[t], sc, "peak_mib"))
+                x = ""
+                if res[t][0][sc]["peak_x_payload"]:
+                    x = f", {statistics.median(values(res[t], sc, 'peak_x_payload'))}x"
+                cells.append(f"{peak} MiB{x}")
             rows.append(f"| {cfg} | {sc} | " + " | ".join(cells) + " |")
     total = time.perf_counter() - total_start
     text = (
-        "Peak traced memory per operation (x = multiple of the payload)\n\n"
+        f"Peak traced memory per operation, median of {args.passes} passes "
+        "(x = multiple of the payload)\n\n"
         "Trees: "
         + ", ".join(f"`{k}`={heads[k]}" for k in trees)
         + "\n\n"
@@ -265,8 +286,9 @@ def main():
         + "\n".join(times)
     )
     print(text)
-    # peak memory is nearly deterministic (the least-disturbed of the
-    # repeats), so no noise term: only the allowed percentage applies
+    # The peak of one run is the least-disturbed of its repeats, but it still
+    # depends on how the reply arrives in socket reads, so it moves between
+    # runs of the same code: the spread across passes is the noise term.
     summaries = [
         gate.render(
             "Read path, peak traced memory",
@@ -275,11 +297,17 @@ def main():
                     {
                         "config": cfg,
                         "scenario": sc,
-                        "old": res[old][sc]["peak_mib"],
-                        "new": res[new][sc]["peak_mib"],
+                        "old": statistics.median(values(res[old], sc, "peak_mib")),
+                        "new": statistics.median(values(res[new], sc, "peak_mib")),
+                        "old_noise": run_bench.rel_iqr(
+                            values(res[old], sc, "peak_mib")
+                        ),
+                        "new_noise": run_bench.rel_iqr(
+                            values(res[new], sc, "peak_mib")
+                        ),
                     }
                     for cfg, res in results.items()
-                    for sc in res[old]
+                    for sc in res[old][0]
                 ],
                 args.allowed_regression,
                 args.max_limit,

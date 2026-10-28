@@ -185,7 +185,8 @@ class, `connection` (`ConnectionPool`, the default) or `blocking`
 per node and has no pool class. Add `--uvloop` to repeat the async configs
 under uvloop. Every combination of these runs, and each worker checks that its
 connections use the requested parser before timing. Each round runs every
-tree once per config, in a shuffled order. A delta is flagged only above the
+tree once per config, in an order rotated from round to round, so every
+tree runs first equally often. A delta is flagged only above the
 allowed regression and above twice the larger noise (relative IQR across
 rounds) of the two trees; see "Regression gate" below. Every scenario checks
 its reply, so a broken read path cannot pass as a fast one.
@@ -209,7 +210,8 @@ or socket. `mem_probe` runs its scenarios through the async and the sync
 client. It uses tracemalloc, which does not see hiredis' C reader buffer, so
 the hiredis rows understate its peak. The sync pure-Python peak for a 10 MB
 GET moves by up to about 3.5% between runs of the same code, because it
-depends on how the reply arrives in socket reads.
+depends on how the reply arrives in socket reads, so `mem_probe` runs every
+config `--passes` times per tree (default 5) and reports the median.
 
 Every tool reports how long each test took, and writes JSON and Markdown
 results under `benchmarks/measure_read_path/results/` (ignored by git), with the
@@ -222,8 +224,8 @@ every `--compare candidate:baseline` pair: whether the gate passed, and for
 every regressed or inconclusive cell the baseline and candidate numbers and
 the delta. A cell regresses when the candidate is worse by more than
 `--allowed-regression` percent (default 5) and by more than twice the noise
-measured for either tree. The noise is the relative IQR of a tree's per-round
-results. The noise rule may raise the limit only up to `--max-limit` percent
+measured for either tree. The noise is the relative IQR of a tree's results
+across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The noise rule may raise the limit only up to `--max-limit` percent
 (default 10): a cell that would need a higher limit is inconclusive, because it
 is too noisy to catch a regression that size, and it fails the gate instead of
 passing unseen. With `--fail-on-regression` the tool exits 1 on a regression
@@ -243,16 +245,18 @@ gates on request, not on every pull request:
 - by hand, from Actions > Benchmarks > Run workflow, with a base ref (default
   `master`), a ref under test (a branch, tag, SHA or
   `refs/pull/<number>/head`) and the allowed regression (default 3%);
-- on a pull request labeled `with-benchmarks`, when the label is added and on
-  every push while it stays. The tree under test is GitHub's merge of the PR
-  onto its target branch, and the base is `master`.
+- on a pull request labeled `with-benchmarks` or `run-benchmark`, when the
+  label is added and on every push while it stays. The tree under test is
+  GitHub's merge of the PR onto its target branch, and the base is the
+  commit it was merged onto, so only the PR's own effect is measured.
 
 `ci_matrix.py` generates the jobs: one each for peak memory and the
 parser-only benchmark, and one `run_bench` job per config, every client,
 topology, pool class, parser, protocol and socket timeout combination (58
 jobs). Each job measures both trees on the same runner, with the tools from
 the workflow's own commit, so the ref under test does not need the
-benchmarks. The workflow is informational: keep it out of the required
+benchmarks, and against only the standalone server and the cluster, so no
+other container competes for the runner's CPU. The workflow is informational: keep it out of the required
 status checks, so a regression shows as a failed check without blocking the
 merge.
 
@@ -274,8 +278,9 @@ python -m benchmarks.maint_notifications_async_perf --flow notifications --effec
 
 `--fault-injector-url` defaults to `FAULT_INJECTION_API_URL`, like the
 scenario tests. `--db-name`, `--db-port`, `--shards`, `--effect` and
-`--trigger` set the database and the migration. Run with `--help` for the
-load options.
+`--trigger` set the database and the migration, and `--op-timeout` (default
+300 seconds, the scenario tests' slot-shuffle budget) how long to wait for
+it. Run with `--help` for the load options.
 
 ## OpenTelemetry Benchmarks
 

@@ -468,9 +468,12 @@ async def teardown(r):
 
 async def check_parser(r, expected, expected_pool):
     if hasattr(r, "nodes_manager"):
-        # the async cluster client keeps connections per node, no pool class
+        # the async cluster client keeps connections per node, no pool class.
+        # acquire_connection() does not connect, so connect it here:
+        # pool_checkout times this node's idle connection and may run alone
         node = r.get_node_from_key(K_SMALL)
         conn = node.acquire_connection()
+        await conn.connect()
         node.release(conn)
     else:
         if type(r.connection_pool) is not expected_pool:

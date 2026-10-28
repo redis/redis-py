@@ -22,8 +22,9 @@ import sys
 
 # Default allowed regression, in percent. Timing noise on a quiet machine is
 # 1-8% per cell, so 5% plus the noise rule passes run-to-run variance while
-# still catching the slowdowns that matter for every command. Peak memory is
-# nearly deterministic, so its 5% is pure headroom.
+# still catching the slowdowns that matter for every command. Peak memory
+# moves by a few percent between runs too, so mem_probe also measures its
+# noise across passes.
 DEFAULT_ALLOWED_PCT = 5.0
 NOISE_FACTOR = 2.0
 # Largest limit the noise rule may set, in percent. Above it a cell cannot

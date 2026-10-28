@@ -4,8 +4,8 @@ Two flows, selectable via --flow:
 
   throughput      N concurrent tasks run SET/GET against the cluster for a fixed
                   duration, optionally triggering a slot-migration mid-run. Reports
-                  throughput, per-command latency percentiles, errors, and — most
-                  importantly — event-loop stalls (the symptom we are chasing).
+                  throughput, per-command latency percentiles, errors, and - most
+                  importantly - event-loop stalls (the symptom we are chasing).
 
   notifications   Acquire one connection per node, trigger a migration effect, and
                   watch the SMIGRATING/SMIGRATED handling + per-connection state
@@ -35,7 +35,6 @@ import asyncio
 import logging
 import os
 import time
-from typing import Dict, List, Optional
 
 from redis.maint_notifications import MaintenanceState
 
@@ -61,7 +60,7 @@ DEFAULT_FAULT_INJECTOR_URL = os.getenv(
 # Database to create for the run. Mirrors the slot-shuffle / external-ip config
 # used by the scenario tests. --db-name, --db-port and --shards override the
 # matching keys.
-DEFAULT_BDB_CONFIG: Dict = {
+DEFAULT_BDB_CONFIG: dict = {
     "memory_size": 134217728,
     "eviction_policy": "volatile-lru",
     "sharding": True,
@@ -83,6 +82,10 @@ DEFAULT_BDB_CONFIG: Dict = {
 # Default migration effect/trigger to fire mid-run.
 DEFAULT_EFFECT = SlotMigrateEffects.SLOT_SHUFFLE
 DEFAULT_TRIGGER = "migrate"
+# How long to wait for the fault injector's operation. It blocks on a
+# slot-shuffle reshard for up to 300s, the SLOT_SHUFFLE_TIMEOUT of the
+# scenario tests; a shorter wait fails slow but successful migrations.
+DEFAULT_OP_TIMEOUT = 300
 
 # Client connection knobs.
 DEFAULT_SOCKET_TIMEOUT = 2.0
@@ -106,7 +109,7 @@ def _apply_redis_log_level(level: int):
 
 
 # =============================================================================
-# Event-loop lag monitor — the core diagnostic.
+# Event-loop lag monitor - the core diagnostic.
 # =============================================================================
 
 
@@ -117,8 +120,8 @@ class LoopLagMonitor:
     def __init__(self, interval: float = 0.05, stall_threshold: float = 0.25):
         self.interval = interval
         self.stall_threshold = stall_threshold
-        self.samples: List[float] = []
-        self._task: Optional[asyncio.Task] = None
+        self.samples: list[float] = []
+        self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
     async def _run(self):
@@ -164,7 +167,7 @@ class LoopLagMonitor:
 
 async def setup_cluster(
     fault_injector: AsyncREFaultInjector,
-    bdb_config: Dict,
+    bdb_config: dict,
     maint_enabled: bool,
     socket_timeout: float,
     socket_connect_timeout: float,
@@ -214,9 +217,10 @@ async def teardown(client, fault_injector, endpoints_config, keep_db: bool):
 
 async def trigger_migration(
     fault_injector: AsyncREFaultInjector,
-    endpoints_config: Dict,
+    endpoints_config: dict,
     effect: SlotMigrateEffects,
     trigger: str,
+    timeout: int,
 ):
     logger.info(f"Triggering effect={effect.value} trigger={trigger} ...")
     action_id = await fault_injector.trigger_effect(
@@ -224,7 +228,7 @@ async def trigger_migration(
         effect_name=effect,
         trigger_name=trigger,
     )
-    result = await fault_injector.get_operation_result(action_id, timeout=120)
+    result = await fault_injector.get_operation_result(action_id, timeout=timeout)
     logger.info(f"Effect completed: {result.get('status')}")
 
 
@@ -280,8 +284,8 @@ async def run_throughput_flow(args):
         monitor.start()
 
         stats = {"ok": 0, "err": 0}
-        latencies: List[float] = []
-        errors: List[str] = []
+        latencies: list[float] = []
+        errors: list[str] = []
         stop = asyncio.Event()
 
         async def worker(name: str):
@@ -312,7 +316,11 @@ async def run_throughput_flow(args):
         await asyncio.sleep(args.ramp)
         if args.trigger_migration:
             await trigger_migration(
-                fault_injector, endpoints_config, args.effect, args.trigger
+                fault_injector,
+                endpoints_config,
+                args.effect,
+                args.trigger,
+                args.op_timeout,
             )
 
         await asyncio.sleep(args.duration)
@@ -335,7 +343,7 @@ async def run_throughput_flow(args):
             )
         monitor.report()
         if errors:
-            uniq: Dict[str, int] = {}
+            uniq: dict[str, int] = {}
             for e in errors:
                 uniq[e] = uniq.get(e, 0) + 1
             logger.info(f"  error breakdown: {uniq}")
@@ -349,7 +357,7 @@ async def run_throughput_flow(args):
 # =============================================================================
 
 
-def _node_connections(node) -> List:
+def _node_connections(node) -> list:
     return list(node._connections)
 
 
@@ -380,7 +388,11 @@ async def run_notifications_flow(args):
         # Trigger the migration in the background and poll connection state.
         trigger_task = asyncio.create_task(
             trigger_migration(
-                fault_injector, endpoints_config, args.effect, args.trigger
+                fault_injector,
+                endpoints_config,
+                args.effect,
+                args.trigger,
+                args.op_timeout,
             )
         )
 
@@ -484,6 +496,12 @@ def parse_args():
     )
     p.add_argument("--trigger", default=DEFAULT_TRIGGER)
     p.add_argument(
+        "--op-timeout",
+        type=int,
+        default=DEFAULT_OP_TIMEOUT,
+        help="Seconds to wait for the fault injector's operation.",
+    )
+    p.add_argument(
         "--redis-log-level",
         choices=["INFO", "DEBUG"],
         default="INFO",
@@ -507,7 +525,7 @@ async def main():
     _apply_redis_log_level(getattr(logging, args.redis_log_level))
     if args.asyncio_debug:
         # asyncio debug mode logs any callback/coroutine step that runs longer
-        # than slow_callback_duration, naming the offending function — this is
+        # than slow_callback_duration, naming the offending function - this is
         # how we identify what synchronous work is blocking the event loop.
         loop = asyncio.get_running_loop()
         loop.set_debug(True)

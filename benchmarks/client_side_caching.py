@@ -209,7 +209,11 @@ def run_worker(
 
         try:
             if is_read:
-                client.get(key)
+                # every key holds `value`, so any other reply is a broken
+                # read (a cache returning stale or missing data), not a fast one
+                reply = client.get(key)
+                if reply != value:
+                    raise ValueError(f"GET {key} returned {reply!r:.80}")
                 result.read_operations += 1
             else:
                 client.set(key, value)

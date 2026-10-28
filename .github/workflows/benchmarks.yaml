@@ -9,9 +9,11 @@ name: Benchmarks
 # It runs in two ways:
 # - by hand (Actions > Benchmarks > Run workflow), with any base ref (default
 #   master) and any ref under test;
-# - on a pull request that carries the `with-benchmarks` label, when the label
-#   is added and on every push while it stays. The tree under test is
-#   GitHub's merge of the PR onto its target branch, and the base is master.
+# - on a pull request that carries the `with-benchmarks` or `run-benchmark`
+#   label, when the label is added and on every push while it stays. The tree
+#   under test is GitHub's merge of the PR onto its target branch, and the
+#   base is the commit it was merged onto, so only the PR's own effect is
+#   measured.
 #
 # The tools run from the workflow's own commit, checked out apart from the
 # two measured trees, so a ref under test does not need the benchmarks. Both
@@ -38,7 +40,7 @@ on:
     types: [labeled, reopened, synchronize]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.test_ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}..{1}', inputs.base_ref, inputs.test_ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -47,7 +49,7 @@ permissions:
 env:
   # Keep in step with CURRENT_REDIS_VERSION in integration.yaml.
   REDIS_VERSION: '8.10.2'
-  BASE_REF: ${{ inputs.base_ref || 'master' }}
+  BASE_REF: ${{ inputs.base_ref || github.base_ref }}
   TEST_REF: ${{ inputs.test_ref || github.sha }}
   # Accepted slowdown or growth in percent, on top of the noise rule.
   ALLOWED_REGRESSION: ${{ inputs.allowed_regression || '3' }}
@@ -57,12 +59,15 @@ env:
 jobs:
   plan:
     name: Plan
-    # A labeled event runs only for this label; other PR events run while
-    # the PR carries it.
+    # A labeled event runs only for these labels; other PR events run while
+    # the PR carries one of them.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'with-benchmarks') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'with-benchmarks'))
+      (github.event.action == 'labeled' &&
+        contains(fromJSON('["with-benchmarks", "run-benchmark"]'), github.event.label.name)) ||
+      (github.event.action != 'labeled' &&
+        (contains(github.event.pull_request.labels.*.name, 'with-benchmarks') ||
+          contains(github.event.pull_request.labels.*.name, 'run-benchmark')))
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -93,13 +98,20 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.BASE_REF }}
-          path: base
-
-      - uses: actions/checkout@v7
-        with:
           ref: ${{ env.TEST_REF }}
           path: test
+          # a PR's merge commit needs its first parent, the base
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+
+      - name: Check out the commit the PR was merged onto
+        if: github.event_name == 'pull_request'
+        run: git -C test worktree add --detach ../base HEAD^1
+
+      - uses: actions/checkout@v7
+        if: github.event_name != 'pull_request'
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: base
 
       - uses: actions/setup-python@v7
         with:
@@ -108,17 +120,18 @@ jobs:
       - name: Install dependencies
         # redis-py itself is not installed: each tool imports it from the
         # tree it measures and checks where it came from.
-        run: pip install "hiredis>=3.2.0" "$(grep '^invoke' tools/dev_requirements.txt)"
+        run: pip install "hiredis>=3.2.0"
 
       - name: Start Redis
-        # The same endpoints as the CI workflow: standalone on 6379 and the
-        # cluster on 16379.
+        # Only the two servers the tools use, standalone on 6379 and the
+        # cluster on 16379: other containers would compete with the
+        # measurement for the runner's CPU.
         working-directory: tools
         env:
           CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.REDIS_VERSION }}
           CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.REDIS_VERSION }}
         run: |
-          invoke devenv --endpoints all
+          docker compose up -d redis cluster
           for i in $(seq 60); do
             docker exec redis-standalone redis-cli ping | grep -q PONG &&
               docker exec redis-cluster redis-cli -p 16379 cluster info |

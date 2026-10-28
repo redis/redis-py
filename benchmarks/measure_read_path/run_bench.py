@@ -1,7 +1,7 @@
 """A/B benchmark of the read path across redis-py checkouts.
 
 Each round runs worker.py once per (config, tree) in a fresh interpreter,
-with the tree order shuffled per round so drift (thermal, other load) is
+with the tree order rotated per round so drift (thermal, other load) is
 spread evenly. The reported value per cell is the median over rounds of the
 worker's median time per operation; the spread is the relative IQR across
 rounds, which is the noise floor a delta has to beat. The report also lists
@@ -32,7 +32,6 @@ import argparse
 import datetime
 import json
 import os
-import random
 import statistics
 import subprocess
 import sys
@@ -114,7 +113,6 @@ def parse_args():
     p.add_argument("--db", type=int, default=13)
     p.add_argument("--cluster-port", type=int, default=16379)
     p.add_argument("--count-arms", action="store_true")
-    p.add_argument("--seed", type=int, default=0)
     p.add_argument(
         "--output-dir",
         default=os.path.join(HERE, "results"),
@@ -160,6 +158,16 @@ def run_worker(args, tree, extra, scenarios=None):
     if proc.returncode != 0:
         raise SystemExit(f"worker failed: {' '.join(cmd)}\n{proc.stderr}")
     return json.loads(proc.stdout.strip().splitlines()[-1]), elapsed
+
+
+def tree_order(trees, i):
+    """The tree labels for run i, rotated so that over len(trees) runs every
+    tree runs in every position once. Drift between consecutive runs
+    (thermal, CPU frequency, other load) then falls evenly on the trees
+    instead of mostly on one of them."""
+    labels = list(trees)
+    k = i % len(labels)
+    return labels[k:] + labels[:k]
 
 
 def topology_args(args, topology):
@@ -222,7 +230,7 @@ class Run:
     def __init__(self, args, trees):
         self.args = args
         self.trees = trees
-        self.rng = random.Random(args.seed)
+        self.rounds_run = 0
         # samples[config][tree][scenario] -> list of per-round medians
         self.samples = {}
         # wall[config][tree][scenario] -> list of per-round execution times
@@ -231,14 +239,12 @@ class Run:
         self.extra_rounds = 0
 
     def round(self, configs, scenarios_for=None):
-        """Run every tree once per config, in a shuffled order. scenarios_for
+        """Run every tree once per config, in a rotated order. scenarios_for
         maps a config label to the scenarios to run (default: all)."""
         for cfg in configs:
             label_cfg = config_label(*cfg)
             scenarios = scenarios_for.get(label_cfg) if scenarios_for else None
-            order = list(self.trees)
-            self.rng.shuffle(order)
-            for label in order:
+            for label in tree_order(self.trees, self.rounds_run):
                 res, elapsed = run_worker(
                     self.args,
                     self.trees[label],
@@ -254,6 +260,7 @@ class Run:
                     self.wall.setdefault(label_cfg, {}).setdefault(
                         label, {}
                     ).setdefault(sc, []).append(v)
+        self.rounds_run += 1
 
     def cells(self, new, old):
         out = []

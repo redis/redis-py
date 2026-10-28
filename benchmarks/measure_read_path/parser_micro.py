@@ -206,8 +206,9 @@ def main():
     # passes[tree] -> list of {config: {scenario: result}}
     passes = {t: [] for t in trees}
     total_start = time.perf_counter()
-    for _ in range(args.passes):
-        for label, path in trees.items():
+    for i in range(args.passes):
+        for label in run_bench.tree_order(trees, i):
+            path = trees[label]
             cmd = [
                 args.python,
                 "-I",
