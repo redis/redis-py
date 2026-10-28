@@ -2069,7 +2069,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn = conn
         self.retry = self._conn.retry
         self.host = self._conn.host
-        self.port = self._conn.port
+        # A UnixDomainSocketConnection has no port
+        self.port = getattr(self._conn, "port", None)
         self.db = self._conn.db
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider

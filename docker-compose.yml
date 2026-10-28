@@ -19,7 +19,7 @@ services:
       - REDIS_CLUSTER=no
       - PORT=6379
       - TLS_PORT=6666
-    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save "" --unixsocket /redis/work/redis.sock --unixsocketperm 777}
     ports:
       - 6379:6379
       - 6666:6666 # TLS port
