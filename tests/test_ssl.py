@@ -901,7 +901,6 @@ class TestOCSPCertificateBinding:
         # An unsigned UNAUTHORIZED status must not let the check move on to a
         # certificate fetched over a second handshake, GOOD as that one may be.
         import base64
-        from urllib.parse import urlparse
 
         from cryptography.hazmat.primitives import serialization
         from cryptography.x509 import ocsp
