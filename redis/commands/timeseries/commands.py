@@ -187,7 +187,7 @@ class TimeSeriesCommands:
                 all.
             labels:
                 A dictionary of label-value pairs that represent metadata labels of the
-                key.
+                key. Pass an empty dictionary to remove all labels from the series.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
                 of 8 in the range `[48..1048576]`. In earlier versions of the module the
@@ -225,7 +225,7 @@ class TimeSeriesCommands:
         self._append_retention(params, retention_msecs)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
-        self._append_labels(params, labels)
+        self._append_labels(params, labels, empty_removes=True)
         self._append_insertion_filters(
             params, ignore_max_time_diff, ignore_max_val_diff
         )
@@ -1968,9 +1968,20 @@ class TimeSeriesCommands:
             params.extend(["RETENTION", retention])
 
     @staticmethod
-    def _append_labels(params: list[EncodableT], labels: dict[str, str] | None):
-        """Append LABELS property to params."""
-        if labels:
+    def _append_labels(
+        params: list[EncodableT],
+        labels: dict[str, str] | None,
+        *,
+        empty_removes: bool = False,
+    ):
+        """Append LABELS property to params.
+
+        An empty mapping normally means "no labels", so nothing is appended. For
+        TS.ALTER an explicitly empty mapping removes every label from the series,
+        which the server encodes as the LABELS keyword with no pairs; pass
+        ``empty_removes=True`` for that command.
+        """
+        if labels or (empty_removes and labels is not None):
             params.append("LABELS")
             for k, v in labels.items():
                 params.extend([k, v])

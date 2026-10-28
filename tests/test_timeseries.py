@@ -84,6 +84,13 @@ def test_alter(client):
     assert_resp_response(
         client, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    # An explicit empty mapping removes every label from the series
+    assert client.ts().alter(1, labels={})
+    assert {} == client.ts().info(1)["labels"]
+    info = client.ts().info(1)
+    assert_resp_response(
+        client, 10, info.get("retention_msecs"), info.get("retentionTime")
+    )
 
 
 @pytest.mark.redismod
