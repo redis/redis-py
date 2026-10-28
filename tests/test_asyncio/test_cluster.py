@@ -7188,15 +7188,12 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
-    @pytest.mark.fixed_client
-    @pytest.mark.parametrize("protocol", [2, 3])
     @pytest.mark.parametrize("dynamic_startup_nodes", [False, True])
     @pytest.mark.parametrize("use_default_node", [False, True])
     async def test_lazy_transaction_does_not_reuse_private_loop_connections(
         self,
         r: RedisCluster,
         request,
-        protocol,
         dynamic_startup_nodes,
         use_default_node,
     ) -> None:
@@ -7209,7 +7206,7 @@ class TestClusterPipeline:
         )
         client = RedisCluster.from_url(
             request.config.getoption("--redis-url"),
-            protocol=protocol,
+            protocol=request.config.getoption("--protocol"),
             dynamic_startup_nodes=dynamic_startup_nodes,
         )
         try:
