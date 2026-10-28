@@ -5207,13 +5207,11 @@ class ClusterPipeline(RedisCluster):
 
     def unlink(self, *names):
         """
-        Stages an `UNLINK` for keys ``names``, and returns ``None`` rather than the
-        pipeline, so unlike `delete` it does not chain::
+        Stages an `UNLINK` for keys ``names``. Like `delete`, it returns ``None``
+        rather than the pipeline, so it does not chain.
 
-            pipe.unlink("A")
-
-        Outside a transactional block only one key is accepted; more raises
-        :class:`~.RedisClusterException`.
+        Outside a transactional block only one key is accepted, as with `delete`; more
+        raises :class:`~.RedisClusterException`.
         """
         self._execution_strategy.unlink(*names)
 

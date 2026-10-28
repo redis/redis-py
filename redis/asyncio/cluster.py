@@ -3198,8 +3198,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         )
         # result = [True, "1", 1, {"F": "V"}, True, True, "2", "3", 1, 1, 1]
 
-    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `UNLINK`, `mset_nonatomic`, which
-    are split across multiple nodes, you'll get multiple results for them in the array.
+    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `mset_nonatomic`, which are split
+    across multiple nodes, you'll get multiple results for them in the array.
 
     Which methods must be awaited:
 
@@ -3216,25 +3216,27 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     and the two ``himport_discard`` methods an ``int``.
 
     That list covers only the methods defined on this class. Inherited command
-    coroutines such as ``command_info``, ``cluster_delslots``, ``client_tracking_on``
-    and the ``hotkeys_*`` family are not pipeline steps: awaiting one awaits the
-    pipeline itself, which re-initializes it and discards everything staged so far.
+    coroutines are not pipeline steps. ``client_tracking_on`` and
+    ``client_tracking_off`` await the pipeline itself, which re-initializes it and
+    discards everything staged so far. Others cannot run on a pipeline at all:
+    ``command_info`` and the ``hotkeys_*`` family raise ``NotImplementedError``, and
+    ``cluster_delslots`` raises ``TypeError``.
 
-    `unlink` is the surprising one, because `delete` sits beside it in the note above
-    and behaves the other way::
+    `unlink` is the surprising one, because the inherited `delete` behaves the other
+    way::
 
         pipe = rc.pipeline()
         pipe.delete("A")          # stages, chainable
         await pipe.unlink("B")    # stages, must be awaited, returns None
         await pipe.execute()
 
-    Between :meth:`watch` and :meth:`multi` commands are sent as they are issued and
-    return a response rather than the pipeline, so they must be awaited. After
-    :meth:`multi` they are queued again and chain as usual::
+    Between :meth:`watch` and :meth:`multi` a command returns a coroutine rather than
+    the pipeline. It is executed only when awaited and resolves to the response, so it
+    must be awaited. After :meth:`multi` commands are queued again and chain as usual::
 
         async with rc.pipeline(transaction=True) as pipe:
             await pipe.watch("a")
-            a = await pipe.get("a")     # sent now, so awaited
+            a = await pipe.get("a")     # executed when awaited
             pipe.multi()
             pipe.set("a", int(a) + 1)   # queued, chains
             await pipe.execute()
