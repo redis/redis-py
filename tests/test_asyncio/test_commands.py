@@ -1805,6 +1805,23 @@ class TestRedisCommands:
         assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
         assert float(await r.get(key)) == pytest.approx(1.75)
 
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("8.7.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    async def test_increx_unified_responses(self, create_redis, protocol):
+        r = await create_redis(protocol=protocol, legacy_responses=False)
+        key = "increx:unified"
+        assert await r.set(key, "1.5")
+        assert await r.increx(key, byfloat=0.25) == [1.75, 0.25]
+        # A rejected increment returns the current value and a zero increment.
+        result = await r.increx(key, byfloat=0.75, ubound=2)
+        assert result == [1.75, 0.0]
+        assert all(type(value) is float for value in result)
+        assert await r.set(key, 20)
+        result = await r.increx(key, byint=4)
+        assert result == [24, 4]
+        assert all(type(value) is int for value in result)
+
     @skip_if_server_version_lt("8.7.0")
     async def test_increx_saturating_bounds(self, r: redis.Redis):
         key = "increx:sat"
