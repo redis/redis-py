@@ -3210,10 +3210,10 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         watch, unwatch, unlink, discard, reset, execute, initialize,
         himport_prepare, himport_discard, himport_discard_all
 
-    Of those, only ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink`` return
-    ``None``, so only they fail to chain once awaited. The rest return a value:
-    ``execute`` a ``list``, ``initialize`` the pipeline, ``himport_prepare`` a ``bool``
-    and the two ``himport_discard`` methods an ``int``.
+    Of those, only ``initialize`` returns the pipeline, so it is the only one that
+    chains once awaited. ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink``
+    return ``None``, ``execute`` returns a ``list``, ``himport_prepare`` a ``bool`` and
+    the two ``himport_discard`` methods an ``int``.
 
     That list covers only the methods defined on this class. Inherited command
     coroutines are not pipeline steps. ``client_tracking_on`` and
@@ -3240,6 +3240,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             pipe.multi()
             pipe.set("a", int(a) + 1)   # queued, chains
             await pipe.execute()
+
+    The split commands from the note above are the exception: between :meth:`watch`
+    and :meth:`multi`, ``delete``, ``exists`` and ``touch`` return the pipeline and
+    drop the command unsent, so do not use them there. ``mset_nonatomic`` raises
+    ``NotImplementedError`` in a transactional pipeline.
 
     Outside a transactional pipeline ``watch``, ``unwatch`` and ``discard`` raise
     :class:`~.RedisClusterException`, and the ``himport_*`` methods act on the shared
