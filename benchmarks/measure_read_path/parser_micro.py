@@ -1,0 +1,299 @@
+"""Parser-only microbenchmark: no network, one reply per iteration.
+
+Feeds a whole reply to every parser and times it reading the reply, so
+per-call overhead in the parser is not hidden behind round-trip latency. Two
+replies: an LRANGE-style array of 10k bulk strings (many line reads, few
+socket reads) and one 10 MB bulk string (one line read, about 160 socket
+reads of 64 KB). The async parsers read from an in-memory StreamReader and
+the sync parsers from an in-memory socket; both are attached through the
+parser's own on_connect(). Covered: the pure-Python RESP2 and RESP3 parsers
+and the hiredis parser, sync and async, with the async ones at
+socket_timeout=5 and None. Each tree runs in its own interpreter.
+
+Run from the repository root:
+
+  python -m benchmarks.measure_read_path.parser_micro \\
+      --trees base=../redis-py-bench-base pr=../redis-py-bench-pr
+"""
+
+import argparse
+import asyncio
+import json
+import os
+import statistics
+import subprocess
+import sys
+import time
+from types import SimpleNamespace
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import gate  # noqa: E402
+import run_bench  # noqa: E402
+import worker  # noqa: E402
+
+N = 10_000
+BULK = 10 * 1024 * 1024
+# scenario -> (wire bytes, expected len() of the reply)
+REPLIES = {
+    "lrange_10k_parse": (
+        b"*%d\r\n" % N + b"".join(b"$10\r\nitem%06d\r\n" % i for i in range(N)),
+        N,
+    ),
+    "get_10mb_parse": (b"$%d\r\n" % BULK + b"x" * BULK + b"\r\n", BULK),
+}
+
+
+class BufferSocket:
+    """The part of a socket the sync parsers use, reading from bytes."""
+
+    def __init__(self, data):
+        self._view = memoryview(data)
+        self._pos = 0
+
+    def recv(self, size):
+        chunk = self._view[self._pos : self._pos + size]
+        self._pos += len(chunk)
+        return chunk.tobytes()
+
+    def recv_into(self, buffer, nbytes=0):
+        size = min(nbytes or len(buffer), len(self._view) - self._pos)
+        buffer[:size] = self._view[self._pos : self._pos + size]
+        self._pos += size
+        return size
+
+    def settimeout(self, timeout):
+        pass
+
+
+def encoder():
+    from redis._parsers.encoders import Encoder
+
+    return Encoder("utf-8", "strict", False)
+
+
+async def time_async(parser_class, timeout, wire, expected, rounds):
+    parser = parser_class(65536)
+    samples = []
+    # the first read is a warmup: it settles the allocator for the reply size
+    for i in range(rounds + 1):
+        reader = asyncio.StreamReader(limit=2**30)
+        reader.feed_data(wire)
+        parser.on_connect(
+            SimpleNamespace(_reader=reader, encoder=encoder(), socket_timeout=timeout)
+        )
+        # Parsers that apply socket_timeout per read take it from the
+        # connection; set it the way a default read_response() would.
+        if hasattr(parser, "_apply_read_timeout"):
+            parser._apply_read_timeout = True
+            parser._read_timeout = timeout
+        start = time.perf_counter()
+        res = await parser.read_response(disable_decoding=True)
+        if i:
+            samples.append(time.perf_counter() - start)
+        assert len(res) == expected
+    return statistics.median(samples) * 1e3
+
+
+def time_sync(parser_class, wire, expected, rounds):
+    samples = []
+    # the first read is a warmup: it settles the allocator for the reply size
+    for i in range(rounds + 1):
+        parser = parser_class(65536)
+        parser.on_connect(
+            SimpleNamespace(
+                _sock=BufferSocket(wire), encoder=encoder(), socket_timeout=5.0
+            )
+        )
+        start = time.perf_counter()
+        res = parser.read_response(disable_decoding=True)
+        if i:
+            samples.append(time.perf_counter() - start)
+        assert len(res) == expected
+        parser.on_disconnect()
+    return statistics.median(samples) * 1e3
+
+
+def timed(fn):
+    start = time.perf_counter()
+    ms = fn()
+    return {
+        # hiredis reads the array in about 0.2 ms; keep enough digits that
+        # rounding does not show up as noise
+        "ms_per_reply": round(ms, 4),
+        "wall_s": round(time.perf_counter() - start, 2),
+    }
+
+
+def child(args):
+    worker.import_redis(args.tree)
+    from redis._parsers import (
+        _AsyncHiredisParser,
+        _AsyncRESP2Parser,
+        _AsyncRESP3Parser,
+        _HiredisParser,
+        _RESP2Parser,
+        _RESP3Parser,
+    )
+    from redis.utils import HIREDIS_AVAILABLE
+
+    if not HIREDIS_AVAILABLE:
+        raise SystemExit("hiredis is not installed for " + args.python)
+    async_parsers = {
+        "python/resp2": _AsyncRESP2Parser,
+        "python/resp3": _AsyncRESP3Parser,
+        "hiredis": _AsyncHiredisParser,
+    }
+    sync_parsers = {
+        "python/resp2": _RESP2Parser,
+        "python/resp3": _RESP3Parser,
+        "hiredis": _HiredisParser,
+    }
+    # out[config][scenario] -> result
+    out = {}
+    for name, parser_class in async_parsers.items():
+        for timeout in (5.0, None):
+            out[f"async/{name}/timeout={timeout}"] = {
+                scenario: timed(
+                    lambda: asyncio.run(
+                        time_async(parser_class, timeout, wire, expected, args.rounds)
+                    )
+                )
+                for scenario, (wire, expected) in REPLIES.items()
+            }
+    # The sync parsers read with the socket's own timeout, which an
+    # in-memory socket never hits, so one timeout covers them.
+    for name, parser_class in sync_parsers.items():
+        out[f"sync/{name}"] = {
+            scenario: timed(
+                lambda: time_sync(parser_class, wire, expected, args.rounds)
+            )
+            for scenario, (wire, expected) in REPLIES.items()
+        }
+    print(json.dumps(out))
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
+    )
+    p.add_argument("--trees", nargs="+")
+    p.add_argument("--tree", help=argparse.SUPPRESS)
+    p.add_argument("--python", default=sys.executable)
+    p.add_argument("--rounds", type=int, default=30)
+    p.add_argument(
+        "--passes",
+        type=int,
+        default=5,
+        help="runs per tree; their spread is the noise the gate allows for",
+    )
+    p.add_argument(
+        "--output-dir",
+        default=os.path.join(HERE, "results"),
+        help="where the JSON and Markdown results are written",
+    )
+    gate.add_gate_args(p)
+    args = p.parse_args()
+    if args.tree:
+        return child(args)
+    if not args.trees:
+        p.error("--trees is required")
+    trees = {k: os.path.abspath(v) for k, v in (t.split("=", 1) for t in args.trees)}
+    pairs = gate.compare_pairs(args, trees)
+    # passes[tree] -> list of {config: {scenario: result}}
+    passes = {t: [] for t in trees}
+    total_start = time.perf_counter()
+    for _ in range(args.passes):
+        for label, path in trees.items():
+            cmd = [
+                args.python,
+                "-I",
+                os.path.abspath(__file__),
+                "--tree",
+                path,
+                "--rounds",
+                str(args.rounds),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            if proc.returncode != 0:
+                raise SystemExit(proc.stderr)
+            passes[label].append(json.loads(proc.stdout.strip().splitlines()[-1]))
+    first = passes[next(iter(trees))][0]
+    cells = [(cfg, scenario) for cfg in first for scenario in first[cfg]]
+    heads = {k: run_bench.git_head(v) for k, v in trees.items()}
+
+    def values(tree, cfg, scenario, key="ms_per_reply"):
+        return [r[cfg][scenario][key] for r in passes[tree]]
+
+    lines = [
+        f"Parser only, milliseconds per reply (median of {args.passes} passes)",
+        "",
+        "Trees: " + ", ".join(f"`{k}`={heads[k]}" for k in trees),
+        "",
+        "| config | scenario | " + " | ".join(trees) + " |",
+        "|" + "---|" * (2 + len(trees)),
+    ]
+    for cfg, scenario in cells:
+        row = [f"{statistics.median(values(t, cfg, scenario)):.3f} ms" for t in trees]
+        lines.append(f"| {cfg} | {scenario} | " + " | ".join(row) + " |")
+    lines += [
+        "",
+        "## Execution times",
+        "",
+        f"Whole run: "
+        f"{time.perf_counter() - total_start:.0f}s. Median seconds per "
+        "config and scenario run:",
+        "",
+    ]
+    for cfg, scenario in cells:
+        row = [
+            f"{t}={statistics.median(values(t, cfg, scenario, 'wall_s')):.2f}s"
+            for t in trees
+        ]
+        lines.append(f"- {cfg} {scenario}: " + ", ".join(row))
+    text = "\n".join(lines)
+    print(text)
+
+    summaries = [
+        gate.render(
+            "Parser only",
+            gate.evaluate(
+                [
+                    {
+                        "config": cfg,
+                        "scenario": scenario,
+                        "old": statistics.median(values(old, cfg, scenario)),
+                        "new": statistics.median(values(new, cfg, scenario)),
+                        "old_noise": run_bench.rel_iqr(values(old, cfg, scenario)),
+                        "new_noise": run_bench.rel_iqr(values(new, cfg, scenario)),
+                    }
+                    for cfg, scenario in cells
+                ],
+                args.allowed_regression,
+                args.max_limit,
+            ),
+            new,
+            old,
+            args.allowed_regression,
+            "milliseconds per reply",
+            args.max_limit,
+        )
+        for new, old in pairs
+    ]
+    run_bench.save(
+        args,
+        heads,
+        {
+            "passes": passes,
+            "report": text + "\n\n" + "\n\n".join(s for s, _ in summaries),
+        },
+        suffix="parser",
+    )
+    gate.finish(args, summaries)
+
+
+if __name__ == "__main__":
+    main()
