@@ -414,6 +414,21 @@ async def test_vsim_unexisting(d_client):
     sim = await d_client.vset().vsim("myset_not_existing", input="elem1")
     assert sim == []
 
+    sim = await d_client.vset().vsim(
+        "myset_not_existing", input="elem1", with_scores=True
+    )
+    assert sim == {}
+
+    sim = await d_client.vset().vsim(
+        "myset_not_existing", input="elem1", with_attribs=True
+    )
+    assert sim == {}
+
+    sim = await d_client.vset().vsim(
+        "myset_not_existing", input="elem1", with_scores=True, with_attribs=True
+    )
+    assert sim == {}
+
 
 @skip_if_server_version_lt("7.9.0")
 async def test_vsim_with_filter(d_client):

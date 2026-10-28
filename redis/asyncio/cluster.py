@@ -150,10 +150,10 @@ from redis.utils import (
     SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
-    safe_str,
     str_if_bytes,
     truncate_text,
 )
@@ -996,9 +996,9 @@ class RedisCluster(
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # If initialization fails, decrement the counter to keep it in sync
-            await self._decrement_usage()
+            await asyncio.shield(self._decrement_usage())
             raise
 
     async def _increment_usage(self) -> int:
@@ -1019,15 +1019,24 @@ class RedisCluster(
             self._usage_counter -= 1
             return self._usage_counter
 
+    async def _release_usage(self) -> None:
+        """
+        Decrement the usage counter and close the client on the last exit.
+
+        Hold the lock through closing so a new context cannot use connections
+        that are still being disconnected by the previous context.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            if self._usage_counter == 0:
+                await self.aclose()
+
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
         last exit (counter becomes zero), the client closes its connection pool.
         """
-        current_usage = await asyncio.shield(self._decrement_usage())
-        if current_usage == 0:
-            # This was the last active context, so disconnect the pool.
-            await asyncio.shield(self.aclose())
+        await asyncio.shield(self._release_usage())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -2490,6 +2499,7 @@ class ClusterNode:
                 self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         tmp_queue = collections.deque()
         try:
             while self._free:
@@ -2502,20 +2512,32 @@ class ClusterNode:
                     # a socket here only to authenticate could raise and stop
                     # the token renewal
                     continue
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
@@ -3518,7 +3540,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
@@ -3765,7 +3787,7 @@ class PipelineStrategy(AbstractStrategy):
                 for cmd in todo:
                     result = cmd.result
                     if isinstance(result, Exception):
-                        command = " ".join(map(safe_str, cmd.args))
+                        command = command_text(cmd.args)
                         # Errors from the redirect retry may carry no args,
                         # e.g. MaxConnectionsError() from acquire_connection().
                         error = result.args[0] if result.args else type(result).__name__
@@ -3848,6 +3870,7 @@ class TransactionStrategy(AbstractStrategy):
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
     CONNECTION_ERRORS = (
         ConnectionError,
+        TimeoutError,
         OSError,
         ClusterDownError,
         SlotNotCoveredError,
@@ -3857,6 +3880,7 @@ class TransactionStrategy(AbstractStrategy):
         super().__init__(pipe)
         self._explicit_transaction = False
         self._watching = False
+        self._watch_acknowledged = False
         self._pipeline_slots: Set[int] = set()
         # True once a keyed (non-slot-agnostic) command has fixed the slot
         self._transaction_has_keyed_slot = False
@@ -4092,8 +4116,11 @@ class TransactionStrategy(AbstractStrategy):
                 connection, command_name, **options
             )
 
-        if command_name in self.UNWATCH_COMMANDS:
+        if command_name == "WATCH":
+            self._watch_acknowledged = True
+        elif command_name in self.UNWATCH_COMMANDS:
             self._watching = False
+            self._watch_acknowledged = False
         return output
 
     async def _reinitialize_on_error(self, error, failure_count):
@@ -4112,13 +4139,10 @@ class TransactionStrategy(AbstractStrategy):
                 is_internal=True,
             )
 
-        if self._watching:
-            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
-                raise WatchError("Slot rebalancing occurred while watching keys")
-
-        if (
-            type(error) in self.SLOT_REDIRECT_ERRORS
-            or type(error) in self.CONNECTION_ERRORS
+        # WATCH is requested before the first attempt, but only a reply
+        # establishes the protection that a retry must not silently discard.
+        if self._watch_acknowledged or isinstance(
+            error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             if self._transaction_node is not None:
                 # As on the command path: after a connection error the server
@@ -4162,6 +4186,13 @@ class TransactionStrategy(AbstractStrategy):
                 cluster_client.reinitialize_counter = 0
 
         self._executing = False
+        if self._watch_acknowledged:
+            await self.reset()
+            if isinstance(error, self.SLOT_REDIRECT_ERRORS):
+                raise WatchError(
+                    "Slot rebalancing occurred while watching keys"
+                ) from error
+            raise WatchError("An error occurred while watching keys") from error
 
     async def _raise_first_error(self, responses, stack, start_time):
         """
@@ -4303,6 +4334,7 @@ class TransactionStrategy(AbstractStrategy):
 
         # EXEC clears any watched keys
         self._watching = False
+        self._watch_acknowledged = False
 
         if response is None:
             raise WatchError("Watched variable changed.")
@@ -4392,6 +4424,7 @@ class TransactionStrategy(AbstractStrategy):
             self._transaction_connection = None
             self._transaction_node = None
             self._watching = False
+            self._watch_acknowledged = False
             self._explicit_transaction = False
             self._pipeline_slots = set()
             self._transaction_has_keyed_slot = False

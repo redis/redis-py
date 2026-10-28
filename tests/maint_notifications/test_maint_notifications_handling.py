@@ -1,5 +1,6 @@
 import socket
 import threading
+import time
 from typing import List, Union
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
     MaintenanceCompletedEvent,
+    MaintenanceStartedEvent,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
@@ -2887,3 +2889,372 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
             expected_current_peername="any",
         )
         # TODO validate free connections
+
+
+def _moving_pool(**config_kwargs):
+    config_kwargs.setdefault("enabled", True)
+    config_kwargs.setdefault("proactive_reconnect", True)
+    config_kwargs.setdefault("relaxed_timeout", 10)
+    return ConnectionPool(
+        protocol=3, maint_notifications_config=MaintNotificationsConfig(**config_kwargs)
+    )
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_close_cancels_moving_notification_timers(new_node_host):
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_node_moved_notification = MagicMock()
+    handler.run_proactive_reconnect = MagicMock()
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    # close() runs the cleanup itself; the cancelled timer does not run it again
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+    time.sleep(0.4)
+
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+    if new_node_host is None:
+        handler.run_proactive_reconnect.assert_not_called()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_reused_after_close_mid_moving_has_reverted_kwargs(new_node_host):
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        socket_connect_timeout=4,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    original = dict(pool.connection_kwargs)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=60
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    if new_node_host is not None:
+        assert pool.connection_kwargs["host"] == new_node_host
+    pool.close()
+
+    for key in ("host", "socket_timeout", "socket_connect_timeout"):
+        assert pool.connection_kwargs[key] == original[key]
+    assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
+    assert pool.connection_kwargs["maintenance_notification_hash"] is None
+    # A connection made after the pool is reused does not inherit the MOVING state
+    connection = pool.make_connection()
+    assert connection.host == "localhost"
+    assert connection.socket_timeout == 3
+    assert connection.socket_connect_timeout == 4
+
+
+@pytest.mark.fixed_client
+def test_moving_redelivered_after_close_is_applied_again():
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    assert pool.connection_kwargs["host"] == "localhost"
+
+    # The server redelivers the still-active MOVING to the reused pool
+    handler.handle_notification(notification)
+
+    assert pool.connection_kwargs["host"] == "1.2.3.4"
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    assert handler._pending_handoffs == {notification}
+    pool.close()
+
+
+@pytest.mark.fixed_client
+def test_pool_disconnect_does_not_cancel_moving_notification_timers():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    moved = threading.Event()
+    handler.handle_node_moved_notification = MagicMock(
+        side_effect=lambda _: moved.set()
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.disconnect()
+
+    assert moved.wait(timeout=10)
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+
+
+@pytest.mark.fixed_client
+def test_timer_firing_during_close_does_not_run_its_callback():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    callback = MagicMock()
+
+    test_thread = threading.current_thread()
+    timer_waiting = threading.Event()
+
+    class SignallingLock:
+        def __init__(self, lock):
+            self._lock = lock
+
+        def __enter__(self):
+            if threading.current_thread() is not test_thread:
+                timer_waiting.set()
+            return self._lock.__enter__()
+
+        def __exit__(self, *exc_info):
+            return self._lock.__exit__(*exc_info)
+
+    handler._lock = SignallingLock(handler._lock)
+
+    with handler._lock:
+        handler._schedule(0.01, callback)
+        (timer,) = handler._scheduled_timers
+        # The timer fires and waits for the lock held here.
+        assert timer_waiting.wait(timeout=10)
+        pool.close()
+    timer.join(timeout=10)
+
+    callback.assert_not_called()
+    assert handler._scheduled_timers == set()
+
+
+@pytest.mark.fixed_client
+def test_pool_close_completes_superseded_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent] * 2
+
+    pool.close()
+
+    # closing ends the relaxation of every pending handoff, also of the one
+    # a newer MOVING superseded, so each started event gets its pair
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert {e.notification for e in completed} == {first, second}
+    assert len(completed) == 2
+
+
+@pytest.mark.fixed_client
+def test_pool_close_completes_pending_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=1
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent]
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    assert events[1].notification is notification
+    assert events[1].connection_pool is pool
+
+
+@pytest.mark.fixed_client
+def test_pool_close_retried_after_failed_cleanup_runs_it_again():
+    """
+    A MOVING cleanup that fails halfway, as when a connection is disconnected
+    under it, leaves the handoff pending: a retried close() runs it again and
+    reports its completion once.
+    """
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    update_connections_settings = pool.update_connections_settings
+    calls = []
+
+    def failing_once(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise OSError(9, "Bad file descriptor")
+        return update_connections_settings(**kwargs)
+
+    with patch.object(pool, "update_connections_settings", new=failing_once):
+        with pytest.raises(OSError):
+            pool.close()
+        pool.close()
+
+    assert len(calls) == 2
+    assert calls[1]["matching_notification_hash"] == hash(notification)
+    assert handler._pending_handoffs == set()
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert [e.notification for e in completed] == [notification]
+
+
+@pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_reports_completion_once():
+    """
+    A completion listener that closes the pool re-enters close() while the
+    handoff is being cleaned up; the reentrant close must not run the cleanup
+    again and report a second completion.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+
+
+@pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_mid_close_reports_each_handoff_once():
+    """
+    close() walks a snapshot of the pending handoffs. A completion listener that
+    closes the pool while the first one is cleaned up re-enters close(), which
+    settles the rest; the outer walk must skip them instead of cleaning them up
+    and reporting their completion a second time.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent) and (
+                sum(isinstance(e, MaintenanceCompletedEvent) for e in events) == 1
+            ):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+
+    pool.close()
+
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert sorted(e.notification.id for e in completed) == [1, 2]
+
+
+@pytest.mark.fixed_client
+def test_pool_close_disconnects_even_when_moving_cleanup_fails():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    disconnect = MagicMock()
+
+    failing_reset = patch.object(
+        pool,
+        "update_connections_settings",
+        side_effect=OSError(9, "Bad file descriptor"),
+    )
+    with failing_reset, patch.object(pool, "disconnect", new=disconnect):
+        with pytest.raises(OSError):
+            pool.close()
+
+    # the pool is closed regardless; the handoff stays for a retried close()
+    disconnect.assert_called_once_with()
+    assert handler._pending_handoffs == {notification}

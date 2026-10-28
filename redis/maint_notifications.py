@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Literal,
@@ -864,6 +865,9 @@ class MaintNotificationsPoolHandler:
         self.pool = pool
         self.config = config
         self._processed_notifications = set()
+        self._scheduled_timers: set[threading.Timer] = set()
+        # The handoffs whose scheduled cleanup has not run yet
+        self._pending_handoffs: set[NodeMovingNotification] = set()
         self._lock = threading.RLock()
         self.connection = None
 
@@ -876,6 +880,8 @@ class MaintNotificationsPoolHandler:
         # since each connection can be in a different state
         copy = MaintNotificationsPoolHandler(self.pool, self.config)
         copy._processed_notifications = self._processed_notifications
+        copy._scheduled_timers = self._scheduled_timers
+        copy._pending_handoffs = self._pending_handoffs
         copy._lock = self._lock
         copy.connection = None
         return copy
@@ -952,11 +958,11 @@ class MaintNotificationsPoolHandler:
                         if notification.new_node_host is not None:
                             self.run_proactive_reconnect(moving_address_src)
                         else:
-                            threading.Timer(
+                            self._schedule(
                                 notification.ttl / 2,
                                 self.run_proactive_reconnect,
-                                args=(moving_address_src,),
-                            ).start()
+                                moving_address_src,
+                            )
 
                     # Update config for new connections:
                     # Set state to MOVING
@@ -969,11 +975,12 @@ class MaintNotificationsPoolHandler:
                     if getattr(self.pool, "set_in_maintenance", False):
                         self.pool.set_in_maintenance(False)
 
-                threading.Timer(
+                self._schedule(
                     notification.ttl,
                     self.handle_node_moved_notification,
-                    args=(notification,),
-                ).start()
+                    notification,
+                )
+                self._pending_handoffs.add(notification)
             except BaseException:
                 # The relaxation reported above was not applied, or has no
                 # cleanup to end it: close its pair
@@ -1007,6 +1014,50 @@ class MaintNotificationsPoolHandler:
                 ),
             )
 
+    def _schedule(self, delay: float, callback: Callable[..., Any], *args: Any) -> None:
+        def run() -> None:
+            # Holding the lock through the callback serializes it with
+            # cancel_scheduled_tasks(): a timer cancelled before it gets the
+            # lock does nothing, and one already running finishes before
+            # cancellation proceeds.
+            with self._lock:
+                if timer not in self._scheduled_timers:
+                    return
+                try:
+                    callback(*args)
+                finally:
+                    self._scheduled_timers.discard(timer)
+
+        timer = threading.Timer(delay, run)
+        with self._lock:
+            self._scheduled_timers.add(timer)
+        timer.start()
+
+    def cancel_scheduled_tasks(self) -> None:
+        with self._lock:
+            if not self._scheduled_timers and not self._pending_handoffs:
+                return
+            timers = tuple(self._scheduled_timers)
+            self._scheduled_timers.clear()
+            pending_handoffs = tuple(self._pending_handoffs)
+            for timer in timers:
+                timer.cancel()
+            # The pool can be reused after close(): run the cancelled MOVING
+            # cleanups now so the temporary host and relaxed timeouts do not
+            # stay in its connection kwargs, and forget the handoffs so the
+            # server can redeliver a still-active MOVING to the reused pool.
+            for notification in pending_handoffs:
+                # A completion listener that closes the pool re-enters this
+                # method and settles the remaining handoffs: skip those
+                if notification not in self._pending_handoffs:
+                    continue
+                if not self.handle_node_moved_notification(notification):
+                    # Closing ends the relaxation of a superseded handoff too
+                    self._dispatch_handoff_event(
+                        MaintenanceCompletedEvent, notification
+                    )
+                self._processed_notifications.discard(notification)
+
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """
         Run proactive reconnect for the pool.
@@ -1026,9 +1077,14 @@ class MaintNotificationsPoolHandler:
                     moving_address_src=moving_address_src,
                 )
 
-    def handle_node_moved_notification(self, notification: NodeMovingNotification):
+    def handle_node_moved_notification(
+        self, notification: NodeMovingNotification
+    ) -> bool:
         """
         Handle the cleanup after a node moving notification expires.
+
+        Returns whether the cleanup reverted the connection kwargs; it does not
+        when a newer MOVING notification has superseded this one.
         """
         notification_hash = hash(notification)
 
@@ -1061,10 +1117,15 @@ class MaintNotificationsPoolHandler:
                     include_free_connections=True,
                 )
 
+            # Discarded once the state reset is done, so one that failed halfway
+            # is run again by a retried close(), and before the listeners run,
+            # so a listener closing the pool does not run it a second time
+            self._pending_handoffs.discard(notification)
             # A newer MOVING notification has superseded this one when the
             # kwargs were not reverted: the pool stays relaxed until it expires.
             if kwargs is not None:
                 self._dispatch_handoff_event(MaintenanceCompletedEvent, notification)
+            return kwargs is not None
 
 
 class MaintNotificationsConnectionHandler:

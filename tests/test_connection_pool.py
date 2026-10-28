@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 import redis
 from redis.cache import CacheConfig
+from redis.commands.metadata import StaticMetadataResolver
 from redis.connection import CacheProxyConnection, Connection, to_bool
 from redis.event import (
     AfterConnectionReleasedEvent,
@@ -19,6 +20,8 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
 )
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -178,6 +181,45 @@ class TestConnectionPool:
         assert c1 != c2
         with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
+
+    @pytest.mark.fixed_client
+    def test_failed_re_auth_does_not_stop_the_other_connections(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        failing.send_command.side_effect = redis.ConnectionError("broken")
+        other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        in_use = mock.Mock(spec=Connection)
+        pool._available_connections.extend([failing, other])
+        pool._in_use_connections.add(in_use)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(redis.ConnectionError, match="broken"):
+            pool.re_auth_callback(token)
+
+        other.send_command.assert_called_once_with("AUTH", "oid", "value")
+        in_use.set_re_auth_token.assert_called_once_with(token)
+
+    @pytest.mark.fixed_client
+    def test_re_auth_stops_at_authentication_error(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 3))
+        failing.read_response.side_effect = redis.AuthenticationError("expired")
+        other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        in_use = mock.Mock(spec=Connection)
+        pool._available_connections.extend([failing, other])
+        pool._in_use_connections.add(in_use)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(redis.AuthenticationError, match="expired"):
+            pool.re_auth_callback(token)
+
+        failing.read_response.assert_called_once()
+        other.send_command.assert_not_called()
+        in_use.set_re_auth_token.assert_not_called()
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -768,6 +810,30 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.maint_notifications_enabled() is None
         assert "maint_notifications_config" not in pool.connection_kwargs
         assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+    def test_client_enables_client_side_caching(self):
+        resolver = StaticMetadataResolver()
+        client = redis.Redis(
+            unix_socket_path="/socket",
+            protocol=3,
+            cache_config=CacheConfig(),
+            metadata_resolver=resolver,
+        )
+        pool = client.connection_pool
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert client.get_cache() is not None
+        assert pool.metadata_resolver is resolver
+        assert isinstance(pool.make_connection(), CacheProxyConnection)
+
+    def test_from_url_enables_client_side_caching(self):
+        pool = redis.ConnectionPool.from_url(
+            "unix:///socket?protocol=3", cache_config=CacheConfig()
+        )
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.cache is not None
+        assert isinstance(pool.make_connection(), CacheProxyConnection)
 
     def test_client_respects_disabled_maint_notifications_config(self):
         client = redis.Redis(

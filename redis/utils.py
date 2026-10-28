@@ -417,6 +417,32 @@ def truncate_text(txt, max_length=100):
     )
 
 
+# Commands whose arguments can carry credentials.
+_CREDENTIAL_COMMANDS = frozenset(
+    {"AUTH", "HELLO", "MIGRATE", "ACL SETUSER", "CONFIG SET", "SENTINEL SET"}
+)
+
+
+def command_text(command):
+    """
+    Render a command for an error message, replacing the arguments of commands
+    that can carry credentials (AUTH, HELLO, MIGRATE, ACL SETUSER, CONFIG SET,
+    SENTINEL SET) with a placeholder, so passwords do not end up in exceptions
+    and logs.
+    """
+    parts = [safe_str(arg) for arg in command]
+    name_len = 0
+    if parts:
+        name = parts[0].upper()
+        if name in _CREDENTIAL_COMMANDS:
+            name_len = 1
+        elif len(parts) > 1 and f"{name} {parts[1].upper()}" in _CREDENTIAL_COMMANDS:
+            name_len = 2
+    if name_len and len(parts) > name_len:
+        parts[name_len:] = ["<REDACTED>"]
+    return " ".join(parts)
+
+
 def dummy_fail():
     """
     Fake function for a Retry object if you don't need to handle each failure.

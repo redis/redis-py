@@ -4,6 +4,8 @@ import time
 import pytest
 import redis
 from redis.commands.timeseries.commands import TimeSeriesCommands
+from redis.commands.timeseries.info import TSInfo
+from redis.utils import SENTINEL
 
 from .conftest import (
     _get_client,
@@ -1274,6 +1276,67 @@ def test_info(client):
         client, 5, info.get("retention_msecs"), info.get("retentionTime")
     )
     assert info["labels"]["currentLabel"] == "currentData"
+
+
+@pytest.mark.fixed_client
+def test_info_resp3_bytes_keys():
+    # Server-free: without decode_responses the RESP3 map has bytes keys and
+    # must parse like the RESP2 flat list.
+    resp2 = TSInfo(
+        [
+            b"totalSamples",
+            1,
+            b"retentionTime",
+            5,
+            b"chunkSize",
+            4096,
+            b"duplicatePolicy",
+            b"block",
+            b"labels",
+            [[b"currentLabel", b"currentData"]],
+        ]
+    )
+    resp3 = TSInfo(
+        {
+            b"totalSamples": 1,
+            b"retentionTime": 5,
+            b"chunkSize": 4096,
+            b"duplicatePolicy": b"block",
+            b"labels": {b"currentLabel": b"currentData"},
+        }
+    )
+    for info in (resp2, resp3):
+        assert info.total_samples == 1
+        assert info.retention_msecs == 5
+        assert info.chunk_size == 4096
+        assert info.duplicate_policy == "block"
+        assert info.labels == {"currentLabel": "currentData"}
+
+
+@pytest.mark.fixed_client
+def test_info_resp3_keeps_null_labels():
+    # Server-free: a decoded RESP3 map keeps a literal "null" label as is.
+    info = TSInfo({"labels": {"null": "null", "currentLabel": "currentData"}})
+    assert info.labels == {"null": "null", "currentLabel": "currentData"}
+
+
+@pytest.mark.redismod
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
+)
+def test_info_without_decode_responses(request, stack_url, protocol):
+    kwargs = {"decode_responses": False, "from_url": stack_url}
+    if protocol is not SENTINEL:
+        kwargs["protocol"] = protocol
+    client = _get_client(redis.Redis, request, **kwargs)
+    client.flushdb()
+    client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    client.ts().add(1, 1, 1.5)
+    info = client.ts().info(1)
+    assert info.total_samples == 1
+    assert info.retention_msecs == 5
+    assert info.labels == {"currentLabel": "currentData"}
 
 
 @pytest.mark.redismod

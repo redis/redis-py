@@ -5465,6 +5465,39 @@ class TestNodesManager:
             patcher.stop()
 
     @pytest.mark.fixed_client
+    def test_failed_re_auth_does_not_stop_the_other_pools(self):
+        """
+        A pool whose re-authentication raises does not stop the remaining pools
+        from being re-authenticated. The first error is raised afterwards.
+        """
+        slots = [[0, 16383, ["127.0.0.1", 7000], ["127.0.0.1", 7003]]]
+        credential_provider = self._streaming_credential_provider()
+        patcher, nm = self._refresh_with_cluster_slots(
+            [slots], credential_provider=credential_provider
+        )
+        re_authed = []
+
+        def re_auth_callback(pool, token):
+            re_authed.append(id(pool))
+            if len(re_authed) == 1:
+                raise AuthenticationError("first")
+            raise AuthenticationError("second")
+
+        try:
+            with patch.object(
+                ConnectionPool,
+                "re_auth_callback",
+                autospec=True,
+                side_effect=re_auth_callback,
+            ):
+                with pytest.raises(AuthenticationError, match="first"):
+                    credential_provider.on_next_callback(Mock())
+
+            assert set(re_authed) == self._current_pools(nm)
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
     def test_lazy_node_connection_keeps_re_auth_on_every_pool(self):
         """
         Creating the client of a node added by a MOVED redirect must not narrow
