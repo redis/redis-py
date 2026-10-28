@@ -231,6 +231,7 @@ class TestPipeline:
         client = redis.asyncio.Redis(connection_pool=r.connection_pool)
         assert await client.get("b") == b"b1"
 
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.0.0")
     async def test_exec_error_in_pipeline_redacts_credentials(self, r):
         try:
