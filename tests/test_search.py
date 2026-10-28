@@ -4043,6 +4043,30 @@ class TestPipeline(SearchTestsBase):
             )
 
     @pytest.mark.redismod
+    def test_parsed_commands_return_the_pipeline(self, client):
+        p = client.ft().pipeline()
+        assert all(res is p for res in _queue_parsed_commands(p))
+        p = client.pipeline()
+        assert all(res is p for res in _queue_parsed_commands(p.ft()))
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    def test_parsed_commands_execute_in_pipeline(self, client):
+        client.ft().create_index((TextField("txt"),))
+        client.hset("doc1", mapping={"txt": "foo bar"})
+        client.ft().synupdate("id1", False, "foo", "bar")
+        client.ft().sugadd("ac", Suggestion("hello"))
+        p = client.ft().pipeline()
+        p.info()
+        p.aggregate(aggregations.AggregateRequest("*"))
+        p.profile(Query("foo"))
+        p.spellcheck("fo")
+        p.syndump()
+        p.sugget("ac", "he")
+        assert len(p.execute()) == 6
+
+    @pytest.mark.redismod
     @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     def test_aliaslist_in_pipeline(self, client):
@@ -6135,36 +6159,42 @@ class TestHybridSearch(SearchTestsBase):
             timeout=10,
         )
 
-        expected_results = [
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"15",
-                "price_discount": b"13.5",
-            },
-            {
-                "description": b"red dress",
-                "color": b"red",
-                "price": b"17",
-                "price_discount": b"15.3",
-            },
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"16",
-                "price_discount": b"14.4",
-            },
-        ]
+        # The results fuse the tag match with a KNN ranking over random
+        # vectors, so their order is random; check each returned item instead.
+        expected_discounts = {
+            b"15": b"13.5",
+            b"16": b"14.4",
+            b"17": b"15.3",
+            b"18": b"16.2",
+        }
         if expects_resp2_shape(client) or expects_unified_shape(client):
             assert len(res.results) == 3
-            assert res.results == expected_results
             assert res.warnings == []
             assert res.execution_time > 0
+            assert any(item["color"] == b"red" for item in res.results)
+            for item in res.results:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
         elif expects_resp3_shape(client):
             assert len(res["results"]) == 3
-            assert res["results"] == expected_results
             assert res["warnings"] == []
             assert res["execution_time"] > 0
+            assert any(item["color"] == b"red" for item in res["results"])
+            for item in res["results"]:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
@@ -6656,3 +6686,18 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         suggestions = res[b"impornant"]
         assert suggestions
         assert suggestions[0]["suggestion"] == b"important"
+
+
+def _queue_parsed_commands(ft):
+    """Queue the search commands whose replies are parsed by the client."""
+    return [
+        ft.info(),
+        ft.aggregate(aggregations.AggregateRequest("*")),
+        ft.profile(Query("foo")),
+        ft.spellcheck("foo"),
+        ft.config_get("TIMEOUT"),
+        ft.config_set("TIMEOUT", "100"),
+        ft.syndump(),
+        ft.sugget("ac", "he"),
+        ft.sugget("ac", "he", with_scores=True),
+    ]
