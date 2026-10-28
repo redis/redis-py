@@ -2286,45 +2286,16 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             command=command, redis_keys=keys, redis_args=args
         )
 
+        is_hit = False
         with self._cache_lock:
-            # We have to trigger invalidation processing in case if
-            # it was cached by another connection to avoid
-            # queueing invalidations in stale connections.
-            #
-            # Only an entry we might serve is drained. An IN_PROGRESS one is never served and
-            # is overwritten by our own placeholder below, so draining cannot change the
-            # result - while its ``connection_ref`` socket may hold the owner's reply pair,
-            # or another command's reply if the placeholder was stranded, and the drain
-            # (which returns non-push replies too) would consume either one.
-            entry = self._cache.get(self._current_command_cache_key)
-            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                with self._pool_lock:
-                    self._drain_invalidations(entry.connection_ref)
-
-                # Re-check: the entry may have been invalidated during the drain, or filled
-                # in by the connection that was fetching it.
-                entry = self._cache.get(self._current_command_cache_key)
-
-            # Whether this read is served locally is decided here, once, and the value is
-            # carried to ``read_response`` - which must not re-derive it from cache state.
-            # Two things can happen to the entry between the two calls, and re-deriving
-            # desynchronises the connection under both:
-            #
-            # - another connection resolves this very entry object and flips it to VALID with
-            #   *its* reply, so a re-derived check would serve that value and never read the
-            #   reply we did send;
-            # - an invalidation removes it, so a re-derived check would find nothing and read
-            #   a reply for a command we never sent.
-            #
-            # An IN_PROGRESS entry is somebody else's fetch in flight and carries no value to
-            # serve, so it is not a hit: fall through and send. Returning without sending
-            # would leave ``read_response`` reading a reply that was never requested.
-            if entry is not None and entry.status != CacheEntryStatus.IN_PROGRESS:
-                cached_value = entry.cache_value
-                self._current_command_cache_key = None
-                is_hit = True
-            else:
-                is_hit = False
+            candidate = self._cache.get(self._current_command_cache_key)
+            if candidate is None or candidate.status == CacheEntryStatus.IN_PROGRESS:
+                # Commit to a miss even if another connection subsequently promotes
+                # the old placeholder, and never drain an IN_PROGRESS entry's owner:
+                # its socket may still hold the reply to its outstanding command, and
+                # the drain (which returns non-push replies too) would consume it.
+                # Setting the placeholder here keeps the miss on a single lock section.
+                candidate = None
                 # Set temporary entry value to prevent
                 # race condition from another connection.
                 self._cache.set(
@@ -2335,6 +2306,50 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         connection_ref=self._conn,
                     )
                 )
+
+        if candidate is not None:
+            # Drain the connection that cached the entry so invalidations do not
+            # accumulate on idle connections. This must run outside our cache lock: the
+            # drain takes the pool lock, and invalidations call the owner's callback
+            # under its cache lock. Holding ours would order a cache lock before the
+            # pool lock and another after it, deadlocking connections draining each
+            # other or a pool.disconnect() holding the pool lock while waiting for ours.
+            with self._pool_lock:
+                self._drain_invalidations(candidate.connection_ref)
+
+            with self._cache_lock:
+                # Re-check: the drained entry may have been invalidated or replaced.
+                entry = self._cache.get(self._current_command_cache_key)
+
+                # A hit requires this very entry object to have been drained. A
+                # replacement filled during the drain may belong to another connection
+                # with pending invalidations and is not trusted, even if it is VALID by
+                # the time we check here.
+                #
+                # Whether this read is served locally is decided here, once, and the
+                # value is carried to ``read_response`` - which must not re-derive it
+                # from cache state. Two things can happen to the entry between the two
+                # calls, and re-deriving desynchronises the connection under both:
+                #
+                # - another connection resolves this very entry object and flips it to
+                #   VALID with *its* reply, so a re-derived check would serve that value
+                #   and never read the reply we did send;
+                # - an invalidation removes it, so a re-derived check would find nothing
+                #   and read a reply for a command we never sent.
+                if entry is candidate:
+                    cached_value = entry.cache_value
+                    self._current_command_cache_key = None
+                    is_hit = True
+                else:
+                    # Replace the lost candidate with our own placeholder.
+                    self._cache.set(
+                        CacheEntry(
+                            cache_key=self._current_command_cache_key,
+                            cache_value=self.DUMMY_CACHE_VALUE,
+                            status=CacheEntryStatus.IN_PROGRESS,
+                            connection_ref=self._conn,
+                        )
+                    )
 
         if is_hit:
             self._pending_cache_hit = _clone_cache_value(cached_value)

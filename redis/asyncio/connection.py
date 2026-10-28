@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import copy
 import inspect
 import logging
@@ -14,7 +13,6 @@ from itertools import chain
 from types import MappingProxyType
 from typing import (
     Any,
-    AsyncIterator,
     Callable,
     Iterable,
     List,
@@ -2765,9 +2763,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                 f"proactive reconnect: {run_proactive_reconnect}"
             )
         async with self._get_pool_lock():
-            # Opt BlockingConnectionPool into serializing its get/release
-            # with this critical section. Other pools do not define
-            # set_in_maintenance and this is a no-op for them.
+            # Record maintenance state for pools that expose the hook.
             self._set_in_maintenance(True)
             try:
                 self._update_connections_settings_without_locking(
@@ -3457,24 +3453,13 @@ class BlockingConnectionPool(ConnectionPool):
 
     def set_in_maintenance(self, in_maintenance: bool) -> None:
         """
-        Toggle the pool's maintenance mode.
+        Record the pool's maintenance state.
 
-        While maintenance mode is on, ``get_connection`` and ``release``
-        serialize their pool mutations through ``self._lock`` so they cannot
-        interleave with a MOVING notification handler that is currently
-        rewriting pool state under the same lock. Outside of maintenance the
-        mutations skip the lock, since their critical sections are pure-Python
-        and already atomic under asyncio's single-threaded scheduling.
+        ``get_connection`` and ``release`` always serialize their pool mutations
+        through ``self._lock``, independently of this flag, so they also wait for
+        reauthentication and maintenance handlers.
         """
         self._in_maintenance = in_maintenance
-
-    @contextlib.asynccontextmanager
-    async def _maybe_pool_lock(self) -> AsyncIterator[None]:
-        if self._in_maintenance:
-            async with self._lock:
-                yield
-        else:
-            yield
 
     @deprecated_args(
         args_to_warn=["*"],
@@ -3490,7 +3475,7 @@ class BlockingConnectionPool(ConnectionPool):
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    async with self._maybe_pool_lock():
+                    async with self._lock:
                         # Track connection count before to detect if a new connection is created
                         connections_before = len(self._available_connections) + len(
                             self._in_use_connections
