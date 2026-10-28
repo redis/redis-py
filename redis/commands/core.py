@@ -436,9 +436,10 @@ class ACLCommands(CommandsProtocol):
                   are prefixed with ``cache:``.
                   `keys` should not be prefixed with a ``'~'``.
             selectors: A list of ``(command, key)`` tuples, each added as one
-                       selector that grants `command` (prefixed with a '+' or a
-                       '-') on keys matching `key`. A ``'~'`` is prepended to
-                       `key` unless it already starts with ``'~'`` or ``'%'``.
+                       selector. `command` must be prefixed with a '+' to add or
+                       a '-' to remove the command permission, on keys matching
+                       `key`. A ``'~'`` is prepended to `key` unless it
+                       already starts with ``'~'`` or ``'%'``.
                        Both values are joined into a single selector string,
                        ``(command key)``, which the server splits on whitespace
                        and applies token by token. Several commands or key
