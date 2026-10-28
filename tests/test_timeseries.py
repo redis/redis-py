@@ -1,10 +1,11 @@
 import math
 import time
-from time import sleep
 
 import pytest
 import redis
 from redis.commands.timeseries.commands import TimeSeriesCommands
+from redis.commands.timeseries.info import TSInfo
+from redis.utils import SENTINEL
 
 from .conftest import (
     _get_client,
@@ -85,6 +86,8 @@ def test_alter(client):
     assert_resp_response(
         client, 10, info.get("retention_msecs"), info.get("retentionTime")
     )
+    assert client.ts().alter(1, labels={})
+    assert {} == client.ts().info(1)["labels"]
 
 
 @pytest.mark.redismod
@@ -190,13 +193,12 @@ def test_madd_missing_timeseries(client):
 
 @pytest.mark.redismod
 def test_incrby_decrby(client):
-    for _ in range(100):
-        assert client.ts().incrby(1, 1)
-        sleep(0.001)
-    assert 100 == client.ts().get(1)[1]
-    for _ in range(100):
-        assert client.ts().decrby(1, 1)
-        sleep(0.001)
+    # explicit, increasing timestamps give each call its own sample
+    for ts in range(1, 6):
+        assert client.ts().incrby(1, 1, timestamp=ts)
+    assert 5 == client.ts().get(1)[1]
+    for ts in range(6, 11):
+        assert client.ts().decrby(1, 1, timestamp=ts)
     assert 0 == client.ts().get(1)[1]
 
     assert client.ts().incrby(2, 1.5, timestamp=5)
@@ -224,9 +226,11 @@ def test_create_and_delete_rule(client):
     client.ts().create(1)
     client.ts().create(2)
     client.ts().createrule(1, 2, "avg", 100)
+    pipe = client.pipeline(transaction=False)
     for i in range(50):
-        client.ts().add(1, time + i * 2, 1)
-        client.ts().add(1, time + i * 2 + 1, 2)
+        pipe.execute_command("TS.ADD", 1, time + i * 2, 1)
+        pipe.execute_command("TS.ADD", 1, time + i * 2 + 1, 2)
+    pipe.execute()
     client.ts().add(1, time * 2, 1.5)
     assert round(client.ts().get(2)[1], 5) == 1.5
     info = client.ts().info(1)
@@ -249,8 +253,10 @@ def test_del_range(client):
     except redis.ResponseError as e:
         assert "key does not exist" in str(e)
 
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 22 == client.ts().delete(1, 0, 21)
     assert [] == client.ts().range(1, 0, 21)
     assert_resp_response(client, client.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]])
@@ -258,11 +264,15 @@ def test_del_range(client):
 
 @pytest.mark.redismod
 def test_range(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 100 == len(client.ts().range(1, 0, 200))
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     assert 200 == len(client.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
@@ -274,9 +284,11 @@ def test_range(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_range_advanced(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
 
     assert 2 == len(
         client.ts().range(
@@ -408,11 +420,15 @@ def test_range_empty(client: redis.Redis):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_rev_range(client):
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+    pipe.execute()
     assert 100 == len(client.ts().range(1, 0, 200))
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     assert 200 == len(client.ts().range(1, 0, 500))
     # first sample isn't returned
     assert 20 == len(
@@ -663,9 +679,11 @@ def test_read_block_min_count_requires_milliseconds(client):
 def test_mrange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     res = client.ts().mrange(0, 200, filters=["Test=This"])
     assert 2 == len(res)
@@ -675,8 +693,10 @@ def test_mrange(client):
         res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
         assert 10 == len(res[0]["1"][1])
 
+        pipe = client.pipeline(transaction=False)
         for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+        pipe.execute()
         res = client.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -693,8 +713,10 @@ def test_mrange(client):
         res = client.ts().mrange(0, 200, filters=["Test=This"], count=10)
         assert 10 == len(res["1"][2])
 
+        pipe = client.pipeline(transaction=False)
         for i in range(100):
-            client.ts().add(1, i + 200, i % 7)
+            pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+        pipe.execute()
         res = client.ts().mrange(
             0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
         )
@@ -831,9 +853,11 @@ def test_mrange_exclude_empty_with_groupby_raises(client):
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     # test with selected labels
     res = client.ts().mrange(0, 200, filters=["Test=This"], select_labels=["team"])
@@ -994,9 +1018,11 @@ def test_mrange_latest(client: redis.Redis):
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i, i % 7)
-        client.ts().add(2, i, i % 11)
+        pipe.execute_command("TS.ADD", 1, i, i % 7)
+        pipe.execute_command("TS.ADD", 2, i, i % 11)
+    pipe.execute()
 
     # ``expected_response_shape`` is ``"unified"`` for
     # ``legacy_responses=False`` (any protocol) and ``"legacy_resp3"`` for
@@ -1019,8 +1045,10 @@ def test_multi_reverse_range(client):
     else:
         assert 10 == len(res["1"][2])
 
+    pipe = client.pipeline(transaction=False)
     for i in range(100):
-        client.ts().add(1, i + 200, i % 7)
+        pipe.execute_command("TS.ADD", 1, i + 200, i % 7)
+    pipe.execute()
     res = client.ts().mrevrange(
         0, 500, filters=["Test=This"], aggregation_type="avg", bucket_size_msec=10
     )
@@ -1248,6 +1276,67 @@ def test_info(client):
         client, 5, info.get("retention_msecs"), info.get("retentionTime")
     )
     assert info["labels"]["currentLabel"] == "currentData"
+
+
+@pytest.mark.fixed_client
+def test_info_resp3_bytes_keys():
+    # Server-free: without decode_responses the RESP3 map has bytes keys and
+    # must parse like the RESP2 flat list.
+    resp2 = TSInfo(
+        [
+            b"totalSamples",
+            1,
+            b"retentionTime",
+            5,
+            b"chunkSize",
+            4096,
+            b"duplicatePolicy",
+            b"block",
+            b"labels",
+            [[b"currentLabel", b"currentData"]],
+        ]
+    )
+    resp3 = TSInfo(
+        {
+            b"totalSamples": 1,
+            b"retentionTime": 5,
+            b"chunkSize": 4096,
+            b"duplicatePolicy": b"block",
+            b"labels": {b"currentLabel": b"currentData"},
+        }
+    )
+    for info in (resp2, resp3):
+        assert info.total_samples == 1
+        assert info.retention_msecs == 5
+        assert info.chunk_size == 4096
+        assert info.duplicate_policy == "block"
+        assert info.labels == {"currentLabel": "currentData"}
+
+
+@pytest.mark.fixed_client
+def test_info_resp3_keeps_null_labels():
+    # Server-free: a decoded RESP3 map keeps a literal "null" label as is.
+    info = TSInfo({"labels": {"null": "null", "currentLabel": "currentData"}})
+    assert info.labels == {"null": "null", "currentLabel": "currentData"}
+
+
+@pytest.mark.redismod
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
+)
+def test_info_without_decode_responses(request, stack_url, protocol):
+    kwargs = {"decode_responses": False, "from_url": stack_url}
+    if protocol is not SENTINEL:
+        kwargs["protocol"] = protocol
+    client = _get_client(redis.Redis, request, **kwargs)
+    client.flushdb()
+    client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    client.ts().add(1, 1, 1.5)
+    info = client.ts().info(1)
+    assert info.total_samples == 1
+    assert info.retention_msecs == 5
+    assert info.labels == {"currentLabel": "currentData"}
 
 
 @pytest.mark.redismod
@@ -1584,6 +1673,44 @@ def test_madd_with_insertion_filters(client):
         [(1010, 1.0), (1020, 2.0), (1021, 22.0)],
         [[1010, 1.0], [1020, 2.0], [1021, 22.0]],
     )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_labels_with_insertion_filters_and_on_duplicate(client):
+    ts = client.ts()
+    filters = {
+        "duplicate_policy": "last",
+        "ignore_max_time_diff": 5,
+        "ignore_max_val_diff": 10.0,
+    }
+    labels = {"sensor": "1"}
+
+    assert ts.create("create", labels=labels, **filters)
+    assert labels == ts.info("create")["labels"]
+    assert 1000 == ts.add("create", 1000, 1.0)
+    assert 1000 == ts.add("create", 1004, 3.0)
+
+    assert ts.alter("create", labels={}, **filters)
+    assert {} == ts.info("create")["labels"]
+    assert 1000 == ts.add("create", 1003, 2.0)
+
+    assert 1000 == ts.add("add", 1000, 1.0, labels=labels, **filters)
+    assert labels == ts.info("add")["labels"]
+    assert 1000 == ts.add("add", 1004, 3.0)
+
+    assert 1000 == ts.add("add-dup", 1000, 1.0)
+    assert 1000 == ts.add("add-dup", 1000, 2.0, labels=labels, on_duplicate="last")
+    assert {} == ts.info("add-dup")["labels"]
+
+    assert 1000 == ts.add("add-new", 1000, 1.0, labels=labels, on_duplicate="last")
+    assert labels == ts.info("add-new")["labels"]
+
+    assert 1000 == ts.incrby("incrby", 1.0, timestamp=1000, labels=labels, **filters)
+    assert labels == ts.info("incrby")["labels"]
+
+    assert 1000 == ts.decrby("decrby", 1.0, timestamp=1000, labels=labels, **filters)
+    assert labels == ts.info("decrby")["labels"]
 
 
 @pytest.mark.redismod
@@ -2117,6 +2244,7 @@ def test_nrange_aggregator_count_mismatch_raises(client):
         )
 
 
+@pytest.mark.fixed_client
 def test_nrange_aggregation_builds_one_spec_token_per_key():
     # Server-free: each per-key spec is its own token and may hold multiple
     # comma-separated aggregators -> AGGREGATION avg,max sum 1000 for two keys
@@ -2126,6 +2254,7 @@ def test_nrange_aggregation_builds_one_spec_token_per_key():
     assert params == ["AGGREGATION", "avg,max", "sum", 1000]
 
 
+@pytest.mark.fixed_client
 def test_nrange_aggregation_single_key_single_spec():
     # Server-free: a bare string is the single-key spec (may be comma-joined).
     params = []

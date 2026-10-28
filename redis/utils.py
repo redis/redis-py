@@ -5,7 +5,7 @@ import textwrap
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from functools import wraps
+from functools import cache, wraps
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
@@ -69,6 +69,19 @@ def pipeline(redis_obj):
         p.execute()
     finally:
         p.reset()
+
+
+def is_os_level_timeout(exc: BaseException) -> bool:
+    """Tell an OS-level timeout apart from a socket/asyncio timeout.
+
+    Since Python 3.10 ``socket.timeout`` and since 3.11 ``asyncio.TimeoutError``
+    are the builtin ``TimeoutError``, an ``OSError`` subclass. A timeout the OS
+    reports on a broken connection (``ETIMEDOUT``, e.g. after a network change)
+    is therefore caught by the same ``except`` clauses as our own read/write
+    timeouts, although it means the connection is dead. Only the OS-level error
+    carries an errno.
+    """
+    return isinstance(exc, OSError) and exc.errno is not None
 
 
 def str_if_bytes(value: Union[str, bytes]) -> str:
@@ -299,6 +312,7 @@ def check_protocol_version(
     return protocol == expected_version
 
 
+@cache
 def get_lib_version():
     try:
         libver = metadata.version("redis")
@@ -374,7 +388,7 @@ def extract_expire_flags(
         elif isinstance(ex, str) and ex.isdecimal():
             exp_options.append(int(ex))
         else:
-            raise DataError("ex must be datetime.timedelta or int")
+            raise DataError("ex must be datetime.timedelta, int, or a digit string")
     elif px is not None:
         exp_options.append("PX")
         if isinstance(px, datetime.timedelta):
@@ -384,7 +398,7 @@ def extract_expire_flags(
         elif isinstance(px, str) and px.isdecimal():
             exp_options.append(int(px))
         else:
-            raise DataError("px must be datetime.timedelta or int")
+            raise DataError("px must be datetime.timedelta, int, or a digit string")
     elif exat is not None:
         if isinstance(exat, datetime.datetime):
             exat = int(exat.timestamp())

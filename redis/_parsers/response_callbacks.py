@@ -66,6 +66,8 @@ from .helpers import (
     parse_debug_object,
     parse_function_list_resp3_to_resp2_legacy,
     parse_function_list_unified,
+    parse_function_stats_resp3_to_resp2_legacy,
+    parse_function_stats_unified,
     parse_geopos_resp3_to_resp2_legacy,
     parse_geopos_unified,
     parse_geosearch_generic,
@@ -270,7 +272,7 @@ _RedisCallbacksRESP2 = {
         map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
     ),
     "HGETALL": lambda r: r and pairs_to_dict(r) or {},
-    "HOTKEYS GET": lambda r: [pairs_to_dict(m) for m in r],
+    "HOTKEYS GET": lambda r: None if r is None else [pairs_to_dict(m) for m in r],
     "MEMORY STATS": parse_memory_stats,
     "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
     "RESET": str_if_bytes,
@@ -364,6 +366,7 @@ _RedisCallbacksRESP2Unified: dict[str, Callable[..., Any]] = {
     "COMMAND": parse_command_unified,
     "COMMAND GETKEYS": lambda r, **kwargs: r,
     "FUNCTION LIST": parse_function_list_unified,
+    "FUNCTION STATS": parse_function_stats_unified,
     "GEOPOS": parse_geopos_unified,
     "LCS": parse_lcs_idx_unified,
     "MEMORY STATS": parse_memory_stats_unified,
@@ -395,6 +398,7 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
         "GEORADIUS GEORADIUSBYMEMBER GEOSEARCH",
         parse_geosearch_generic_unified,
     ),
+    **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
     "ZSCAN": parse_zscan_unified,
     "ZRANDMEMBER": zset_score_pairs_resp3,
     "ACL CAT": lambda r: list(map(str_if_bytes, r)),
@@ -408,7 +412,9 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
     "CLIENT TRACKINGINFO": parse_client_trackinginfo_unified,
     "CLUSTER LINKS": parse_cluster_links_unified,
     "COMMAND": parse_command_unified,
+    "DEBUG OBJECT": parse_debug_object,
     "FUNCTION LIST": parse_function_list_unified,
+    "FUNCTION STATS": parse_function_stats_unified,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "LCS": parse_lcs_idx_unified,
     "RESET": str_if_bytes,
@@ -423,8 +429,9 @@ _RedisCallbacksRESP3Unified: dict[str, Callable[..., Any]] = {
 # RESP3 wire converted back to the legacy RESP2 Python shapes. Only the
 # entries needed to undo RESP3-side differences are listed; everything
 # else falls through to ``_RedisCallbacks``. Scores are re-encoded to bytes
-# before being passed to ``score_cast_func`` so the callable observes the
-# same input type it would on a RESP2 connection.
+# (``str`` when the client decodes responses) before being passed to
+# ``score_cast_func`` so the callable observes the same input type it would
+# on a RESP2 connection.
 _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     **string_keys_to_dict(
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
@@ -468,6 +475,7 @@ _RedisCallbacksRESP3toRESP2Legacy: dict[str, Callable[..., Any]] = {
     "CONFIG GET": parse_config_get_resp3_to_resp2_legacy,
     "DEBUG OBJECT": parse_debug_object,
     "FUNCTION LIST": parse_function_list_resp3_to_resp2_legacy,
+    "FUNCTION STATS": parse_function_stats_resp3_to_resp2_legacy,
     "GEOHASH": lambda r: list(map(str_if_bytes, r)),
     "GEOPOS": parse_geopos_resp3_to_resp2_legacy,
     "LCS": parse_lcs_idx_resp3_to_resp2_legacy,

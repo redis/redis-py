@@ -24,7 +24,7 @@ pytest tests/test_asyncio/test_commands.py -k "test_set and not cluster"
 pytest --redis-url=redis://localhost:16379/0 -m onlycluster tests/test_cluster.py
 ```
 
-The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`.
+The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`. It also adds `--tracemalloc` (off by default, not exposed via invoke), which traces allocations so `ResourceWarning`s show where the object was allocated; it makes cluster client setup several times slower.
 
 ### pytest markers
 
@@ -89,7 +89,7 @@ RESP3 is now the default on the wire. Two knobs interact:
 
 - `redis/auth/` — credential providers and token-based auth (EntraID via `redis-entraid`; JWT support).
 - `redis/cache.py` — client-side caching configuration. `CacheConfig.is_allowed_to_cache` is the single eligibility decision point, and delegates to the `MetadataResolver` the config holds (`redis/commands/metadata.py`), defaulted to the static table and injected by `ConnectionPool.__init__` from the client-level `metadata_resolver=`. `DEFAULT_ALLOW_LIST` is deprecated and unread - change eligibility in `metadata.py`, never there. `CacheProxyConnection.send_command` asks that decision point and then requires the invocation to carry `keys`; a cacheable command without them bypasses the cache rather than raising, so plumbing `keys=` into a command method is a purely additive way to start caching it.
-- `redis/maint_notifications.py` — server-pushed maintenance notifications and the handler that reacts to them.
+- `redis/maint_notifications.py` — server-pushed maintenance notifications and the handler that reacts to them. The handlers report the relaxation they apply as `MaintenanceStartedEvent` / `MaintenanceCompletedEvent` (`redis/event.py`) to the optional `event_dispatcher` on `MaintNotificationsConfig`; the MultiDB health check policy (`redis/asyncio/multidb/healthcheck.py`) is the in-tree consumer, relaxing a database's `health_check_timeout` to `probes * (relaxed_timeout + delay)` while its probe client is under maintenance. With notifications enabled, a pooled connection that has readable data while idle is not reconnected outright by `ensure_connection`: `handle_pending_push_notifications` (both connection mixins) drains the buffered pushes with the handlers deferred, applies them only if the socket is still alive (the maintenance is still in progress), and discards them and raises for the pool to reconnect if the server has closed the socket or a stale reply was left on it.
 - `redis/keyspace_notifications.py` — keyspace/keyevent subscription helpers (sync and async variants live side by side).
 - `redis/observability/` (and `redis/asyncio/observability/`) — OpenTelemetry instrumentation. Modules: `attributes.py` (span/metric attribute keys), `config.py`, `metrics.py`, `providers.py`, `recorder.py` (the API the rest of the code calls — `record_operation_duration`, `record_error_count`, `record_pubsub_message`, `record_streaming_lag_from_response`), `registry.py`. Optional, gated by the `otel` extra. The async stack has only `recorder.py` and delegates the rest to the sync package.
 - `redis/event.py` — `EventDispatcher` used to notify subscribers on connection lifecycle events.
@@ -102,9 +102,9 @@ RESP3 is now the default on the wire. Two knobs interact:
 
 ## Python and dependency notes
 
-- `requires-python = ">=3.10"`; `pyproject.toml` lists the supported versions.
+- `requires-python = ">=3.11"`; `pyproject.toml` lists the supported versions.
 - Optional extras: `hiredis`, `xxhash`, `ocsp`, `jwt`, `circuit_breaker`, `otel`.
-- Ruff is the only formatter/linter (`target-version = "py310"`, `line-length = 88`). `tests/*` has relaxed naming rules; module command packages (`bf`, `timeseries`, `json`, `search`) opt out of pep8 naming.
+- Ruff is the only formatter/linter (`target-version = "py311"`, `line-length = 88`). `tests/*` has relaxed naming rules; module command packages (`bf`, `timeseries`, `json`, `search`) opt out of pep8 naming.
 - `whitelist.py` is the vulture allowlist — extend it instead of silencing vulture inline.
 
 ---

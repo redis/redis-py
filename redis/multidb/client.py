@@ -1,9 +1,15 @@
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, List, Literal, Optional
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional
 
-from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis._parsers import Encoder
+from redis.asyncio.multidb.healthcheck import (
+    HealthCheck,
+    HealthCheckPolicy,
+    database_maint_notifications_config,
+    relaxed_health_check_budget,
+)
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.client import PubSubWorkerThread
@@ -33,6 +39,11 @@ from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
 
+# The floor of the time a health check run from the calling thread is waited
+# for, and the margin left on top of the largest budget a check can take
+DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT = 10.0
+SYNC_HEALTH_CHECK_TIMEOUT_MARGIN = 1.0
+
 
 @experimental
 class MultiDBClient(RedisModuleCommands, CoreCommands):
@@ -43,6 +54,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
+        # Removed databases, kept so that close() still closes their clients
+        self._removed_databases: List[SyncDatabase] = []
         self._health_checks = (
             config.default_health_checks()
             if not config.health_checks
@@ -103,7 +116,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         # Uses run_coro_sync to run in the shared background loop - this ensures
         # connection pools created during initial health check remain valid for
         # subsequent recurring health checks (they use the same event loop).
-        self._bg_scheduler.run_coro_sync(self._perform_initial_health_check)
+        self._bg_scheduler.run_coro_sync(
+            self._perform_initial_health_check,
+            timeout=self._sync_health_check_timeout(
+                database for database, _ in self._databases
+            ),
+        )
 
         # Starts recurring health checks on the background.
         # Uses run_recurring_coro which shares the same event loop as run_coro_sync
@@ -132,6 +150,28 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         self.initialized = True
 
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """
+        Get the connection keyword arguments of the active database's client.
+        """
+        return self._underlying_client().get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """
+        Get the encoder of the active database's client.
+        """
+        return self._underlying_client().get_encoder()
+
+    def _underlying_client(self):
+        active_database = self.command_executor.active_database
+        if active_database is not None:
+            return active_database.client
+
+        # Before initialization there is no active database yet, so use the
+        # first configured one (databases are kept in descending weight order).
+        database, _ = self._databases.get_top_n(1)[0]
+        return database.client
+
     def get_databases(self) -> Databases:
         """
         Returns a sorted (by weight) list of all databases.
@@ -152,7 +192,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if not exists:
             raise ValueError("Given database is not a member of database list")
 
-        self._bg_scheduler.run_coro_sync(self._check_db_health, database)
+        self._bg_scheduler.run_coro_sync(
+            self._check_db_health,
+            database,
+            timeout=self._sync_health_check_timeout((database,)),
+        )
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
@@ -181,8 +225,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         config.client_kwargs["retry"] = Retry(retries=0, backoff=NoBackoff())
 
         # Maintenance notifications are disabled by default in underlying clients,
-        # but user can override this by providing their own config.
-        if "maint_notifications_config" not in config.client_kwargs:
+        # but user can override this by providing their own config. A supplied
+        # pool keeps its own configuration.
+        if (
+            not config.from_pool
+            and "maint_notifications_config" not in config.client_kwargs
+        ):
             config.client_kwargs["maint_notifications_config"] = (
                 MaintNotificationsConfig(enabled=False)
             )
@@ -213,7 +261,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         )
 
         try:
-            self._bg_scheduler.run_coro_sync(self._check_db_health, database)
+            self._bg_scheduler.run_coro_sync(
+                self._check_db_health,
+                database,
+                timeout=self._sync_health_check_timeout((database,)),
+            )
         except UnhealthyDatabaseException:
             if not skip_initial_health_check:
                 raise
@@ -239,6 +291,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Removes a database from the database list.
         """
         weight = self._databases.remove(database)
+        # The client is left open for in-flight commands when the database
+        # was the active one, so it is closed with the others on close()
+        self._removed_databases.append(database)
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
         if (
@@ -340,6 +395,53 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return PubSub(self, **kwargs)
 
+    def _sync_health_check_timeout(
+        self, databases: Iterable[SyncDatabase]
+    ) -> Optional[float]:
+        """
+        How long a health check of the given databases, run from the calling
+        thread, is waited for before it is given up on.
+
+        The wait has to hold the largest budget a check can take, or a check
+        that legitimately runs long would surface as a ``TimeoutError`` to the
+        caller instead of as an unhealthy database. A budget is relaxed while
+        the database is under a server maintenance (see
+        ``relaxed_health_check_budget``), so databases with maintenance
+        notifications enabled count with their relaxed budget. A blocking
+        relaxed timeout (``None``) relaxes the budget up to the notification's
+        time-to-live, which is not known here: the wait is then unbounded, and
+        the check itself ends when that window does.
+        """
+        with self._hc_lock:
+            health_checks = list(self._health_checks)
+
+        timeout = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
+        for database in databases:
+            config = database_maint_notifications_config(database.client)
+            if not (
+                config is not None
+                and config.enabled
+                and config.is_relaxed_timeouts_enabled()
+            ):
+                relaxed_timeout = None
+                relaxed = False
+            else:
+                relaxed_timeout = config.relaxed_timeout
+                relaxed = True
+                if relaxed_timeout is None:
+                    return None
+
+            for health_check in health_checks:
+                budget = health_check.health_check_timeout
+                if relaxed:
+                    budget = max(
+                        budget,
+                        relaxed_health_check_budget(health_check, relaxed_timeout),
+                    )
+                timeout = max(timeout, budget + SYNC_HEALTH_CHECK_TIMEOUT_MARGIN)
+
+        return timeout
+
     async def _check_db_health(self, database: SyncDatabase) -> bool:
         """
         Runs health checks on the given database until first failure.
@@ -351,6 +453,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         is_healthy = await self._health_check_policy.execute(health_checks, database)
 
         if not is_healthy:
+            # The exception path is logged by the caller; a check that reports
+            # unhealthy without raising would otherwise open the circuit silently
+            logger.debug(f"Health check reported database unhealthy: {database}")
             if database.circuit.state != CBState.OPEN:
                 database.circuit.state = CBState.OPEN
             return is_healthy
@@ -453,8 +558,23 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 pass
             self._bg_scheduler.stop()
 
-        if self.command_executor.active_database:
-            self.command_executor.active_database.client.close()
+        # Close every database client: a failover leaves the previous active
+        # database's client open, so its in-flight commands can complete. A
+        # failing client must not leave the later ones open, so the first error
+        # is raised only after every client was closed.
+        error = None
+        databases = [database for database, _ in self._databases]
+        databases.extend(self._removed_databases)
+        # A removed database is only kept to be closed here
+        self._removed_databases.clear()
+        for database in databases:
+            try:
+                database.client.close()
+            except Exception as e:
+                if error is None:
+                    error = e
+        if error is not None:
+            raise error
 
 
 def _half_open_circuit(circuit: CircuitBreaker):
@@ -471,6 +591,14 @@ class Pipeline(RedisModuleCommands, CoreCommands):
     def __init__(self, client: MultiDBClient):
         self._command_stack = []
         self._client = client
+
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """Get the connection keyword arguments of the parent client."""
+        return self._client.get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """Get the encoder of the parent client."""
+        return self._client.get_encoder()
 
     def __enter__(self) -> "Pipeline":
         return self

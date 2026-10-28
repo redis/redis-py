@@ -11,6 +11,7 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 
 
+@pytest.mark.fixed_client
 class TestRedisClientMetricsRecording:
     """
     Unit tests that verify metrics are properly recorded from Redis client

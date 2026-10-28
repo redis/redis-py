@@ -38,6 +38,26 @@ If no ``retry`` is provided, a default one is created with  :class:`~.Exponentia
 and 3 retries.
 
 
+Retry with asyncio
+******************
+
+Async clients use ``redis.asyncio.retry.Retry`` so retry callbacks and backoff
+delays can be awaited:
+
+>>> from redis.asyncio import Redis
+>>> from redis.asyncio.retry import Retry
+>>> from redis.backoff import ExponentialBackoff
+>>>
+>>> retry = Retry(ExponentialBackoff(), 3)
+>>> r = Redis(host='localhost', port=6379, retry=retry)
+
+Passing :class:`redis.retry.Retry` to an async client is supported for
+compatibility, but it is converted to ``redis.asyncio.retry.Retry`` and emits a
+warning. Custom synchronous ``call_with_retry`` implementations cannot be
+preserved by that conversion, so async clients should be configured with an
+async retry policy directly.
+
+
 Retry in Redis Cluster
 **************************
 
@@ -58,8 +78,9 @@ Retry behaviour in Redis Cluster is a little bit different from Standalone:
       only in the case when the ``retry`` object is not provided.
       When the ``retry`` argument is provided, the ``cluster_error_retry_attempts`` argument is ignored!
 
-* The retry object is not yet fully utilized in the cluster client.
-  The retry object is used only to determine the number of retries for the cluster level calls.
+* The retry object sets both the number of retries and the delay before each one:
+  the cluster client waits as long as its backoff says before it retries a command or a pipeline.
+  See :ref:`cluster-retries-label` for the delays and for how often the topology is refreshed.
 
 Let's consider the following example:
 
@@ -73,5 +94,10 @@ Let's consider the following example:
 #. the client library calculates the hash slot for key 'foo'.
 #. given the hash slot, it then determines which node to connect to, in order to execute the command.
 #. during the connection, a :class:`~.ConnectionError` is raised.
-#. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the cluster client starts a cluster update, removes the failed node from the startup nodes, and re-initializes the cluster.
-#. the cluster client retries the command until it either succeeds or the max number of retries is reached.
+#. because we set ``retry=Retry(ExponentialBackoff(), 6)``, the cluster client asks for
+   a refresh of the cluster topology, which tries the failed node last. The request is
+   shared by the whole client: the first command attempt that starts once the refresh
+   is due runs it, whether that is the retry of this command or another command.
+   Refreshes run at most once per second, so a retry inside that second still uses the
+   current topology.
+#. the cluster client waits as long as the backoff says and retries the command, until it either succeeds or the max number of retries is reached.

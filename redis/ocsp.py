@@ -73,13 +73,15 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
             "failed to retrieve a successful response from the ocsp responder"
         )
 
-    if ocsp_response.this_update >= datetime.datetime.now():
+    # this_update / next_update are reported in UTC, so compare against UTC now
+    # rather than datetime.now(), which is local time. Comparing a UTC timestamp
+    # to local time let a stale response (next_update already in the past) pass
+    # the freshness check by the host's offset west of UTC.
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    if ocsp_response.this_update >= now:
         raise ConnectionError("ocsp certificate was issued in the future")
 
-    if (
-        ocsp_response.next_update
-        and ocsp_response.next_update < datetime.datetime.now()
-    ):
+    if ocsp_response.next_update and ocsp_response.next_update < now:
         raise ConnectionError("ocsp certificate has invalid update - in the past")
 
     responder_name = ocsp_response.responder_name
@@ -107,9 +109,28 @@ def _check_certificate(issuer_cert, cert, ocsp_bytes, validate=True):
         ext = responder_cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
         if ext is None or x509.oid.ExtendedKeyUsageOID.OCSP_SIGNING not in ext.value:
             raise ConnectionError("delegate not authorized for ocsp signing")
+        # A delegate normally carries id-pkix-ocsp-nocheck, so it is never
+        # checked for revocation and its validity period is all that bounds
+        # how long its key is trusted.
+        if not (
+            responder_cert.not_valid_before <= now <= responder_cert.not_valid_after
+        ):
+            raise ConnectionError("delegate certificate is outside its validity period")
         cert_to_validate = responder_cert
 
     if validate:
+        # The issuer and any delegated responder certificate come from the
+        # peer's chain, the AIA fetch or the response itself, none of which is
+        # authenticated. Without these checks anyone can mint a key pair with
+        # the issuer's name and sign a GOOD response for a revoked certificate.
+        try:
+            cert.verify_directly_issued_by(issuer_cert)
+            if cert_to_validate is not issuer_cert:
+                cert_to_validate.verify_directly_issued_by(issuer_cert)
+        except (ValueError, TypeError, InvalidSignature):
+            raise ConnectionError(
+                f"certificate was not issued by {issuer_cert.subject.rfc4514_string()}"
+            )
         _verify_response(cert_to_validate, ocsp_response)
     return True
 

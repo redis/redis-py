@@ -469,6 +469,9 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     async def _execute_pipeline_by_slot(
         self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
     ) -> List[Any]:
+        # Only _initialize and initialize() are asked of the host class (other
+        # clients may use this mixin), and initialize() returns at once while
+        # a requested refresh is not due
         if self._initialize:
             await self.initialize()
         replica_safe = (
@@ -1126,6 +1129,9 @@ class ClusterManagementCommands(ManagementCommands):
         connection with this id should be provided.
         When clientid is not provided - target_nodes can be any node.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself.
+
         For more information see https://redis.io/commands/client-tracking
         """
         return self.client_tracking(
@@ -1160,6 +1166,9 @@ class ClusterManagementCommands(ManagementCommands):
         When clientid is provided - in target_nodes only the node that owns the
         connection with this id should be provided.
         When clientid is not provided - target_nodes can be any node.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        turning tracking off would stop invalidations for cached replies.
 
         For more information see https://redis.io/commands/client-tracking
         """

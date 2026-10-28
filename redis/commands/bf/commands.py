@@ -561,7 +561,7 @@ class TOPKCommands:
 
         Example:
 
-        >>> topkincrby('A', ['foo'], [1])
+        >>> client.topk().incrby('A', ['foo'], [1])
         """  # noqa
         params = [key]
         self.append_items_and_increments(params, items, increments)
@@ -964,7 +964,7 @@ class CMSCommands:
 
         Example:
 
-        >>> cmsincrby('A', ['foo'], [1])
+        >>> client.cms().incrby('A', ['foo'], [1])
         """  # noqa
         params = [key]
         self.append_items_and_increments(params, items, increments)

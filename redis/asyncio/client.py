@@ -53,7 +53,7 @@ from redis.asyncio.observability.recorder import (
     record_operation_duration,
     record_pubsub_message,
 )
-from redis.asyncio.retry import Retry
+from redis.asyncio.retry import Retry, _to_async_retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
@@ -589,6 +589,7 @@ class Redis(
         return self.get_connection_kwargs().get("retry")
 
     def set_retry(self, retry: Retry) -> None:
+        retry = _to_async_retry(retry)
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 
@@ -1547,7 +1548,7 @@ class PubSub:
         """
         patterns: Iterable[ChannelT]
         if args:
-            parsed_args = list_or_args((args[0],), args[1:])
+            parsed_args = list_or_args(args[0], args[1:])
             patterns = self._normalize_keys(dict.fromkeys(parsed_args)).keys()
         else:
             parsed_args = []
@@ -1659,6 +1660,8 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
+    get_sharded_message = get_message
+
     def ping(self, message=None) -> Awaitable[bool]:
         """
         Ping the Redis server to test connectivity.
@@ -1735,8 +1738,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -1791,6 +1794,11 @@ class PubSub:
         for pattern, handler in self.patterns.items():
             if handler is None:
                 raise PubSubError(f"Pattern: '{pattern}' has no handler registered")
+        for s_channel, handler in self.shard_channels.items():
+            if handler is None:
+                raise PubSubError(
+                    f"Shard Channel: '{s_channel}' has no handler registered"
+                )
 
         await self.connect()
         while True:
@@ -2178,13 +2186,20 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         )
 
         response = []
-        for args, options in commands:
-            try:
-                response.append(
-                    await self.parse_response(connection, args[0], **options)
-                )
-            except ResponseError as e:
-                response.append(e)
+        try:
+            for args, options in commands:
+                try:
+                    response.append(
+                        await self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    response.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            await connection.disconnect(nowait=True)
+            raise
 
         # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
         # raised regardless of raise_on_error as it was before folding -- only now
@@ -2207,7 +2222,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         cmd = " ".join(map(safe_str, command))
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
-            f"of pipeline caused error: {exception.args}"
+            f"of pipeline caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 

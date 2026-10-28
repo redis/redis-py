@@ -6,7 +6,12 @@ from typing import Callable, List, Optional, TypedDict, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from ..typing import EncodableT
-from ..utils import HIREDIS_AVAILABLE, SENTINEL, deprecated_function
+from ..utils import (
+    HIREDIS_AVAILABLE,
+    SENTINEL,
+    deprecated_function,
+    is_os_level_timeout,
+)
 from .base import (
     AsyncBaseParser,
     AsyncPushNotificationsParser,
@@ -210,7 +215,12 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
-        except socket.timeout:
+        except socket.timeout as e:
+            if is_os_level_timeout(e):
+                # ETIMEDOUT from the OS (e.g. after a network change): the
+                # connection is dead, not slow. Reporting it as a timeout - or
+                # as "no data" when polling - would hide a broken connection.
+                raise ConnectionError(f"Error while reading from socket: {e.args}")
             if raise_on_timeout:
                 raise TimeoutError("Timeout reading from socket")
             return False
@@ -349,10 +359,11 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # server has since closed the connection.
         if self._reader.has_data():
             return True
-        if self._stream.at_eof():
+        if self._stream.at_eof() or self._stream.exception() is not None:
             # Raise like the sync parser does on a server-closed connection,
             # so callers that tolerate pending data (push notifications)
             # can't mistake EOF for a readable connection.
+            # A reset (RST) leaves no EOF but an exception on the stream.
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         # asyncio.StreamReader has no public non-destructive API for checking
         # buffered bytes. Preserve dirty-connection detection for hiredis; tests

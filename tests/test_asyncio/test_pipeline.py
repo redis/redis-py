@@ -161,8 +161,9 @@ class TestPipeline:
             pipe.set("a", 1).set("b", 2).lpush("c", 3).set("d", 4)
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
-            assert str(ex.value).startswith(
+            assert str(ex.value) == (
                 "Command # 3 (LPUSH c 3) of pipeline caused error: "
+                "WRONGTYPE Operation against a key holding the wrong kind of value"
             )
 
             # make sure the pipe was restored to a working state
@@ -213,6 +214,22 @@ class TestPipeline:
             # make sure the pipe was restored to a working state
             assert await pipe.set("z", "zzz").execute() == [True]
             assert await r.get("z") == b"zzz"
+
+    @pytest.mark.onlynoncluster
+    async def test_callback_error_does_not_leave_replies_on_connection(self, r):
+        # The score callback raises on the first reply, while the BLPOP reply is
+        # still in flight. The next command on the pooled connection must not
+        # read it.
+        await r.zadd("z", {"a": float("inf")})
+        await r.set("b", "b1")
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.zrange("z", 0, -1, withscores=True, score_cast_func=int)
+            pipe.blpop("q", 0.5)
+            with pytest.raises(OverflowError):
+                await pipe.execute()
+
+        client = redis.asyncio.Redis(connection_pool=r.connection_pool)
+        assert await client.get("b") == b"b1"
 
     @pytest.mark.onlynoncluster
     async def test_parse_error_raised_transaction(self, r):
@@ -519,6 +536,7 @@ class TestPipeline:
         assert "JSON.GET" in r.response_callbacks
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncPipelineOperationDurationMetricsRecording:
     """

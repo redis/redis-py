@@ -1033,6 +1033,9 @@ class ManagementCommands(CommandsProtocol):
         Turn on the tracking mode.
         For more information, about the options look at client_tracking func.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself.
+
         See https://redis.io/commands/client-tracking
         """
         return self.client_tracking(
@@ -1073,6 +1076,9 @@ class ManagementCommands(CommandsProtocol):
         """
         Turn off the tracking mode.
         For more information, about the options look at client_tracking func.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        turning tracking off would stop invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1143,6 +1149,10 @@ class ManagementCommands(CommandsProtocol):
 
         ``prefix``  for broadcasting, register a given key prefix, so that
         notifications will be provided only for keys starting with this string.
+
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the cache enables tracking itself, and changing it would stop
+        invalidations for cached replies.
 
         See https://redis.io/commands/client-tracking
         """
@@ -1818,6 +1828,9 @@ class ManagementCommands(CommandsProtocol):
     def reset(self) -> (bytes | str) | Awaitable[bytes | str]:
         """Perform a full reset on the connection's server-side context.
 
+        On a client with client-side caching enabled this raises ``RedisError``:
+        the reset turns off the tracking the cache relies on for invalidations.
+
         See: https://redis.io/commands/reset
         """
         return self.execute_command("RESET")
@@ -2392,7 +2405,8 @@ class ManagementCommands(CommandsProtocol):
             metrics: List of metrics to track. Supported values: [HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
             duration: Automatically stop the collection after `duration` seconds
             sample_ratio: Commands are sampled with probability 1/ratio (1 means no sampling)
-            slots: Only track keys on the specified hash slots
+            slots: Only track keys on the specified hash slots; an empty list is
+                treated as not given
 
         For more information, see https://redis.io/commands/hotkeys-start
         """
@@ -2415,7 +2429,7 @@ class ManagementCommands(CommandsProtocol):
             args.extend(["SAMPLE", sample_ratio])
 
         # Add optional SLOTS
-        if slots is not None:
+        if slots:
             args.append("SLOTS")
             args.append(len(slots))
             args.extend(slots)
@@ -2457,22 +2471,23 @@ class ManagementCommands(CommandsProtocol):
     @overload
     def hotkeys_get(
         self: SyncClientProtocol, **kwargs
-    ) -> list[dict[str | bytes, Any]]: ...
+    ) -> list[dict[str | bytes, Any]] | None: ...
 
     @overload
     def hotkeys_get(
         self: AsyncClientProtocol, **kwargs
-    ) -> Awaitable[list[dict[str | bytes, Any]]]: ...
+    ) -> Awaitable[list[dict[str | bytes, Any]] | None]: ...
 
     def hotkeys_get(
         self, **kwargs
     ) -> Union[
-        Awaitable[list[dict[str | bytes, Any]]],
-        list[dict[str | bytes, Any]],
+        Awaitable[list[dict[str | bytes, Any]] | None],
+        list[dict[str | bytes, Any]] | None,
     ]:
         """
         Retrieve the result of the ongoing collection session (if any),
         or the last collection session (if any).
+        Returns None if there is no collection session.
 
         HOTKEYS GET response is wrapped in an array for aggregation support.
         Each node returns a single-element array, allowing multiple node
@@ -6308,7 +6323,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        if no_values is not None:
+        if no_values:
             pieces.extend([b"NOVALUES"])
         return self.execute_command("HSCAN", *pieces, no_values=no_values)
 
@@ -7825,7 +7840,8 @@ class StreamCommands(CommandsProtocol):
         min: minimum stream ID.
         max: maximum stream ID.
         count: number of messages to return
-        consumername: name of a consumer to filter by (optional).
+        consumername: name of a consumer to filter by (optional). Empty names
+        are supported; only None omits the consumer filter.
         """
         if {min, max, count} == {None}:
             if idle is not None or consumername is not None:
@@ -7857,7 +7873,7 @@ class StreamCommands(CommandsProtocol):
         except TypeError:
             pass
         # consumername
-        if consumername:
+        if consumername is not None:
             pieces.append(consumername)
 
         return self.execute_command("XPENDING", *pieces, parse_detail=True)
@@ -8284,6 +8300,14 @@ class SortedSetCommands(CommandsProtocol):
     Redis commands for Sorted Sets data type.
     see: https://redis.io/topics/data-types-intro#redis-sorted-sets
     """
+
+    def _zset_decode_responses(self) -> bool:
+        # Hosts that don't define get_connection_kwargs() keep the undecoded
+        # (bytes) legacy score text.
+        get_connection_kwargs = getattr(self, "get_connection_kwargs", None)
+        if get_connection_kwargs is None:
+            return False
+        return bool(get_connection_kwargs().get("decode_responses", False))
 
     @overload
     def zadd(
@@ -8900,7 +8924,7 @@ class SortedSetCommands(CommandsProtocol):
                 "``withscores`` not supported in combination with ``bylex``."
             )
         pieces = [command]
-        if dest:
+        if dest is not None:
             pieces.append(dest)
         pieces.extend([name, start, end])
         if byscore:
@@ -9380,6 +9404,9 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        if withscore and score_cast_func is not float:
+            # Lets the RESP3 -> legacy callback match RESP2's str scores.
+            options["decode_responses"] = self._zset_decode_responses()
 
         return self.execute_command(*pieces, **options)
 
@@ -9504,6 +9531,9 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        if withscore and score_cast_func is not float:
+            # Lets the RESP3 -> legacy callback match RESP2's str scores.
+            options["decode_responses"] = self._zset_decode_responses()
 
         return self.execute_command(*pieces, **options)
 
@@ -9678,7 +9708,7 @@ class SortedSetCommands(CommandsProtocol):
         if dest is not None:
             pieces.append(dest)
         pieces.append(len(keys))
-        if isinstance(keys, dict):
+        if isinstance(keys, Mapping):
             keys, weights = keys.keys(), keys.values()
         else:
             weights = None
@@ -12098,8 +12128,8 @@ class GeoCommands(CommandsProtocol):
         if kwargs["member"] is None:
             if kwargs["longitude"] is None or kwargs["latitude"] is None:
                 raise DataError("GEOSEARCH must have member or longitude and latitude")
-        if kwargs["member"]:
-            if kwargs["longitude"] or kwargs["latitude"]:
+        if kwargs["member"] is not None:
+            if kwargs["longitude"] is not None or kwargs["latitude"] is not None:
                 raise DataError(
                     "GEOSEARCH member and longitude or latitude can't be set together"
                 )
@@ -12115,13 +12145,13 @@ class GeoCommands(CommandsProtocol):
             raise DataError("GEOSEARCH must have unit")
         if kwargs["unit"].lower() not in ("m", "km", "mi", "ft"):
             raise DataError("GEOSEARCH invalid unit")
-        if kwargs["radius"]:
-            if kwargs["width"] or kwargs["height"]:
+        if kwargs["radius"] is not None:
+            if kwargs["width"] is not None or kwargs["height"] is not None:
                 raise DataError(
                     "GEOSEARCH radius and width or height can't be set together"
                 )
             pieces.extend([b"BYRADIUS", kwargs["radius"], kwargs["unit"]])
-        if kwargs["width"] and kwargs["height"]:
+        if kwargs["width"] is not None and kwargs["height"] is not None:
             pieces.extend([b"BYBOX", kwargs["width"], kwargs["height"], kwargs["unit"]])
 
         # sort
@@ -12134,7 +12164,7 @@ class GeoCommands(CommandsProtocol):
                 raise DataError("GEOSEARCH invalid sort")
 
         # count any
-        if kwargs["count"]:
+        if kwargs["count"] is not None:
             pieces.extend([b"COUNT", kwargs["count"]])
             if kwargs["any"]:
                 pieces.append(b"ANY")
