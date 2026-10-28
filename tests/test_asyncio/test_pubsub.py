@@ -1364,6 +1364,40 @@ class TestPubSubSubcommands:
 
 @pytest.mark.onlynoncluster
 class TestPubSubPings:
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("6.0.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    @pytest.mark.parametrize("message", [None, "x", "hello\u2603"])
+    @pytest.mark.parametrize("read_method", ["get_message", "listen"])
+    async def test_ping_response_shapes(
+        self, create_redis, protocol, decode_responses, message, read_method
+    ):
+        client = await create_redis(
+            protocol=protocol, decode_responses=decode_responses
+        )
+        async with client.pubsub() as pubsub:
+            await pubsub.subscribe("foo")
+            assert (await pubsub.get_message(timeout=1))["type"] == "subscribe"
+            await pubsub.ping(message)
+
+            if read_method == "get_message":
+                response = await pubsub.get_message(timeout=1)
+            else:
+                messages = pubsub.listen()
+                try:
+                    response = await asyncio.wait_for(messages.__anext__(), timeout=1)
+                finally:
+                    await messages.aclose()
+
+            data = message if message is not None else ""
+            assert response == {
+                "type": "pong",
+                "pattern": None,
+                "channel": None,
+                "data": data if decode_responses else data.encode(),
+            }
+
     @skip_if_server_version_lt("3.0.0")
     async def test_send_pubsub_ping(self, r: redis.Redis):
         p = r.pubsub(ignore_subscribe_messages=True)
@@ -1786,9 +1820,6 @@ class TestPubSubAutoReconnect:
 
 @pytest.mark.onlynoncluster
 class TestBaseException:
-    @pytest.mark.skipif(
-        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
-    )
     async def test_outer_timeout(self, r: redis.Redis):
         """
         Using asyncio_timeout manually outside the inner method timeouts works.
@@ -1820,9 +1851,6 @@ class TestBaseException:
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
-    )
     async def test_base_exception(self, r: redis.Redis):
         """
         Manually trigger a BaseException inside the parser's .read_response method

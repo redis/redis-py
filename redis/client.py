@@ -504,21 +504,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
-                if metadata_resolver is not None:
-                    # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
-                    # reaches the pool without also being forwarded to every connection.
-                    kwargs.update(
-                        {
-                            "metadata_resolver": metadata_resolver,
-                        }
-                    )
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
@@ -540,6 +525,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
+                )
+            if metadata_resolver is not None:
+                # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                # reaches the pool without also being forwarded to every connection.
+                kwargs.update(
+                    {
+                        "metadata_resolver": metadata_resolver,
+                    }
+                )
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -1682,6 +1682,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
 
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":

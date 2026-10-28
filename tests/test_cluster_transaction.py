@@ -115,6 +115,147 @@ class TestClusterTransaction:
             assert pipe.execute() == [b"OK"]
 
     @pytest.mark.onlycluster
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            redis.exceptions.MovedError,
+            redis.exceptions.AskError,
+            redis.exceptions.ConnectionError,
+            redis.exceptions.TimeoutError,
+            redis.exceptions.ClusterDownError,
+            redis.exceptions.SlotNotCoveredError,
+        ],
+    )
+    @pytest.mark.parametrize("command", ["GET", "WATCH", "EXEC"])
+    @pytest.mark.parametrize("failure_point", ["send", "read"])
+    def test_retry_after_acknowledged_watch_raises(
+        self, r, error_type, command, failure_point
+    ):
+        """A retried command must not silently abandon an acknowledged WATCH."""
+        key = "book"
+        slot = r.keyslot(key)
+        node = r.nodes_manager.get_node_from_slot(slot)
+        error = error_type(f"{slot} {node.name}")
+        r.set_retry(Retry(NoBackoff(), 1))
+        r.reinitialize_steps = 1
+
+        with r.pipeline(transaction=True) as pipe:
+            pipe.watch(key)
+            strategy = pipe._execution_strategy
+            connection = strategy._transaction_connection
+            # A concurrent write must not be overwritten by an unwatched retry.
+            r.set(key, 100)
+            if command == "EXEC":
+                pipe.multi()
+                pipe.set(key, 1)
+                send_method = "send_packed_command"
+            else:
+                send_method = "send_command"
+            original_send = getattr(connection, send_method)
+            attempts = []
+
+            def fail_once(*args, **kwargs):
+                attempts.append(args)
+                if len(attempts) == 1:
+                    raise error
+                return original_send(*args, **kwargs)
+
+            if failure_point == "send":
+                patcher = patch.object(connection, send_method, side_effect=fail_once)
+            else:
+                node_type = Redis
+                original_parse = node_type.parse_response
+
+                def fail_after_read(redis_node, conn, name, **options):
+                    result = original_parse(redis_node, conn, name, **options)
+                    if name == command:
+                        attempts.append(name)
+                        if len(attempts) == 1:
+                            raise error
+                    return result
+
+                patcher = patch.object(
+                    node_type,
+                    "parse_response",
+                    autospec=True,
+                    side_effect=fail_after_read,
+                )
+
+            with patcher:
+                with pytest.raises(redis.exceptions.WatchError) as exc_info:
+                    if command == "EXEC":
+                        pipe.execute()
+                    else:
+                        pipe.execute_command(command, key)
+
+            assert exc_info.value.__cause__ is error
+            assert len(attempts) == 1
+            assert strategy._transaction_connection is None
+            assert not connection.is_connected
+            assert r.get(key) == b"100"
+
+            # Reset and reuse must not retain acknowledged WATCH state.
+            pipe.reset()
+            assert not strategy._watch_acknowledged
+            pipe.watch(key)
+            assert strategy._watch_acknowledged
+            pipe.unwatch()
+            assert not strategy._watch_acknowledged
+            pipe.set(key, 2)
+            assert pipe.execute() == [b"OK"]
+            assert not strategy._watch_acknowledged
+
+    @pytest.mark.onlycluster
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            redis.exceptions.MovedError,
+            redis.exceptions.AskError,
+            redis.exceptions.ConnectionError,
+            redis.exceptions.TimeoutError,
+            redis.exceptions.ClusterDownError,
+            redis.exceptions.SlotNotCoveredError,
+        ],
+    )
+    def test_error_before_watch_acknowledgement_is_retried(self, r, error_type):
+        key = "book"
+        slot = r.keyslot(key)
+        node = r.nodes_manager.get_node_from_slot(slot)
+        error = error_type(f"{slot} {node.name}")
+        r.set_retry(Retry(NoBackoff(), 1))
+        node_type = Redis
+        original_parse = node_type.parse_response
+        attempts = []
+
+        def fail_first_watch_reply(redis_node, connection, command, **options):
+            result = original_parse(redis_node, connection, command, **options)
+            if command == "WATCH":
+                attempts.append(connection)
+                if len(attempts) == 1:
+                    raise error
+            return result
+
+        with r.pipeline(transaction=True) as pipe:
+            with patch.object(
+                node_type,
+                "parse_response",
+                autospec=True,
+                side_effect=fail_first_watch_reply,
+            ):
+                pipe.watch(key)
+
+            assert len(attempts) == 2
+            assert pipe._execution_strategy._watch_acknowledged
+            # The successful retry must actually install a new WATCH.
+            r.set(key, 100)
+            pipe.multi()
+            pipe.set(key, 1)
+            with pytest.raises(redis.exceptions.WatchError, match="Watched variable"):
+                pipe.execute()
+            assert r.get(key) == b"100"
+            assert not pipe._execution_strategy._watch_acknowledged
+
+    @pytest.mark.onlycluster
     def test_retry_transaction_during_unfinished_slot_migration(self, r):
         """
         When a transaction is triggered during a migration, MovedError
@@ -353,9 +494,10 @@ class TestClusterTransaction:
                     r.nodes_manager.nodes_cache[node_owning.name] = replacement
 
                 if release == "error":
-                    strategy._reinitialize_on_error(
-                        redis.exceptions.ConnectionError("Conn error"), 1
-                    )
+                    with pytest.raises(redis.exceptions.WatchError):
+                        strategy._reinitialize_on_error(
+                            redis.exceptions.ConnectionError("Conn error"), 1
+                        )
                     assert strategy._transaction_connection is None
                     assert not connection.is_connected
 

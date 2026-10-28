@@ -1677,6 +1677,41 @@ class TestPubSubSubcommands:
 
 
 class TestPubSubPings:
+    @pytest.mark.fixed_client
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.0.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    @pytest.mark.parametrize("message", [None, "x", "hello\u2603"])
+    @pytest.mark.parametrize("read_method", ["get_message", "listen"])
+    def test_ping_response_shapes(
+        self, request, protocol, decode_responses, message, read_method
+    ):
+        client = _get_client(
+            redis.Redis, request, protocol=protocol, decode_responses=decode_responses
+        )
+        with client.pubsub() as pubsub:
+            pubsub.subscribe("foo")
+            assert pubsub.get_message(timeout=1)["type"] == "subscribe"
+            pubsub.ping(message)
+
+            if read_method == "get_message":
+                response = pubsub.get_message(timeout=1)
+            else:
+                messages = pubsub.listen()
+                try:
+                    response = next(messages)
+                finally:
+                    messages.close()
+
+            data = message if message is not None else ""
+            assert response == {
+                "type": "pong",
+                "pattern": None,
+                "channel": None,
+                "data": data if decode_responses else data.encode(),
+            }
+
     @skip_if_server_version_lt("3.0.0")
     def test_send_pubsub_ping(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
