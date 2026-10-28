@@ -2893,11 +2893,11 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         # TODO validate free connections
 
 
-def _moving_pool(**config_kwargs):
+def _moving_pool(pool_class=ConnectionPool, **config_kwargs):
     config_kwargs.setdefault("enabled", True)
     config_kwargs.setdefault("proactive_reconnect", True)
     config_kwargs.setdefault("relaxed_timeout", 10)
-    return ConnectionPool(
+    return pool_class(
         protocol=3, maint_notifications_config=MaintNotificationsConfig(**config_kwargs)
     )
 
@@ -3305,6 +3305,53 @@ def test_pool_close_in_forked_child_does_not_block_on_inherited_handler_lock():
 
     def hold_lock():
         with handler._lock:
+            holding.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holding.wait(5)
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        status = 1
+        try:
+            signal.alarm(5)
+            pool.close()
+            status = 0
+        finally:
+            os._exit(status)
+    try:
+        _, wait_status = os.waitpid(pid, 0)
+    finally:
+        release.set()
+        holder.join(5)
+
+    assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+def test_pool_close_in_forked_child_does_not_block_on_inherited_pool_lock(
+    pool_class,
+):
+    """
+    A parent thread holds the pool lock while a handoff is pending when the
+    process forks: the child inherits the lock held and no thread there will
+    ever release it, yet resetting the handler takes it to revert the handoff.
+    """
+    pool = _moving_pool(pool_class)
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(
+        NodeMovingNotification(id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60)
+    )
+    assert handler._pending_handoffs
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with pool._lock:
             holding.set()
             release.wait(30)
 

@@ -4038,6 +4038,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if is_fork:
             # Inherited connections were counted by the parent, not this process.
             self._pool_id = secrets.token_hex(4)
+            # A parent thread may have held the lock at fork time, and the
+            # handler reset below takes it to revert an active MOVING.
+            self._lock = threading.RLock()
 
         # Record metrics for connections being removed before clearing
         # (only if attributes exist - they won't during __init__)
@@ -4503,6 +4506,9 @@ class BlockingConnectionPool(ConnectionPool):
         if is_fork:
             # Inherited connections were counted by the parent, not this process.
             self._pool_id = secrets.token_hex(4)
+            # A parent thread may have held the lock at fork time, and the
+            # handler reset below takes it to revert an active MOVING.
+            self._lock = threading.RLock()
 
         # Create and fill up a thread safe queue with ``None`` values.
         try:
