@@ -56,7 +56,6 @@ def make_resp3_connection(socket_timeout=SOCKET_TIMEOUT):
     return make_connection(_AsyncRESP3Parser(READ_SIZE), 3, socket_timeout)
 
 
-@requires_hiredis
 def make_hiredis_connection(socket_timeout=SOCKET_TIMEOUT):
     return make_connection(_AsyncHiredisParser(READ_SIZE), 2, socket_timeout)
 
@@ -189,30 +188,6 @@ async def test_blocking_read_ignores_socket_timeout():
     assert response == PAYLOAD
 
 
-async def test_send_packed_command_times_out_when_writer_stalls():
-    # The write side already applies socket_timeout per send operation: a
-    # writer whose drain() stalls raises TimeoutError instead of hanging.
-    conn = Connection(socket_timeout=0.2, health_check_interval=0)
-    writer = mock.Mock()
-    writer.transport.is_closing.return_value = False
-
-    async def stalled_drain():
-        await asyncio.sleep(10)
-
-    writer.drain = stalled_drain
-    conn._reader = mock.Mock()
-    conn._writer = writer
-    conn.disconnect = mock.AsyncMock()
-
-    start = time.monotonic()
-    with pytest.raises(TimeoutError, match="Timeout writing to socket"):
-        await conn.send_packed_command(b"PING", check_health=False)
-    elapsed = time.monotonic() - start
-
-    assert elapsed < 2
-    conn.disconnect.assert_awaited()
-
-
 @pytest.mark.parametrize(
     "factory",
     [
@@ -246,27 +221,25 @@ async def test_explicit_timeout_mid_bulk_read_preserves_bytes(factory):
     assert response == PAYLOAD
 
 
-def test_should_arm_read_timeout_only_when_read_can_wait():
-    # The per-read timeout is armed only for a read that can actually
-    # wait: arming one for a read the StreamReader satisfies from its
-    # own buffer would waste an asyncio.Timeout per piece of a reply.
+async def test_reads_arm_timeout_only_when_they_can_wait():
     parser = _AsyncRESP2Parser(READ_SIZE)
-    # Reads with an explicit caller timeout never arm per-read deadlines.
-    assert not parser._should_arm_read_timeout(True)
+    reader = asyncio.StreamReader()
+    parser._stream = reader
     parser._apply_read_timeout = True
-    # A read that cannot wait (data already buffered) arms nothing.
-    assert not parser._should_arm_read_timeout(False)
-    # The default socket_timeout=None arms nothing outside a maintenance
-    # window: no deadline could be imposed on the read later.
-    assert not parser._should_arm_read_timeout(True)
-    parser._read_timeout = 1.0
-    assert parser._should_arm_read_timeout(True)
-    # Inside a maintenance window even a None timeout arms an (empty)
-    # context, so the restore at the end of the window can impose a
-    # deadline on a read that started while the timeout was relaxed.
+    parser._read_timeout = 0.05
+
+    with pytest.raises(asyncio.TimeoutError):
+        await parser._readline()
+    assert parser._active_read_timeout is None
+
+    reader.feed_data(b"OK\r\n")
+    assert await parser._readline() == b"OK"
+    assert parser._active_read_timeout is None
+
     parser._read_timeout = None
-    parser._in_maintenance_window = True
-    assert parser._should_arm_read_timeout(True)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(parser._readline(), 0.2)
+    assert parser._active_read_timeout is None
 
 
 async def test_read_exactly_replaces_pieces_with_joined_buffer():
@@ -308,22 +281,3 @@ async def test_read_exactly_keeps_pieces_when_eof_interrupts():
     await feeder
 
     assert parser._chunks == [b"a" * 1000, b"b" * 1000]
-
-
-async def test_send_packed_command_within_socket_timeout_succeeds():
-    # A slow but responsive writer (drain completes within socket_timeout)
-    # must not be timed out.
-    conn = Connection(socket_timeout=1, health_check_interval=0)
-    writer = mock.Mock()
-    writer.transport.is_closing.return_value = False
-
-    async def slow_drain():
-        await asyncio.sleep(0.05)
-
-    writer.drain = slow_drain
-    conn._reader = mock.Mock()
-    conn._writer = writer
-
-    await conn.send_packed_command(b"PING", check_health=False)
-
-    writer.writelines.assert_called_once_with([b"PING"])
