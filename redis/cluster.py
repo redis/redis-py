@@ -5212,7 +5212,9 @@ class ClusterPipeline(RedisCluster):
         rather than the pipeline, so it does not chain.
 
         Outside a transactional block only one key is accepted, as with `delete`; more
-        raises :class:`~.RedisClusterException`.
+        raises :class:`~.RedisClusterException`. Between :meth:`watch` and
+        :meth:`multi` it is not staged: it is sent at once, outside the eventual
+        transaction, and the response is discarded.
         """
         self._execution_strategy.unlink(*names)
 
