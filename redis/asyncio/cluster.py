@@ -3982,7 +3982,10 @@ class TransactionStrategy(AbstractStrategy):
                     id(node): node
                     for node in chain(startup_nodes, cluster_client.get_nodes())
                 }
-                await asyncio.gather(*(node.disconnect() for node in nodes.values()))
+                await asyncio.gather(
+                    *(node.disconnect() for node in nodes.values()),
+                    return_exceptions=True,
+                )
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS

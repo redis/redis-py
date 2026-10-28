@@ -7188,6 +7188,7 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("protocol", [2, 3])
     @pytest.mark.parametrize("dynamic_startup_nodes", [False, True])
     @pytest.mark.parametrize("use_default_node", [False, True])
@@ -7624,8 +7625,9 @@ class TestClusterPipelineMocked:
 
     @pytest.mark.parametrize("initialized", [False, True])
     @pytest.mark.parametrize("slot_error", [False, True])
+    @pytest.mark.parametrize("disconnect_error", [False, True])
     async def test_transaction_closes_only_connections_initialized_on_private_loop(
-        self, initialized, slot_error
+        self, initialized, slot_error, disconnect_error
     ) -> None:
         client = RedisCluster(host=default_host, port=default_port)
         startup_node = next(iter(client.nodes_manager.startup_nodes.values()))
@@ -7641,6 +7643,12 @@ class TestClusterPipelineMocked:
             async def disconnect(connection=connection):
                 disconnect_loops.append(asyncio.get_running_loop())
                 connection.is_connected = False
+                if (
+                    disconnect_error
+                    and not initialized
+                    and connection.disconnect.await_count == 1
+                ):
+                    raise TimeoutError("close timed out")
 
             connection.disconnect.side_effect = disconnect
             node._connections.append(connection)
