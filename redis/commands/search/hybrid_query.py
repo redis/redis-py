@@ -1,15 +1,9 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-
-from redis.utils import experimental
-
-try:
-    from typing import Self  # Py 3.11+
-except ImportError:
-    from typing_extensions import Self
+from typing import Any, Dict, List, Optional, Self, Union
 
 from redis.commands.search.aggregation import Limit, Reducer
 from redis.commands.search.query import Filter, SortbyField
+from redis.utils import experimental
 
 
 @experimental

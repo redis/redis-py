@@ -2603,6 +2603,30 @@ class TestPipeline(AsyncSearchTestsBase):
             )
 
     @pytest.mark.redismod
+    async def test_parsed_commands_return_the_pipeline(self, decoded_r: redis.Redis):
+        p = decoded_r.ft().pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p))
+        p = decoded_r.pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p.ft()))
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    async def test_parsed_commands_execute_in_pipeline(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("txt"),))
+        await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
+        await decoded_r.ft().synupdate("id1", False, "foo", "bar")
+        await decoded_r.ft().sugadd("ac", Suggestion("hello"))
+        p = decoded_r.ft().pipeline()
+        await p.info()
+        await p.aggregate(aggregations.AggregateRequest("*"))
+        p.profile(Query("foo"))
+        await p.spellcheck("fo")
+        p.syndump()
+        await p.sugget("ac", "he")
+        assert len(await p.execute()) == 6
+
+    @pytest.mark.redismod
     @skip_if_redis_enterprise()
     async def test_search_through_pipeline_ft_is_decoded(self, decoded_r: redis.Redis):
         await decoded_r.ft().create_index((TextField("txt"),))
@@ -4054,36 +4078,42 @@ class TestHybridSearch(AsyncSearchTestsBase):
             timeout=10,
         )
 
-        expected_results = [
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"15",
-                "price_discount": b"13.5",
-            },
-            {
-                "description": b"red dress",
-                "color": b"red",
-                "price": b"17",
-                "price_discount": b"15.3",
-            },
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"16",
-                "price_discount": b"14.4",
-            },
-        ]
+        # The results fuse the tag match with a KNN ranking over random
+        # vectors, so their order is random; check each returned item instead.
+        expected_discounts = {
+            b"15": b"13.5",
+            b"16": b"14.4",
+            b"17": b"15.3",
+            b"18": b"16.2",
+        }
         if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
             assert len(res.results) == 3
-            assert res.results == expected_results
             assert res.warnings == []
             assert res.execution_time > 0
+            assert any(item["color"] == b"red" for item in res.results)
+            for item in res.results:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
         elif expects_resp3_shape(decoded_r):
             assert len(res["results"]) == 3
-            assert res["results"] == expected_results
             assert res["warnings"] == []
             assert res["execution_time"] > 0
+            assert any(item["color"] == b"red" for item in res["results"])
+            for item in res["results"]:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
@@ -4380,3 +4410,20 @@ def _contains_bytes(value):
     if hasattr(value, "__dict__"):
         return _contains_bytes(vars(value))
     return False
+
+
+async def _queue_parsed_commands(ft):
+    """Queue the search commands whose replies are parsed by the client."""
+    queued = [
+        ft.info(),
+        ft.aggregate(aggregations.AggregateRequest("*")),
+        ft.profile(Query("foo")),
+        ft.spellcheck("foo"),
+        ft.config_get("TIMEOUT"),
+        ft.config_set("TIMEOUT", "100"),
+        ft.syndump(),
+        ft.sugget("ac", "he"),
+        ft.sugget("ac", "he", with_scores=True),
+    ]
+    # ``profile`` and ``syndump`` are inherited from the sync commands.
+    return [await res if asyncio.iscoroutine(res) else res for res in queued]
