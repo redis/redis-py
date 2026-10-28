@@ -377,11 +377,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # recv(). Check the flags first to avoid private stream access when
         # per-read timeouts do not apply. StreamReader.read can only wait
         # while its bytearray buffer is empty; only then arm the timeout.
-        if (
-            self._apply_read_timeout
-            and self._read_timeout is not None
-            and not self._stream._buffer
-        ):
+        if self._apply_read_timeout and not self._stream._buffer:
             async with async_timeout(self._read_timeout) as active_timeout:
                 self._active_read_timeout = active_timeout
                 try:
