@@ -6688,6 +6688,21 @@ class TestRedisCommands:
             if key.startswith("db."):
                 assert not isinstance(value, list)
 
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
+    @pytest.mark.parametrize("protocol", [2, 3])
+    async def test_memory_stats_unified_responses(self, create_redis, protocol):
+        r = await create_redis(protocol=protocol, legacy_responses=False)
+        await r.set("foo", "bar")
+        stats = await r.memory_stats()
+        # Redis replies with doubles for these, which RESP2 sends as bulk strings.
+        for key in ("dataset.percentage", "peak.percentage", "fragmentation"):
+            assert type(stats[key]) is float
+        assert type(stats["peak.allocated"]) is int
+        db_stats = next(v for k, v in stats.items() if k.startswith("db."))
+        assert all(type(value) is int for value in db_stats.values())
+
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):
         await r.set("foo", "bar")
