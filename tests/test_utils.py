@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import warnings
 import pytest
 from redis.exceptions import DataError
-import redis.utils as ru
+import redis.utils
 from redis.utils import (
     check_protocol_version,
     compare_versions,
@@ -24,6 +24,20 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
+
+
+@pytest.fixture
+def filterable_args_calls(monkeypatch):
+    """Count calls to the slow path the args decorators skip on clean calls."""
+    calls = []
+    orig_get = redis.utils._get_filterable_args
+
+    def counting_get(*args, **kwargs):
+        calls.append(args)
+        return orig_get(*args, **kwargs)
+
+    monkeypatch.setattr(redis.utils, "_get_filterable_args", counting_get)
+    return calls
 
 
 @pytest.mark.fixed_client
@@ -219,23 +233,17 @@ class TestDeprecatedArgs:
             assert result == "new_val"
             assert len(w) == 0
 
-    def test_fast_path_bypasses_filterable_args_construction(self, monkeypatch):
-        called = False
-        orig_get = ru._get_filterable_args
-
-        def counting_get(*args, **kwargs):
-            nonlocal called
-            called = True
-            return orig_get(*args, **kwargs)
-
-        monkeypatch.setattr(ru, "_get_filterable_args", counting_get)
-
+    def test_fast_path_bypasses_filterable_args_construction(
+        self, filterable_args_calls
+    ):
         @deprecated_args(args_to_warn=["batch_size"])
         def record_metric(cmd, dur, host=None, port=None, batch_size=None):
             return (cmd, dur)
 
         assert record_metric("GET", 0.001, "localhost", 6379) == ("GET", 0.001)
-        assert not called, "_get_filterable_args should not be called on clean hot path"
+        assert not filterable_args_calls, (
+            "_get_filterable_args should not be called on clean hot path"
+        )
 
     def test_mutable_args_input_snapshotting(self):
         # Mutating the list passed to args_to_warn or allowed_args after decorator
@@ -264,6 +272,113 @@ class TestDeprecatedArgs:
             assert res == (None, "val", None)
             assert len(w) == 1
             assert "old_param" in str(w[0].message)
+
+    def test_wildcard_pool_get_connection_signature(self, filterable_args_calls):
+        class Pool:
+            @deprecated_args(args_to_warn=["*"])
+            def get_connection(self, command_name=None, *keys, **options):
+                return "conn"
+
+        pool = Pool()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection() == "conn"
+            assert len(w) == 0
+            assert not filterable_args_calls
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection("GET", "key") == "conn"
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "command_name" in str(w[0].message)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection(option="value") == "conn"
+            assert len(w) == 1
+            assert "option" in str(w[0].message)
+
+    def test_wildcard_allowed_kwarg_skips_filterable_args(self, filterable_args_calls):
+        @deprecated_args(args_to_warn=["*"], allowed_args=["allowed_param"])
+        def func(allowed_param=None, old_param=None):
+            return allowed_param
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func(allowed_param="value") == "value"
+            assert len(w) == 0
+        assert not filterable_args_calls, (
+            "_get_filterable_args should not be called for allowed args"
+        )
+
+    def test_keyword_only_and_positional_only_args(self, filterable_args_calls):
+        @deprecated_args(args_to_warn=["old_pos", "old_kw"])
+        def func(old_pos=None, /, new_param=None, *, old_kw=None, **options):
+            return (old_pos, new_param, old_kw)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func(new_param=1, other=2) == (None, 1, None)
+            assert len(w) == 0
+        assert not filterable_args_calls
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func("val") == ("val", None, None)
+            assert len(w) == 1
+            assert "old_pos" in str(w[0].message)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func(old_kw="val") == (None, None, "val")
+            assert len(w) == 1
+            assert "old_kw" in str(w[0].message)
+
+    def test_wildcard_and_named_arg_warn_together(self):
+        @deprecated_args(args_to_warn=["*", "old_param"])
+        def func(new_param=None, old_param=None):
+            return (new_param, old_param)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func() == (None, None)
+            assert len(w) == 0
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert func(old_param="val") == (None, "val")
+            assert len(w) == 2
+            assert all("old_param" in str(x.message) for x in w)
+
+    def test_decorator_that_cannot_warn_keeps_wrapper(self, filterable_args_calls):
+        def func(old_param=None, new_param=None):
+            return (old_param, new_param)
+
+        never_warns = deprecated_args(
+            args_to_warn=["old_param"], allowed_args=["old_param"]
+        )(func)
+        assert never_warns is not func
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert never_warns("a", new_param="b") == ("a", "b")
+            assert len(w) == 0
+        assert not filterable_args_calls
+
+        # The outer decorator sees the inner wrapper's (*args, **kwargs)
+        # signature, so it warns only for keyword usage.
+        stacked = deprecated_args(args_to_warn=["new_param"])(never_warns)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert stacked("a", "b") == ("a", "b")
+            assert stacked(old_param="a") == ("a", None)
+            assert len(w) == 0
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert stacked(new_param="b") == (None, "b")
+            assert len(w) == 1
+            assert "new_param" in str(w[0].message)
 
 
 # Tests for experimental_method decorator
@@ -334,23 +449,42 @@ class TestExperimentalArgs:
             assert len(w) == 1
             assert "beta_param" in str(w[0].message)
 
-    def test_experimental_fast_path_bypasses_filterable_args(self, monkeypatch):
-        called = False
-        orig_get = ru._get_filterable_args
-
-        def counting_get(*args, **kwargs):
-            nonlocal called
-            called = True
-            return orig_get(*args, **kwargs)
-
-        monkeypatch.setattr(ru, "_get_filterable_args", counting_get)
-
+    def test_experimental_fast_path_bypasses_filterable_args(
+        self, filterable_args_calls
+    ):
         @experimental_args(args_to_warn=["beta_param"])
         def stable_func(a, b, c=1, beta_param=None):
             return a + b + c
 
         assert stable_func(1, 2) == 4
-        assert not called, "_get_filterable_args should not be called on clean hot path"
+        assert not filterable_args_calls, (
+            "_get_filterable_args should not be called on clean hot path"
+        )
+
+    def test_wildcard_pool_get_connection_signature(self):
+        class Pool:
+            @experimental_args(args_to_warn=["*"])
+            def get_connection(self, command_name=None, *keys, **options):
+                return "conn"
+
+        pool = Pool()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection() == "conn"
+            assert len(w) == 0
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection("GET", "key") == "conn"
+            assert len(w) == 1
+            assert issubclass(w[0].category, UserWarning)
+            assert "command_name" in str(w[0].message)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            assert pool.get_connection(option="value") == "conn"
+            assert len(w) == 1
+            assert "option" in str(w[0].message)
 
 
 @pytest.mark.fixed_client
