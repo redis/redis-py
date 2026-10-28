@@ -2916,13 +2916,20 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
-    async def test_address_remap_applies_to_redirects(self, create_redis, master_host):
+    @pytest.mark.parametrize(
+        "remap_host, offset",
+        # Not the ports of the other remap tests: their listeners may still be open
+        [("127.0.0.1", 3000), ("localhost", 3100)],
+    )
+    async def test_address_remap_applies_to_redirects(
+        self, create_redis, master_host, remap_host, offset
+    ):
         """
         A MOVED or ASK redirect names the address the node advertises, so the
-        retry must go through address_remap like the CLUSTER SLOTS addresses do
+        retry must go through address_remap like the CLUSTER SLOTS addresses do.
+        A remap to localhost is cached under the resolved address, so the retry
+        must look the node up the same way.
         """
-        # Not the ports of the other remap tests: their listeners may still be open
-        offset = 3000
         n = 6
         hostname, master_port = master_host
         ports = [master_port + i for i in range(n)]
@@ -2930,7 +2937,7 @@ class TestRedisClusterObj:
         def address_remap(address):
             host, port = address
             if int(port) in ports:
-                host, port = "127.0.0.1", int(port) + offset
+                host, port = remap_host, int(port) + offset
             return host, port
 
         proxies = [

@@ -2088,7 +2088,7 @@ class RedisCluster(
             ttl -= 1
             try:
                 if asking:
-                    target_node = self.get_node(node_name=redirect_addr)
+                    target_node = self.get_node(*redirect_addr)
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
@@ -2340,9 +2340,7 @@ class RedisCluster(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"
                     )
-                redirect_addr = get_node_name(
-                    *self.nodes_manager.remap_host_port(e.host, e.port)
-                )
+                redirect_addr = self.nodes_manager.remap_host_port(e.host, e.port)
                 asking = True
 
                 self._record_command_metric(
