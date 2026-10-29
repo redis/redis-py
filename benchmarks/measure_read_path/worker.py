@@ -36,6 +36,10 @@ BIG_1M = b"m" * (1024 * 1024)
 BIG_10M = b"M" * (10 * 1024 * 1024)
 LIST_LEN = 10_000
 HASH_LEN = 1_000
+# full contents, so the scenarios can reject a reply of the right size but
+# the wrong data instead of timing it as a fast one
+LIST_ITEMS = [b"item%06d" % i for i in range(LIST_LEN)]
+HASH_ITEMS = {b"f%05d" % i: b"x" * 10 for i in range(HASH_LEN)}
 
 K_SMALL = PREFIX + "small"
 K_1M = PREFIX + "big1m"
@@ -234,7 +238,7 @@ async def sc_lrange_10k(r):
     for _ in range(n):
         res = await r.lrange(K_LIST, 0, -1)
     elapsed = time.perf_counter() - start
-    assert len(res) == LIST_LEN
+    assert res == LIST_ITEMS
     return n, elapsed
 
 
@@ -244,7 +248,7 @@ async def sc_hgetall_1k(r):
     for _ in range(n):
         res = await r.hgetall(K_HASH)
     elapsed = time.perf_counter() - start
-    assert len(res) == HASH_LEN
+    assert res == HASH_ITEMS
     return n, elapsed
 
 
@@ -254,7 +258,7 @@ async def sc_get_1mb(r):
     for _ in range(n):
         v = await r.get(K_1M)
     elapsed = time.perf_counter() - start
-    assert len(v) == len(BIG_1M)
+    assert v == BIG_1M
     return n, elapsed
 
 
@@ -264,7 +268,7 @@ async def sc_get_10mb(r):
     for _ in range(n):
         v = await r.get(K_10M)
     elapsed = time.perf_counter() - start
-    assert len(v) == len(BIG_10M)
+    assert v == BIG_10M
     return n, elapsed
 
 
@@ -358,7 +362,7 @@ def sync_lrange_10k(r):
     for _ in range(n):
         res = r.lrange(K_LIST, 0, -1)
     elapsed = time.perf_counter() - start
-    assert len(res) == LIST_LEN
+    assert res == LIST_ITEMS
     return n, elapsed
 
 
@@ -368,7 +372,7 @@ def sync_hgetall_1k(r):
     for _ in range(n):
         res = r.hgetall(K_HASH)
     elapsed = time.perf_counter() - start
-    assert len(res) == HASH_LEN
+    assert res == HASH_ITEMS
     return n, elapsed
 
 
@@ -378,7 +382,7 @@ def sync_get_1mb(r):
     for _ in range(n):
         v = r.get(K_1M)
     elapsed = time.perf_counter() - start
-    assert len(v) == len(BIG_1M)
+    assert v == BIG_1M
     return n, elapsed
 
 
@@ -388,7 +392,7 @@ def sync_get_10mb(r):
     for _ in range(n):
         v = r.get(K_10M)
     elapsed = time.perf_counter() - start
-    assert len(v) == len(BIG_10M)
+    assert v == BIG_10M
     return n, elapsed
 
 
@@ -453,10 +457,9 @@ async def setup(r):
     await r.set(K_10M, BIG_10M)
     await r.delete(K_LIST)
     await r.delete(K_HASH)
-    items = [b"item%06d" % i for i in range(LIST_LEN)]
     for i in range(0, LIST_LEN, 1000):
-        await r.rpush(K_LIST, *items[i : i + 1000])
-    await r.hset(K_HASH, mapping={b"f%05d" % i: b"x" * 10 for i in range(HASH_LEN)})
+        await r.rpush(K_LIST, *LIST_ITEMS[i : i + 1000])
+    await r.hset(K_HASH, mapping=HASH_ITEMS)
 
 
 async def teardown(r):

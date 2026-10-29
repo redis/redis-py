@@ -93,8 +93,9 @@ DEFAULT_SOCKET_CONNECT_TIMEOUT = 2.0
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(threadName)s: %(message)s",
-    datefmt="%H:%M:%S:%f",
+    # datefmt goes to time.strftime, which has no %f; msecs adds the subsecond
+    format="%(asctime)s.%(msecs)03d %(levelname)s %(threadName)s: %(message)s",
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("maint_perf")
 
@@ -193,7 +194,12 @@ async def setup_cluster(
         socket_timeout=socket_timeout,
         socket_connect_timeout=socket_connect_timeout,
     )
-    await client.initialize()
+    try:
+        await client.initialize()
+    except BaseException:
+        # the caller never gets the client or the DB to clean up
+        await teardown(client, fault_injector, endpoints_config, keep_db=False)
+        raise
     logger.info(
         f"Cluster initialized; maint_notifications={'on' if maint_enabled else 'off'}; "
         f"nodes={[n.name for n in client.get_nodes()]}"
@@ -288,13 +294,18 @@ async def run_throughput_flow(args):
         errors: list[str] = []
         stop = asyncio.Event()
 
-        async def timed(name: str, command, *command_args):
+        async def timed(name: str, expected, command, *command_args):
             # each command is timed and counted on its own, so a SET that
             # succeeds before its GET fails still counts
             t0 = time.perf_counter()
             try:
-                await command(*command_args)
-                latencies.append(time.perf_counter() - t0)
+                reply = await command(*command_args)
+                elapsed = time.perf_counter() - t0
+                # every SET writes "v", so a GET that returns anything else is
+                # a broken read (misrouted or stale), not a successful one
+                if reply != expected:
+                    raise ValueError(f"unexpected reply {reply!r:.80}")
+                latencies.append(elapsed)
                 stats["ok"] += 1
             except Exception as e:
                 stats["err"] += 1
@@ -308,8 +319,8 @@ async def run_throughput_flow(args):
                 for key in worker_keys:
                     if stop.is_set():
                         break
-                    await timed(name, client.set, key, "v")
-                    await timed(name, client.get, key)
+                    await timed(name, True, client.set, key, "v")
+                    await timed(name, b"v", client.get, key)
                 await asyncio.sleep(0.001)
 
         workers = [

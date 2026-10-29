@@ -54,25 +54,25 @@ def ops(r):
             "get_1mb",
             lambda: r.get(worker.K_1M),
             one_mb,
-            lambda v: len(v) == one_mb,
+            lambda v: v == worker.BIG_1M,
         ),
         (
             "get_10mb",
             lambda: r.get(worker.K_10M),
             ten_mb,
-            lambda v: len(v) == ten_mb,
+            lambda v: v == worker.BIG_10M,
         ),
         (
             "mget_10x1mb",
             lambda: r.mget(K_MGET),
             10 * one_mb,
-            lambda v: [len(x) for x in v] == [one_mb] * 10,
+            lambda v: v == [worker.BIG_1M] * 10,
         ),
         (
             "lrange_10k",
             lambda: r.lrange(worker.K_LIST, 0, -1),
             None,
-            lambda v: len(v) == worker.LIST_LEN,
+            lambda v: v == worker.LIST_ITEMS,
         ),
     ]
 
