@@ -822,6 +822,22 @@ class TestRedisCommands:
         assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
+    async def test_info_with_non_utf8_errorstat(
+        self, r: redis.Redis, decoded_r: redis.Redis
+    ):
+        await r.config_resetstat()
+        with pytest.raises(redis.ResponseError):
+            await r.eval(b"return redis.error_reply('\xff\xfeBAD oops')", 0)
+        try:
+            info = await decoded_r.info("errorstats")
+            assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
+            assert "redis_version" in await decoded_r.info()
+        finally:
+            await r.config_resetstat()
+
+    @pytest.mark.onlynoncluster
     async def test_lastsave(self, r: redis.Redis):
         assert isinstance(await r.lastsave(), datetime.datetime)
 

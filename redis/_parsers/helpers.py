@@ -33,7 +33,7 @@ def parse_debug_object(response):
     return response
 
 
-def parse_info(response):
+def parse_info(response, **options):
     """Parse the result of Redis's INFO command into a Python dict"""
     info = {}
     response = str_if_bytes(response)
