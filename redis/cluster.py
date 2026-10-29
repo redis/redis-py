@@ -109,6 +109,7 @@ from redis.typing import (
 )
 from redis.utils import (
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     dict_merge,
@@ -5188,7 +5189,7 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.load_scripts()
 
     def discard(self):
-        """ """
+        """Discards the transactional block."""
         self._execution_strategy.discard()
 
     def watch(self, *names):
@@ -5206,6 +5207,15 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.delete(*names)
 
     def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``. Like `delete`, it returns ``None``
+        rather than the pipeline, so it does not chain.
+
+        Outside a transactional block only one key is accepted, as with `delete`; more
+        raises :class:`~.RedisClusterException`. Between :meth:`watch` and
+        :meth:`multi` it is not staged: it is sent at once, outside the eventual
+        transaction, and the response is discarded.
+        """
         self._execution_strategy.unlink(*names)
 
 
@@ -5602,7 +5612,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"

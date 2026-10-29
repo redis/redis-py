@@ -435,6 +435,18 @@ class ACLCommands(CommandsProtocol):
                   access to all keys while ``'cache:*'`` grants access to all keys that
                   are prefixed with ``cache:``.
                   `keys` should not be prefixed with a ``'~'``.
+            selectors: A list of ``(command, key)`` tuples, each added as one
+                       selector. `command` must be prefixed with a '+' to add or
+                       a '-' to remove the command permission, on keys matching
+                       `key`. A ``'~'`` is prepended to `key` unless it
+                       already starts with ``'~'`` or ``'%'``.
+                       Both values are joined into a single selector string,
+                       ``(command key)``, which the server splits on whitespace
+                       and applies token by token. Several commands or key
+                       patterns can therefore be packed into one tuple, e.g.
+                       ``("+get +set", "~app:*")``, but any whitespace in either
+                       value starts a new rule. Do not build these fields from
+                       unvalidated input such as a tenant or user name.
             reset: Indicates whether the user should be fully reset prior to applying
                    the new ACL. Setting this to `True` will remove all existing
                    passwords, flags, and privileges from the user and then apply the
@@ -8954,6 +8966,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> ZSetRangeResponse: ...
 
     @overload
@@ -8969,6 +8982,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> Awaitable[ZSetRangeResponse]: ...
 
     def zrange(
@@ -8983,6 +8997,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
@@ -8992,6 +9007,13 @@ class SortedSetCommands(CommandsProtocol):
 
         ``desc`` a boolean indicating whether to sort the results in reversed
         order.
+
+        ``use_rev`` only affects the rank-based reverse path: when True
+        together with ``desc``, it sends ``ZRANGE ... REV`` instead of the
+        deprecated ``ZREVRANGE``. It is ignored for the byscore, bylex,
+        and offset/num paths, which already send ``ZRANGE ... REV``.
+        It defaults to False so callers on servers older than Redis 6.2
+        keep the ``ZREVRANGE`` fallback.
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs.
@@ -9014,7 +9036,13 @@ class SortedSetCommands(CommandsProtocol):
         """
         # Need to support ``desc`` also when using old redis version
         # because it was supported in 3.5.3 (of redis-py)
-        if not byscore and not bylex and (offset is None and num is None) and desc:
+        if (
+            not byscore
+            and not bylex
+            and (offset is None and num is None)
+            and desc
+            and not use_rev
+        ):
             return self.zrevrange(name, start, end, withscores, score_cast_func)
 
         return self._zrange(
