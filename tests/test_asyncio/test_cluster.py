@@ -7231,7 +7231,18 @@ class TestClusterPipeline:
             assert pipe.set(key, "updated") is pipe
             assert await pipe.execute() == [True]
             assert await client.get(key) == b"updated"
-            await client.delete(key)
+            # Queuing movablekeys commands (COMMAND GETKEYS) on an initialized
+            # transaction pipeline must neither reuse caller-loop sockets on the
+            # private worker loop nor leave private-loop sockets open afterward.
+            zset_a = f"{{{key}}}:zset-a"
+            zset_b = f"{{{key}}}:zset-b"
+            zset_out = f"{{{key}}}:zset-out"
+            await client.zadd(zset_a, {"member": 1})
+            await client.zadd(zset_b, {"member": 2})
+            assert pipe.zunionstore(zset_out, [zset_a, zset_b]) is pipe
+            assert await pipe.execute() == [1]
+            assert await client.zscore(zset_out, "member") == 3.0
+            await client.delete(key, zset_a, zset_b, zset_out)
         finally:
             await client.aclose()
 
@@ -7696,6 +7707,103 @@ class TestClusterPipelineMocked:
             if not initialized:
                 assert all(loop is initialize_loops[0] for loop in disconnect_loops)
         finally:
+            await client.aclose()
+
+    @pytest.mark.parametrize("caller_connected", [False, True])
+    @pytest.mark.parametrize("disconnect_error", [False, True])
+    async def test_transaction_movablekeys_isolates_caller_and_private_loop_connections(
+        self, caller_connected, disconnect_error
+    ) -> None:
+        client = RedisCluster(host=default_host, port=default_port)
+        parser_node = ClusterNode(
+            default_host, default_port, max_connections=1 if caller_connected else 4
+        )
+        caller_loop = asyncio.get_running_loop()
+        private_connect_loops = []
+        private_disconnect_loops = []
+
+        caller_conn = mock.AsyncMock(spec=Connection)
+        caller_conn.is_connected = caller_connected
+        caller_conn.should_reconnect.return_value = False
+
+        async def connect_caller():
+            private_connect_loops.append(asyncio.get_running_loop())
+            caller_conn.is_connected = True
+
+        async def disconnect_caller():
+            if caller_connected and asyncio.get_running_loop() is not caller_loop:
+                raise RuntimeError("Future attached to a different loop")
+            private_disconnect_loops.append(asyncio.get_running_loop())
+            caller_conn.is_connected = False
+            if (
+                disconnect_error
+                and not caller_connected
+                and caller_conn.disconnect.await_count == 1
+            ):
+                raise TimeoutError("close timed out")
+
+        caller_conn.connect.side_effect = connect_caller
+        caller_conn.disconnect.side_effect = disconnect_caller
+        caller_conn.pack_command.return_value = [b"COMMAND GETKEYS"]
+        caller_conn.read_response.return_value = ["{tag}a", "{tag}b"]
+        parser_node._connections.append(caller_conn)
+        parser_node._free.append(caller_conn)
+
+        created_private_conns = []
+
+        def make_private_conn(**kwargs):
+            priv_conn = mock.AsyncMock(spec=Connection)
+            priv_conn.is_connected = False
+            priv_conn.should_reconnect.return_value = False
+
+            async def send_packed_command(*args, **kw):
+                private_connect_loops.append(asyncio.get_running_loop())
+                priv_conn.is_connected = True
+
+            async def disconnect_priv():
+                private_disconnect_loops.append(asyncio.get_running_loop())
+                priv_conn.is_connected = False
+                if disconnect_error and priv_conn.disconnect.await_count == 1:
+                    raise TimeoutError("close timed out")
+
+            priv_conn.send_packed_command.side_effect = send_packed_command
+            priv_conn.disconnect.side_effect = disconnect_priv
+            priv_conn.pack_command.return_value = [b"COMMAND GETKEYS"]
+            priv_conn.read_response.return_value = ["{tag}a", "{tag}b"]
+            created_private_conns.append(priv_conn)
+            return priv_conn
+
+        async def send_on_unconnected(*args, **kw):
+            if caller_connected and asyncio.get_running_loop() is not caller_loop:
+                raise RuntimeError("Future attached to a different loop")
+            private_connect_loops.append(asyncio.get_running_loop())
+            caller_conn.is_connected = True
+
+        caller_conn.send_packed_command.side_effect = send_on_unconnected
+        parser_node.connection_class = make_private_conn
+
+        client.nodes_manager.default_node = parser_node
+        client.nodes_manager.nodes_cache[parser_node.name] = parser_node
+        client._initialize = False
+        client._topology_ready = True
+        client.commands_parser.node = parser_node
+        client.commands_parser.commands = {
+            "zunionstore": {"name": "zunionstore", "flags": ["movablekeys"]}
+        }
+
+        try:
+            pipe = client.pipeline(transaction=True)
+            assert pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"]) is pipe
+            assert len(private_connect_loops) == 1
+            assert private_connect_loops[0] is not caller_loop
+            assert private_disconnect_loops == [private_connect_loops[0]]
+            assert caller_conn.is_connected is caller_connected
+            assert parser_node._free[0] is caller_conn
+            assert len(parser_node._connections) <= parser_node.max_connections
+            for conn in created_private_conns:
+                assert not conn.is_connected
+        finally:
+            caller_conn.is_connected = False
             await client.aclose()
 
     async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
