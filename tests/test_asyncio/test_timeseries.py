@@ -3,6 +3,7 @@ import time
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from redis.utils import SENTINEL
 from tests.conftest import (
     assert_resp_response,
     expected_response_shape,
@@ -1099,6 +1100,24 @@ async def test_info(decoded_r: redis.Redis):
         decoded_r, 5, info.get("retention_msecs"), info.get("retentionTime")
     )
     assert info["labels"]["currentLabel"] == "currentData"
+
+
+@pytest.mark.redismod
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
+)
+async def test_info_without_decode_responses(create_redis, stack_url, protocol):
+    kwargs = {"decode_responses": False, "url": stack_url}
+    if protocol is not SENTINEL:
+        kwargs["protocol"] = protocol
+    r = await create_redis(**kwargs)
+    await r.ts().create(KEY1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    await r.ts().add(KEY1, 1, 1.5)
+    info = await r.ts().info(KEY1)
+    assert info.total_samples == 1
+    assert info.retention_msecs == 5
+    assert info.labels == {"currentLabel": "currentData"}
 
 
 @pytest.mark.redismod

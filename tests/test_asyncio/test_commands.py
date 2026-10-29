@@ -955,6 +955,13 @@ class TestRedisCommands:
             )
 
     @pytest.mark.onlynoncluster
+    async def test_hotkeys_start_empty_slots_omits_slots(self, r: redis.Redis):
+        """Test HOTKEYS START does not send SLOTS for an empty slots list"""
+        with patch.object(r, "execute_command", AsyncMock(return_value=b"OK")) as cmd:
+            await r.hotkeys_start(metrics=[HotkeysMetricsTypes.CPU], slots=[])
+        cmd.assert_called_once_with("HOTKEYS", "START", "METRICS", 1, "CPU")
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
     @skip_if_redis_enterprise()
     async def test_hotkeys_start_with_all_parameters(self, r: redis.Redis):
@@ -1021,15 +1028,21 @@ class TestRedisCommands:
         result = await r.hotkeys_reset()
         assert result == b"OK"
 
-        # Try to get results after reset - should fail or return empty
+        # No session exists after reset
+        assert await r.hotkeys_get() is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
+    async def test_hotkeys_get_no_session(self, r: redis.Redis):
+        """Test HOTKEYS GET when there is no collection session"""
         try:
-            result_after = await r.hotkeys_get()
-            # If it doesn't fail, verify the data is cleared
-            # The response might indicate no session exists
-            assert result_after != result_before
+            await r.hotkeys_stop()
         except Exception:
-            # Expected - no session exists after reset
             pass
+        await r.hotkeys_reset()
+
+        assert await r.hotkeys_get() is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
@@ -1791,6 +1804,23 @@ class TestRedisCommands:
         result = await r.increx(key, byfloat=0.25, lbound=0, ubound=2)
         assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
         assert float(await r.get(key)) == pytest.approx(1.75)
+
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("8.7.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    async def test_increx_unified_responses(self, create_redis, protocol):
+        r = await create_redis(protocol=protocol, legacy_responses=False)
+        key = "increx:unified"
+        assert await r.set(key, "1.5")
+        assert await r.increx(key, byfloat=0.25) == [1.75, 0.25]
+        # A rejected increment returns the current value and a zero increment.
+        result = await r.increx(key, byfloat=0.75, ubound=2)
+        assert result == [1.75, 0.0]
+        assert all(type(value) is float for value in result)
+        assert await r.set(key, 20)
+        result = await r.increx(key, byint=4)
+        assert result == [24, 4]
+        assert all(type(value) is int for value in result)
 
     @skip_if_server_version_lt("8.7.0")
     async def test_increx_saturating_bounds(self, r: redis.Redis):
@@ -3982,6 +4012,63 @@ class TestRedisCommands:
             response,
             [(b"a1", "1"), (b"a2", "2")],
             [[b"a1", "1.0"], [b"a2", "2.0"]],
+        )
+
+    async def test_zrange_desc_sends_zrevrange_by_default(self):
+        """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange("a", 0, -1, desc=True)
+        execute.assert_called_once_with(
+            "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
+    async def test_zrange_desc_use_rev_sends_zrange_rev(self):
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange("a", 0, -1, desc=True, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            withscores=False,
+            score_cast_func=float,
+            keys=["a"],
+        )
+
+    async def test_zrange_desc_use_rev_withscores_and_score_cast(self):
+        def cast_score(value):
+            return value
+
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange(
+                "a",
+                0,
+                -1,
+                desc=True,
+                withscores=True,
+                score_cast_func=cast_score,
+                use_rev=True,
+            )
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            "WITHSCORES",
+            withscores=True,
+            score_cast_func=cast_score,
+            keys=["a"],
         )
 
     @pytest.mark.onlynoncluster
@@ -6686,8 +6773,7 @@ class TestRedisCommands:
             # If the following is not done, further Timout operations will fail,
             # because the timeout won't catch its Cancelled Error if the task
             # has a pending cancel.  Python documentation probably should reflect this.
-            if sys.version_info >= (3, 11):
-                asyncio.current_task().uncancel()
+            asyncio.current_task().uncancel()
             # if all is well, we can continue.  The following should not hang.
             await r.set("status", "down")
 

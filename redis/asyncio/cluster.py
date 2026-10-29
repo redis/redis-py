@@ -150,10 +150,10 @@ from redis.utils import (
     SENTINEL,
     SSL_AVAILABLE,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
-    safe_str,
     str_if_bytes,
     truncate_text,
 )
@@ -996,9 +996,9 @@ class RedisCluster(
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # If initialization fails, decrement the counter to keep it in sync
-            await self._decrement_usage()
+            await asyncio.shield(self._decrement_usage())
             raise
 
     async def _increment_usage(self) -> int:
@@ -1019,15 +1019,24 @@ class RedisCluster(
             self._usage_counter -= 1
             return self._usage_counter
 
+    async def _release_usage(self) -> None:
+        """
+        Decrement the usage counter and close the client on the last exit.
+
+        Hold the lock through closing so a new context cannot use connections
+        that are still being disconnected by the previous context.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            if self._usage_counter == 0:
+                await self.aclose()
+
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
         last exit (counter becomes zero), the client closes its connection pool.
         """
-        current_usage = await asyncio.shield(self._decrement_usage())
-        if current_usage == 0:
-            # This was the last active context, so disconnect the pool.
-            await asyncio.shield(self.aclose())
+        await asyncio.shield(self._release_usage())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -2298,11 +2307,18 @@ class ClusterNode:
         The connections remain in the pool and will reconnect on next use.
         """
         if self._free:
-            # Take a snapshot to avoid issues if _free changes during await
-            await asyncio.gather(
-                *(connection.disconnect() for connection in tuple(self._free)),
-                return_exceptions=True,
-            )
+            # Take the connections out of _free while they close, so
+            # acquire_connection cannot hand one out mid-disconnect, and put
+            # them back behind any connection released meanwhile.
+            connections = tuple(self._free)
+            self._free.clear()
+            try:
+                await asyncio.gather(
+                    *(connection.disconnect() for connection in connections),
+                    return_exceptions=True,
+                )
+            finally:
+                self._free.extend(connections)
 
     def _mark_free_connections_for_reconnect_on_error(self, error: Exception) -> bool:
         """
@@ -2483,6 +2499,7 @@ class ClusterNode:
                 self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         tmp_queue = collections.deque()
         try:
             while self._free:
@@ -2495,20 +2512,32 @@ class ClusterNode:
                     # a socket here only to authenticate could raise and stop
                     # the token renewal
                     continue
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
@@ -3178,8 +3207,58 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         )
         # result = [True, "1", 1, {"F": "V"}, True, True, "2", "3", 1, 1, 1]
 
-    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `UNLINK`, `mset_nonatomic`, which
-    are split across multiple nodes, you'll get multiple results for them in the array.
+    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `mset_nonatomic`, which are split
+    across multiple nodes, you'll get multiple results for them in the array.
+
+    Which methods must be awaited:
+
+    Staging a command returns the pipeline itself, so commands chain and are not
+    awaited, as in the example above. The coroutines defined on this class must be
+    awaited individually::
+
+        watch, unwatch, unlink, discard, reset, execute, initialize,
+        himport_prepare, himport_discard, himport_discard_all
+
+    Of those, only ``initialize`` returns the pipeline, so it is the only one that
+    chains once awaited. ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink``
+    return ``None``, ``execute`` returns a ``list``, ``himport_prepare`` a ``bool`` and
+    the two ``himport_discard`` methods an ``int``.
+
+    That list covers only the methods defined on this class. Inherited command
+    coroutines are not pipeline steps. ``client_tracking_on`` and
+    ``client_tracking_off`` await the pipeline itself, which re-initializes it and
+    discards everything staged so far. Others cannot run on a pipeline at all:
+    ``command_info`` and the ``hotkeys_*`` family raise ``NotImplementedError``, and
+    ``cluster_delslots`` raises ``TypeError``.
+
+    `unlink` is the surprising one, because the inherited `delete` behaves the other
+    way::
+
+        pipe = rc.pipeline()
+        pipe.delete("A")          # stages, chainable
+        await pipe.unlink("B")    # stages, must be awaited, returns None
+        await pipe.execute()
+
+    Between :meth:`watch` and :meth:`multi` a command returns a coroutine rather than
+    the pipeline. It is executed only when awaited and resolves to the response, so it
+    must be awaited. After :meth:`multi` commands are queued again and chain as usual::
+
+        async with rc.pipeline(transaction=True) as pipe:
+            await pipe.watch("a")
+            a = await pipe.get("a")     # executed when awaited
+            pipe.multi()
+            pipe.set("a", int(a) + 1)   # queued, chains
+            await pipe.execute()
+
+    The split commands from the note above and ``unlink`` are the exception: between
+    :meth:`watch` and :meth:`multi`, ``delete``, ``exists`` and ``touch`` return the
+    pipeline and ``unlink`` returns ``None``, and all four drop the command unsent, so
+    do not use them there. ``mset_nonatomic`` raises ``NotImplementedError`` in a
+    transactional pipeline.
+
+    Outside a transactional pipeline ``watch``, ``unwatch`` and ``discard`` raise
+    :class:`~.RedisClusterException`, and the ``himport_*`` methods act on the shared
+    fieldset registry rather than staging a command.
 
     Retryable errors:
         - :class:`~.ClusterDownError`
@@ -3338,7 +3417,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._execution_strategy.multi()
 
     async def discard(self):
-        """ """
+        """Discards the transactional block. Must be awaited."""
         await self._execution_strategy.discard()
 
     async def watch(self, *names):
@@ -3350,6 +3429,16 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         await self._execution_strategy.unwatch()
 
     async def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``. Must be awaited, and returns ``None``
+        rather than the pipeline, so unlike `delete` it does not chain::
+
+            await pipe.unlink("A")
+
+        Outside a transactional block only one key is accepted; more raises
+        :class:`~.RedisClusterException`. Between :meth:`watch` and :meth:`multi`
+        nothing is sent, so do not use it there.
+        """
         await self._execution_strategy.unlink(*names)
 
     def mset_nonatomic(
@@ -3511,7 +3600,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
@@ -3758,7 +3847,7 @@ class PipelineStrategy(AbstractStrategy):
                 for cmd in todo:
                     result = cmd.result
                     if isinstance(result, Exception):
-                        command = " ".join(map(safe_str, cmd.args))
+                        command = command_text(cmd.args)
                         # Errors from the redirect retry may carry no args,
                         # e.g. MaxConnectionsError() from acquire_connection().
                         error = result.args[0] if result.args else type(result).__name__
@@ -3841,6 +3930,7 @@ class TransactionStrategy(AbstractStrategy):
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
     CONNECTION_ERRORS = (
         ConnectionError,
+        TimeoutError,
         OSError,
         ClusterDownError,
         SlotNotCoveredError,
@@ -3850,6 +3940,7 @@ class TransactionStrategy(AbstractStrategy):
         super().__init__(pipe)
         self._explicit_transaction = False
         self._watching = False
+        self._watch_acknowledged = False
         self._pipeline_slots: Set[int] = set()
         # True once a keyed (non-slot-agnostic) command has fixed the slot
         self._transaction_has_keyed_slot = False
@@ -3938,15 +4029,34 @@ class TransactionStrategy(AbstractStrategy):
         # on the caller's loop: running it here would do I/O on connections
         # bound to that loop. Only a client that never initialized has no
         # topology to queue against.
-        if (
+        initialize_here = (
             cluster_client._initialize
             and cluster_client.nodes_manager.default_node is None
-        ):
-            await cluster_client.initialize()
-
+        )
+        startup_nodes = (
+            tuple(cluster_client.nodes_manager.startup_nodes.values())
+            if initialize_here
+            else ()
+        )
         slot_number: Optional[int] = None
-        if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._resolve_transaction_slot(*args)
+        try:
+            if initialize_here:
+                await cluster_client.initialize()
+            if args[0] not in self.NO_SLOTS_COMMANDS:
+                slot_number = await self._resolve_transaction_slot(*args)
+        finally:
+            if initialize_here:
+                # Keep the discovered topology and metadata, but not sockets bound
+                # to the private loop that closes when this command is queued.
+                # Same-address nodes can have distinct pools; deduplicate by identity.
+                nodes = {
+                    id(node): node
+                    for node in chain(startup_nodes, cluster_client.get_nodes())
+                }
+                await asyncio.gather(
+                    *(node.disconnect() for node in nodes.values()),
+                    return_exceptions=True,
+                )
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -4085,8 +4195,11 @@ class TransactionStrategy(AbstractStrategy):
                 connection, command_name, **options
             )
 
-        if command_name in self.UNWATCH_COMMANDS:
+        if command_name == "WATCH":
+            self._watch_acknowledged = True
+        elif command_name in self.UNWATCH_COMMANDS:
             self._watching = False
+            self._watch_acknowledged = False
         return output
 
     async def _reinitialize_on_error(self, error, failure_count):
@@ -4105,13 +4218,10 @@ class TransactionStrategy(AbstractStrategy):
                 is_internal=True,
             )
 
-        if self._watching:
-            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
-                raise WatchError("Slot rebalancing occurred while watching keys")
-
-        if (
-            type(error) in self.SLOT_REDIRECT_ERRORS
-            or type(error) in self.CONNECTION_ERRORS
+        # WATCH is requested before the first attempt, but only a reply
+        # establishes the protection that a retry must not silently discard.
+        if self._watch_acknowledged or isinstance(
+            error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             if self._transaction_node is not None:
                 # As on the command path: after a connection error the server
@@ -4155,6 +4265,13 @@ class TransactionStrategy(AbstractStrategy):
                 cluster_client.reinitialize_counter = 0
 
         self._executing = False
+        if self._watch_acknowledged:
+            await self.reset()
+            if isinstance(error, self.SLOT_REDIRECT_ERRORS):
+                raise WatchError(
+                    "Slot rebalancing occurred while watching keys"
+                ) from error
+            raise WatchError("An error occurred while watching keys") from error
 
     async def _raise_first_error(self, responses, stack, start_time):
         """
@@ -4296,6 +4413,7 @@ class TransactionStrategy(AbstractStrategy):
 
         # EXEC clears any watched keys
         self._watching = False
+        self._watch_acknowledged = False
 
         if response is None:
             raise WatchError("Watched variable changed.")
@@ -4385,6 +4503,7 @@ class TransactionStrategy(AbstractStrategy):
             self._transaction_connection = None
             self._transaction_node = None
             self._watching = False
+            self._watch_acknowledged = False
             self._explicit_transaction = False
             self._pipeline_slots = set()
             self._transaction_has_keyed_slot = False
@@ -5237,7 +5356,10 @@ class ClusterPubSub(PubSub):
             # intentionally runs outside the lock so reconciliation is not
             # stalled by long polls.
             async with self._shard_state_lock:
-                if message["channel"] in self.pending_unsubscribe_shard_channels:
+                if (
+                    message["channel"] in self.pending_unsubscribe_shard_channels
+                    and message["channel"] not in pubsub.shard_channels
+                ):
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
                     self.shard_channels.pop(message["channel"], None)
@@ -5369,8 +5491,22 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         async with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                old_name = self._shard_channel_to_node.get(channel)
                 if channel in self.pending_unsubscribe_shard_channels:
-                    continue
+                    # A reconnect clears the per-node pending set and replays
+                    # SSUBSCRIBE, so a channel the node still holds without a
+                    # pending unsubscribe is subscribed again, not leaving, and
+                    # its cluster-level entry is stale. Check the pending set
+                    # first: handle_message drops the channel before its
+                    # pending entry.
+                    old_pubsub = self.node_pubsub_mapping.get(old_name)
+                    if (
+                        old_pubsub is None
+                        or channel in old_pubsub.pending_unsubscribe_shard_channels
+                        or channel not in old_pubsub.shard_channels
+                    ):
+                        continue
+                    self.pending_unsubscribe_shard_channels.discard(channel)
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
@@ -5382,7 +5518,6 @@ class ClusterPubSub(PubSub):
                     # slots-cache change notification.
                     uncovered.append(channel)
                     continue
-                old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
                     owner = self.node_pubsub_mapping.get(new_node.name)
                     if owner is not None and channel in owner.shard_channels:

@@ -1425,6 +1425,13 @@ class TestRedisCommands:
             )
 
     @pytest.mark.onlynoncluster
+    def test_hotkeys_start_empty_slots_omits_slots(self, r):
+        """Test HOTKEYS START does not send SLOTS for an empty slots list"""
+        with mock.patch.object(r, "execute_command", return_value=b"OK") as cmd:
+            r.hotkeys_start(metrics=[HotkeysMetricsTypes.CPU], slots=[])
+        cmd.assert_called_once_with("HOTKEYS", "START", "METRICS", 1, "CPU")
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
     @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_parameters(self, r):
@@ -1491,15 +1498,21 @@ class TestRedisCommands:
         result = r.hotkeys_reset()
         assert result == b"OK"
 
-        # Try to get results after reset - should fail or return empty
+        # No session exists after reset
+        assert r.hotkeys_get() is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
+    def test_hotkeys_get_no_session(self, r):
+        """Test HOTKEYS GET when there is no collection session"""
         try:
-            result_after = r.hotkeys_get()
-            # If it doesn't fail, verify the data is cleared
-            # The response might indicate no session exists
-            assert result_after != result_before
+            r.hotkeys_stop()
         except Exception:
-            # Expected - no session exists after reset
             pass
+        r.hotkeys_reset()
+
+        assert r.hotkeys_get() is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
@@ -2461,6 +2474,23 @@ class TestRedisCommands:
         result = r.increx(key, byfloat=0.25, lbound=0, ubound=2)
         assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
         assert float(r[key]) == pytest.approx(1.75)
+
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("8.7.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    def test_increx_unified_responses(self, request, protocol):
+        r = _get_client(redis.Redis, request, protocol=protocol, legacy_responses=False)
+        key = "increx:unified"
+        assert r.set(key, "1.5")
+        assert r.increx(key, byfloat=0.25) == [1.75, 0.25]
+        # A rejected increment returns the current value and a zero increment.
+        result = r.increx(key, byfloat=0.75, ubound=2)
+        assert result == [1.75, 0.0]
+        assert all(type(value) is float for value in result)
+        assert r.set(key, 20)
+        result = r.increx(key, byint=4)
+        assert result == [24, 4]
+        assert all(type(value) is int for value in result)
 
     @skip_if_server_version_lt("8.7.0")
     def test_increx_saturating_bounds(self, r):
@@ -5260,6 +5290,81 @@ class TestRedisCommands:
 
         # rev
         assert r.zrange("a", 0, 1, desc=True) == [b"a5", b"a4"]
+
+    def test_zrange_desc_sends_zrevrange_by_default(self):
+        """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True)
+        execute.assert_called_once_with(
+            "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
+    def test_zrange_desc_default_withscores_sends_zrevrange(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, withscores=True, score_cast_func=int)
+        execute.assert_called_once_with(
+            "ZREVRANGE",
+            "a",
+            0,
+            -1,
+            b"WITHSCORES",
+            withscores=True,
+            score_cast_func=int,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_sends_zrange_rev(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            withscores=False,
+            score_cast_func=float,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_withscores_and_score_cast(self):
+        def cast_score(value):
+            return value
+
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange(
+                "a",
+                0,
+                -1,
+                desc=True,
+                withscores=True,
+                score_cast_func=cast_score,
+                use_rev=True,
+            )
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            "WITHSCORES",
+            withscores=True,
+            score_cast_func=cast_score,
+            keys=["a"],
+        )
+
+    def test_zrange_use_rev_without_desc_sends_plain_zrange(self):
+        """use_rev only affects the rank-based reverse path."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")

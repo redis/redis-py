@@ -480,6 +480,7 @@ class TestOCSPCertificateBinding:
         ocsp_signing=False,
         rsa_key=False,
         rsa_padding=None,
+        expired=False,
     ):
         pytest.importorskip("cryptography")
 
@@ -489,6 +490,12 @@ class TestOCSPCertificateBinding:
         from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
         now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        if expired:
+            not_before = now - datetime.timedelta(days=400)
+            not_after = now - datetime.timedelta(days=30)
+        else:
+            not_before = now - datetime.timedelta(days=1)
+            not_after = now + datetime.timedelta(days=365)
         if rsa_key:
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         else:
@@ -503,8 +510,8 @@ class TestOCSPCertificateBinding:
             )
             .public_key(key.public_key())
             .serial_number(serial)
-            .not_valid_before(now - datetime.timedelta(days=1))
-            .not_valid_after(now + datetime.timedelta(days=365))
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
         )
         if ca:
             builder = builder.add_extension(
@@ -606,6 +613,30 @@ class TestOCSPCertificateBinding:
         )
 
         assert _check_certificate(ca, cert, response) is True
+
+    def test_check_certificate_rejects_expired_delegated_responder(self):
+        # A delegate is normally exempt from revocation checking, so once its
+        # certificate has expired its key must no longer be trusted.
+        from redis.ocsp import _check_certificate
+
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 111, signing_key=ca_key)
+        responder = self._make_certificate(
+            "Test OCSP", 5, signing_key=ca_key, ocsp_signing=True, expired=True
+        )
+        response = self._good_response(
+            ca,
+            ca_key,
+            cert,
+            now - datetime.timedelta(days=1),
+            now + datetime.timedelta(days=1),
+            responder=responder,
+        )
+
+        with pytest.raises(ConnectionError) as e:
+            _check_certificate(ca, cert, response)
+        assert "outside its validity period" in str(e.value)
 
     def test_check_certificate_accepts_rsa_pss_signed_certificate(self):
         # An RSA issuer may sign with RSASSA-PSS rather than PKCS1v15; the

@@ -109,6 +109,7 @@ from redis.typing import (
 )
 from redis.utils import (
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     dict_merge,
@@ -4525,7 +4526,10 @@ class ClusterPubSub(PubSub):
             # intentionally runs outside the lock so reconciliation is not
             # stalled by long polls.
             with self._shard_state_lock:
-                if message["channel"] in self.pending_unsubscribe_shard_channels:
+                if (
+                    message["channel"] in self.pending_unsubscribe_shard_channels
+                    and message["channel"] not in pubsub.shard_channels
+                ):
                     # User-initiated sunsubscribe: drop from cluster-level tracking.
                     self.pending_unsubscribe_shard_channels.remove(message["channel"])
                     self.shard_channels.pop(message["channel"], None)
@@ -4648,8 +4652,22 @@ class ClusterPubSub(PubSub):
         first_migrate_error: Optional[BaseException] = None
         with self._shard_state_lock:
             for channel, handler in list(self.shard_channels.items()):
+                old_name = self._shard_channel_to_node.get(channel)
                 if channel in self.pending_unsubscribe_shard_channels:
-                    continue
+                    # A reconnect clears the per-node pending set and replays
+                    # SSUBSCRIBE, so a channel the node still holds without a
+                    # pending unsubscribe is subscribed again, not leaving, and
+                    # its cluster-level entry is stale. Check the pending set
+                    # first: handle_message drops the channel before its
+                    # pending entry.
+                    old_pubsub = self.node_pubsub_mapping.get(old_name)
+                    if (
+                        old_pubsub is None
+                        or channel in old_pubsub.pending_unsubscribe_shard_channels
+                        or channel not in old_pubsub.shard_channels
+                    ):
+                        continue
+                    self.pending_unsubscribe_shard_channels.discard(channel)
                 try:
                     new_node = self.cluster.get_node_from_key(channel)
                 except SlotNotCoveredError:
@@ -4661,7 +4679,6 @@ class ClusterPubSub(PubSub):
                     # slots-cache change notification.
                     uncovered.append(channel)
                     continue
-                old_name = self._shard_channel_to_node.get(channel)
                 if old_name == new_node.name:
                     owner = self.node_pubsub_mapping.get(new_node.name)
                     if owner is not None and channel in owner.shard_channels:
@@ -5172,7 +5189,7 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.load_scripts()
 
     def discard(self):
-        """ """
+        """Discards the transactional block."""
         self._execution_strategy.discard()
 
     def watch(self, *names):
@@ -5190,6 +5207,15 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy.delete(*names)
 
     def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``. Like `delete`, it returns ``None``
+        rather than the pipeline, so it does not chain.
+
+        Outside a transactional block only one key is accepted, as with `delete`; more
+        raises :class:`~.RedisClusterException`. Between :meth:`watch` and
+        :meth:`multi` it is not staged: it is sent at once, outside the eventual
+        transaction, and the response is discarded.
+        """
         self._execution_strategy.unlink(*names)
 
 
@@ -5586,7 +5612,7 @@ class AbstractStrategy(ExecutionStrategy):
         """
         Provides extra context to the exception prior to it being handled
         """
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
@@ -6084,6 +6110,7 @@ class TransactionStrategy(AbstractStrategy):
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
     CONNECTION_ERRORS = (
         ConnectionError,
+        TimeoutError,
         OSError,
         ClusterDownError,
         SlotNotCoveredError,
@@ -6093,6 +6120,7 @@ class TransactionStrategy(AbstractStrategy):
         super().__init__(pipe)
         self._explicit_transaction = False
         self._watching = False
+        self._watch_acknowledged = False
         self._pipeline_slots: Set[int] = set()
         # True once a keyed (non-slot-agnostic) command has fixed the slot
         self._transaction_has_keyed_slot = False
@@ -6295,8 +6323,11 @@ class TransactionStrategy(AbstractStrategy):
             conn.send_command(*args)
             output = redis_node.parse_response(conn, command_name, **options)
 
-        if command_name in self.UNWATCH_COMMANDS:
+        if command_name == "WATCH":
+            self._watch_acknowledged = True
+        elif command_name in self.UNWATCH_COMMANDS:
             self._watching = False
+            self._watch_acknowledged = False
         return output
 
     def _reinitialize_on_error(self, error, failure_count):
@@ -6312,13 +6343,10 @@ class TransactionStrategy(AbstractStrategy):
                 is_internal=True,
             )
 
-        if self._watching:
-            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
-                raise WatchError("Slot rebalancing occurred while watching keys")
-
-        if (
-            type(error) in self.SLOT_REDIRECT_ERRORS
-            or type(error) in self.CONNECTION_ERRORS
+        # WATCH is requested before the first attempt, but only a reply
+        # establishes the protection that a retry must not silently discard.
+        if self._watch_acknowledged or isinstance(
+            error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             node = None
             if self._transaction_connection:
@@ -6369,6 +6397,13 @@ class TransactionStrategy(AbstractStrategy):
                 self._pipe.reinitialize_counter = 0
 
         self._executing = False
+        if self._watch_acknowledged:
+            self.reset()
+            if isinstance(error, self.SLOT_REDIRECT_ERRORS):
+                raise WatchError(
+                    "Slot rebalancing occurred while watching keys"
+                ) from error
+            raise WatchError("An error occurred while watching keys") from error
 
     def _raise_first_error(self, responses, stack, start_time):
         """
@@ -6503,6 +6538,7 @@ class TransactionStrategy(AbstractStrategy):
 
         # EXEC clears any watched keys
         self._watching = False
+        self._watch_acknowledged = False
 
         if response is None:
             raise WatchError("Watched variable changed.")
@@ -6576,6 +6612,7 @@ class TransactionStrategy(AbstractStrategy):
         # clean up the other instance attributes
         self._transaction_node = None
         self._watching = False
+        self._watch_acknowledged = False
         self._explicit_transaction = False
         self._pipeline_slots = set()
         self._transaction_has_keyed_slot = False
