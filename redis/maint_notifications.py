@@ -886,6 +886,16 @@ class MaintNotificationsPoolHandler:
         """
         self._lock = threading.RLock()
         self.cancel_scheduled_tasks()
+        # A fork between update_connection_kwargs() and the handoff
+        # registration leaves the MOVING kwargs with no handoff to clean up
+        connection_kwargs = self.pool.connection_kwargs
+        if connection_kwargs.get("maintenance_state") == MaintenanceState.MOVING:
+            self.pool.update_connection_kwargs(
+                **_build_moving_cleanup_connection_kwargs(
+                    connection_kwargs,
+                    connection_kwargs.get("maintenance_notification_hash"),
+                )
+            )
         self._processed_notifications.clear()
 
     def get_handler_for_connection(self):
