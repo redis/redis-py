@@ -38,6 +38,8 @@ class WorkerResult:
     first_error: str | None = None
     latencies_ms: list[float] | None = None
     sampled_operations: int = 0
+    min_latency_ms: float = float("inf")
+    max_latency_ms: float = 0.0
 
     def __post_init__(self) -> None:
         if self.latencies_ms is None:
@@ -217,12 +219,19 @@ def run_worker(
                     raise ValueError(f"GET {key} returned {reply!r:.80}")
                 result.read_operations += 1
             else:
-                client.set(key, value)
+                reply = client.set(key, value)
+                if reply is not True:
+                    raise ValueError(f"SET {key} returned {reply!r:.80}")
                 result.write_operations += 1
 
             if should_sample:
                 elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000
                 sampled_operations += 1
+                # the reservoir may drop the extremes, so track them here
+                if elapsed_ms < result.min_latency_ms:
+                    result.min_latency_ms = elapsed_ms
+                if elapsed_ms > result.max_latency_ms:
+                    result.max_latency_ms = elapsed_ms
                 if len(result.latencies_ms) < max_latency_samples:
                     result.latencies_ms.append(elapsed_ms)
                 else:
@@ -392,8 +401,9 @@ def build_summary(
     sorted_latencies = sorted(merge_latency_samples(results, args.seed))
 
     if sorted_latencies:
-        min_latency_ms = min(sorted_latencies)
-        max_latency_ms = max(sorted_latencies)
+        # from every sampled operation, not just the ones the reservoirs kept
+        min_latency_ms = min(result.min_latency_ms for result in results)
+        max_latency_ms = max(result.max_latency_ms for result in results)
         avg_latency_ms = statistics.fmean(sorted_latencies)
     else:
         min_latency_ms = 0.0
