@@ -696,7 +696,11 @@ class _AsyncRESPBase(AsyncBaseParser):
             # Check the flags first, avoiding private stream access unless
             # per-read timeouts apply. StreamReader.read can only wait while
             # its bytearray buffer is empty; only then arm the timeout.
-            if self._apply_read_timeout and not self._stream._buffer:
+            if (
+                self._apply_read_timeout
+                and self._read_timeout is not None
+                and not self._stream._buffer
+            ):
                 async with async_timeout(self._read_timeout) as active_timeout:
                     self._active_read_timeout = active_timeout
                     try:
@@ -733,7 +737,11 @@ class _AsyncRESPBase(AsyncBaseParser):
             # private stream access when per-read timeouts do not apply.
             # readline can only wait while the stream's bytearray buffer
             # holds no line end.
-            if self._apply_read_timeout and b"\n" not in self._stream._buffer:
+            if (
+                self._apply_read_timeout
+                and self._read_timeout is not None
+                and b"\n" not in self._stream._buffer
+            ):
                 async with async_timeout(self._read_timeout) as active_timeout:
                     self._active_read_timeout = active_timeout
                     try:

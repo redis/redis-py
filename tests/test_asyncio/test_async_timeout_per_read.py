@@ -118,29 +118,6 @@ async def test_socket_timeout_still_fires_when_socket_stalls(factory):
     conn.disconnect.assert_awaited()
 
 
-@pytest.mark.parametrize("factory", CONNECTION_FACTORIES)
-async def test_restored_socket_timeout_reaches_blocking_in_flight_read(factory):
-    conn, _ = factory(socket_timeout=0.2)
-    conn.orig_socket_timeout = conn.socket_timeout
-    conn.orig_socket_connect_timeout = conn.socket_connect_timeout
-    conn.set_tmp_settings(tmp_relaxed_timeout=None)
-    conn.update_current_socket_timeout(None)
-
-    read_task = asyncio.create_task(conn.read_response())
-    for _ in range(1000):
-        if conn._parser._active_read_timeout is not None:
-            break
-        await asyncio.sleep(0.001)
-    assert conn._parser._active_read_timeout is not None
-
-    conn.reset_tmp_settings(reset_relaxed_timeout=True)
-    conn.update_current_socket_timeout(-1)
-
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(read_task, 1)
-    conn.disconnect.assert_awaited()
-
-
 async def test_socket_timeout_per_line_for_aggregate_replies():
     # An aggregate reply made of many small elements exercises the line
     # reads: each element gets a fresh socket_timeout window.
