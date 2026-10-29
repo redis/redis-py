@@ -1192,7 +1192,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
-    def test_info_with_non_utf8_errorstat(self, r, decoded_r):
+    def test_info_with_non_utf8_errorstat(self, request, r, decoded_r):
         r.config_resetstat()
         with pytest.raises(redis.ResponseError):
             r.eval(b"return redis.error_reply('\xff\xfeBAD oops')", 0)
@@ -1200,6 +1200,16 @@ class TestRedisCommands:
             info = decoded_r.info("errorstats")
             assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
             assert "redis_version" in decoded_r.info()
+
+            with _get_client(
+                redis.Redis,
+                request,
+                flushdb=False,
+                decode_responses=True,
+                encoding_errors="backslashreplace",
+            ) as client:
+                info = client.info("errorstats")
+                assert info["errorstat_\\xff\\xfeBAD"] == {"count": 1}
         finally:
             r.config_resetstat()
 

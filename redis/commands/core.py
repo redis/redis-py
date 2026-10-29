@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import datetime
 import hashlib
 import inspect
@@ -1760,7 +1761,13 @@ class ManagementCommands(CommandsProtocol):
         """
         from redis.client import NEVER_DECODE
 
-        kwargs[NEVER_DECODE] = []
+        encoder = self.get_encoder()
+        if (
+            encoder.decode_responses
+            and encoder.encoding_errors == "strict"
+            and codecs.lookup(encoder.encoding).name == "utf-8"
+        ):
+            kwargs[NEVER_DECODE] = []
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:

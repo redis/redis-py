@@ -825,7 +825,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.2.0")
     @skip_if_redis_enterprise()
     async def test_info_with_non_utf8_errorstat(
-        self, r: redis.Redis, decoded_r: redis.Redis
+        self, create_redis, r: redis.Redis, decoded_r: redis.Redis
     ):
         await r.config_resetstat()
         with pytest.raises(redis.ResponseError):
@@ -834,6 +834,14 @@ class TestRedisCommands:
             info = await decoded_r.info("errorstats")
             assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
             assert "redis_version" in await decoded_r.info()
+
+            client = await create_redis(
+                flushdb=False,
+                decode_responses=True,
+                encoding_errors="backslashreplace",
+            )
+            info = await client.info("errorstats")
+            assert info["errorstat_\\xff\\xfeBAD"] == {"count": 1}
         finally:
             await r.config_resetstat()
 
