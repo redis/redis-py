@@ -8966,6 +8966,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> ZSetRangeResponse: ...
 
     @overload
@@ -8981,6 +8982,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> Awaitable[ZSetRangeResponse]: ...
 
     def zrange(
@@ -8995,6 +8997,7 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         offset: int | None = None,
         num: int | None = None,
+        use_rev: bool = False,
     ) -> ZSetRangeResponse | Awaitable[ZSetRangeResponse]:
         """
         Return a range of values from sorted set ``name`` between
@@ -9004,6 +9007,13 @@ class SortedSetCommands(CommandsProtocol):
 
         ``desc`` a boolean indicating whether to sort the results in reversed
         order.
+
+        ``use_rev`` only affects the rank-based reverse path: when True
+        together with ``desc``, it sends ``ZRANGE ... REV`` instead of the
+        deprecated ``ZREVRANGE``. It is ignored for the byscore, bylex,
+        and offset/num paths, which already send ``ZRANGE ... REV``.
+        It defaults to False so callers on servers older than Redis 6.2
+        keep the ``ZREVRANGE`` fallback.
 
         ``withscores`` indicates to return the scores along with the values.
         The return type is a list of (value, score) pairs.
@@ -9026,7 +9036,13 @@ class SortedSetCommands(CommandsProtocol):
         """
         # Need to support ``desc`` also when using old redis version
         # because it was supported in 3.5.3 (of redis-py)
-        if not byscore and not bylex and (offset is None and num is None) and desc:
+        if (
+            not byscore
+            and not bylex
+            and (offset is None and num is None)
+            and desc
+            and not use_rev
+        ):
             return self.zrevrange(name, start, end, withscores, score_cast_func)
 
         return self._zrange(
