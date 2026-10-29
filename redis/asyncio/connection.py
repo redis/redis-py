@@ -651,15 +651,12 @@ class AsyncMaintNotificationsAbstractConnection:
         self, relaxed_timeout: float | None = None
     ) -> None:
         timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
-        # On the default read path the socket timeout is applied per read by
-        # the parser (see AbstractConnection.read_response), so push the new
-        # value down: reads that start after this update must use the
-        # relaxed/restored timeout, not the one captured when the in-flight
+        # Push the new value to the parser unconditionally, because read_response
+        # resets the parser's read timeout on every call, so no stale value can
+        # leak into the next response. Reads that start after this update use the
+        # relaxed/restored timeout rather than the one captured when the in-flight
         # response started.
-        parser = getattr(self, "_parser", None)
-        if parser is not None:
-            if getattr(parser, "_apply_read_timeout", False):
-                parser._read_timeout = timeout
+        self._parser._read_timeout = timeout
         self._reschedule_active_read_timeout(timeout)
 
     def _reschedule_active_read_timeout(self, timeout: float | None) -> None:
