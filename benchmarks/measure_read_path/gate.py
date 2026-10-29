@@ -6,9 +6,10 @@ twice the noise measured for either tree. The noise rule keeps a noisy cell
 from failing a run on a difference it cannot resolve; the allowed percentage
 is the floor below which a slowdown or growth is accepted.
 
-The noise rule has a ceiling, --max-limit. A cell whose limit would exceed it
-is inconclusive: it is too noisy to catch a regression of that size, so it
-fails the gate instead of passing unseen. run_bench gives inconclusive cells
+The noise rule has a ceiling, --max-limit (or the allowed percentage, when
+that is higher). A cell whose noise term would exceed it is inconclusive: it
+is too noisy to catch a regression of that size, so it fails the gate instead
+of passing unseen. run_bench gives inconclusive cells
 the same extra rounds as regressed ones before the verdict.
 
 Every tool ends with the same summary: whether the gate passed, the allowed
@@ -96,7 +97,10 @@ def evaluate(cells, allowed_pct, max_limit_pct=DEFAULT_MAX_LIMIT_PCT):
                 "noise": noise,
                 "limit": limit,
                 "regressed": regressed,
-                "inconclusive": not regressed and limit > max_limit_pct / 100,
+                # only the noise term is capped: an allowed regression above
+                # --max-limit is the caller's choice, not a noisy cell
+                "inconclusive": not regressed
+                and NOISE_FACTOR * noise > max(allowed_pct, max_limit_pct) / 100,
             }
         )
     return out

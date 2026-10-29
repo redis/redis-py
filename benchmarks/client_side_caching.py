@@ -162,6 +162,16 @@ def preload_keyspace(args: argparse.Namespace, value: bytes) -> None:
         client.close()
 
 
+def delete_keyspace(args: argparse.Namespace) -> None:
+    client = create_client(args, csc_enabled=False)
+    try:
+        # one key per DEL: in a cluster the keys live in different slots
+        for key_id in range(args.key_range):
+            client.delete(key_name(args.key_prefix, key_id))
+    finally:
+        client.close()
+
+
 def prime_client_cache(client: Any, args: argparse.Namespace) -> None:
     if not args.prime_cache:
         return
@@ -600,12 +610,12 @@ def main() -> int:
         f"({args.client_side_cache}, {args.workload})...",
         json_only=args.json,
     )
-    print_progress(f"Preloading {args.key_range:,} keys...", json_only=args.json)
-    preload_keyspace(args, value)
-
     clients = []
     warmup_results = []
     try:
+        print_progress(f"Preloading {args.key_range:,} keys...", json_only=args.json)
+        preload_keyspace(args, value)
+
         for _ in range(args.clients):
             clients.append(create_client(args, csc_enabled=csc_enabled))
 
@@ -690,6 +700,7 @@ def main() -> int:
     finally:
         for client in clients:
             client.close()
+        delete_keyspace(args)
 
     return 0
 

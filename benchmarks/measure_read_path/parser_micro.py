@@ -7,8 +7,10 @@ socket reads) and one 10 MB bulk string (one line read, about 160 socket
 reads of 64 KB). The async parsers read from an in-memory StreamReader and
 the sync parsers from an in-memory socket; both are attached through the
 parser's own on_connect(). Covered: the pure-Python RESP2 and RESP3 parsers
-and the hiredis parser, sync and async, with the async ones at
-socket_timeout=5 and None. Each tree runs in its own interpreter.
+and the hiredis parser, sync and async. The async socket timeout is armed by
+Connection.read_response(), not by the parser, so it is out of scope here;
+run_bench times both timeouts through the connection. Each tree runs in its
+own interpreter.
 
 Run from the repository root:
 
@@ -74,7 +76,7 @@ def encoder():
     return Encoder("utf-8", "strict", False)
 
 
-async def time_async(parser_class, timeout, wire, expected, rounds):
+async def time_async(parser_class, wire, expected, rounds):
     parser = parser_class(65536)
     samples = []
     # the first read is a warmup: it settles the allocator for the reply size
@@ -82,13 +84,8 @@ async def time_async(parser_class, timeout, wire, expected, rounds):
         reader = asyncio.StreamReader(limit=2**30)
         reader.feed_data(wire)
         parser.on_connect(
-            SimpleNamespace(_reader=reader, encoder=encoder(), socket_timeout=timeout)
+            SimpleNamespace(_reader=reader, encoder=encoder(), socket_timeout=None)
         )
-        # Parsers that apply socket_timeout per read take it from the
-        # connection; set it the way a default read_response() would.
-        if hasattr(parser, "_apply_read_timeout"):
-            parser._apply_read_timeout = True
-            parser._read_timeout = timeout
         start = time.perf_counter()
         res = await parser.read_response(disable_decoding=True)
         if i:
@@ -154,17 +151,14 @@ def child(args):
     # out[config][scenario] -> result
     out = {}
     for name, parser_class in async_parsers.items():
-        for timeout in (5.0, None):
-            out[f"async/{name}/timeout={timeout}"] = {
-                scenario: timed(
-                    lambda: asyncio.run(
-                        time_async(parser_class, timeout, wire, expected, args.rounds)
-                    )
+        out[f"async/{name}"] = {
+            scenario: timed(
+                lambda: asyncio.run(
+                    time_async(parser_class, wire, expected, args.rounds)
                 )
-                for scenario, (wire, expected) in REPLIES.items()
-            }
-    # The sync parsers read with the socket's own timeout, which an
-    # in-memory socket never hits, so one timeout covers them.
+            )
+            for scenario, (wire, expected) in REPLIES.items()
+        }
     for name, parser_class in sync_parsers.items():
         out[f"sync/{name}"] = {
             scenario: timed(

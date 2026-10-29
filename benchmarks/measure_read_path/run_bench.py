@@ -17,7 +17,7 @@ using:
   python -m benchmarks.measure_read_path.run_bench \\
       --trees master=../redis-py-bench-master pr=../redis-py-bench-pr \\
       --compare pr:master --fail-on-regression
-  ... --grid python:3:5 hiredis:3:none --rounds 7
+  ... --grid python:3:5 hiredis:3:none --rounds 8
   ... --client async sync --topology standalone cluster
   ... --pool blocking    # BlockingConnectionPool; --pool connection blocking runs both
   ... --count-arms       # timeouts armed per operation, no timing (async only)

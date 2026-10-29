@@ -185,8 +185,9 @@ class, `connection` (`ConnectionPool`, the default) or `blocking`
 per node and has no pool class. Add `--uvloop` to repeat the async configs
 under uvloop. Every combination of these runs, and each worker checks that its
 connections use the requested parser before timing. Each round runs every
-tree once per config, in an order rotated from round to round, so every
-tree runs first equally often. A delta is flagged only above the
+tree once per config, in an order rotated from round to round, so with N
+trees every tree runs first once in every N rounds; pick a round count that
+is a multiple of N to balance them exactly. A delta is flagged only above the
 allowed regression and above twice the larger noise (relative IQR across
 rounds) of the two trees; see "Regression gate" below. Every scenario checks
 its reply, so a broken read path cannot pass as a fast one.
@@ -226,10 +227,10 @@ the delta. A cell regresses when the candidate is worse by more than
 `--allowed-regression` percent (default 5) and by more than twice the noise
 measured for either tree. The noise is the relative IQR of a tree's results
 across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The
-noise rule may raise the limit only up to `--max-limit` percent (default 10):
-a cell that would need a higher limit is inconclusive, because it is too
-noisy to catch a regression that size, and it fails the gate instead of
-passing unseen. With `--fail-on-regression` the tool exits 1 on a regression
+noise rule may raise the limit only up to `--max-limit` percent (default 10),
+or the allowed regression when that is higher: a cell that would need a
+higher limit is inconclusive, because it is too noisy to catch a regression
+that size, and it fails the gate instead of passing unseen. With `--fail-on-regression` the tool exits 1 on a regression
 or an inconclusive cell, and `--summary FILE` appends the summary to a file
 such as `$GITHUB_STEP_SUMMARY`. `run_bench` gives regressed and inconclusive
 cells `--recheck-rounds` more rounds (default 3) before the verdict. The
@@ -255,7 +256,9 @@ gates on request, not on every pull request:
 `ci_matrix.py` generates the jobs: one each for peak memory and the
 parser-only benchmark, and one `run_bench` job per config, every client,
 topology, pool class, parser, protocol and socket timeout combination (58
-jobs). Each job measures both trees on the same runner, with the tools from
+jobs). The `run_bench` jobs leave out `get_small_seq` and `set_small_seq`:
+they send one small command per round trip, so on a shared runner they time
+the network more than the client. Each job measures both trees on the same runner, with the tools from
 the workflow's own commit, so the ref under test does not need the
 benchmarks, and against only the standalone server and the cluster, so no
 other container competes for the runner's CPU. The workflow is

@@ -23,8 +23,8 @@ POOL_NAMES = {"connection": "PlainPool", "blocking": "BlockingPool"}
 
 def jobs():
     out = [
-        {"name": "Peak memory tests", "tool": "mem_probe", "args": ""},
-        {"name": "Parser only tests", "tool": "parser_micro", "args": "--passes 7"},
+        {"name": "Peak memory tests", "tool": "mem_probe", "args": "--passes 6"},
+        {"name": "Parser only tests", "tool": "parser_micro", "args": "--passes 8"},
     ]
     every = argparse.Namespace(
         client=["async", "sync"],
