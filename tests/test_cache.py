@@ -234,6 +234,43 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_numeric_key_is_invalidated(self, r, r2):
+        # The invalidation for a key passed as an int or float names it by its
+        # encoded bytes, and must still evict the entry cached for it.
+        cache = r.get_cache()
+        for key in (1234, 12.5):
+            r.set(key, "bar")
+            size = cache.size
+            assert r.get(key) in [b"bar", "bar"]
+            assert cache.size == size + 1
+            # change key in redis (cause invalidation)
+            r2.set(key, "barbar")
+            assert wait_for_invalidated_value(r, key, [b"barbar", "barbar"]) in [
+                b"barbar",
+                "barbar",
+            ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
         ],
         ids=["single", "pool"],
         indirect=True,
