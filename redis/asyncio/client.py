@@ -101,6 +101,7 @@ from redis.utils import (
     SSL_AVAILABLE,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
@@ -795,9 +796,9 @@ class Redis(
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # If initialization fails, decrement the counter to keep it in sync
-            await self._decrement_usage()
+            await asyncio.shield(self._decrement_usage())
             raise
 
     async def _increment_usage(self) -> int:
@@ -818,15 +819,24 @@ class Redis(
             self._usage_counter -= 1
             return self._usage_counter
 
+    async def _release_usage(self) -> None:
+        """
+        Decrement the usage counter and close the client on the last exit.
+
+        Hold the lock through closing so a new context cannot use connections
+        that are still being disconnected by the previous context.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            if self._usage_counter == 0:
+                await self.aclose()
+
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
         last exit (counter becomes zero), the client closes its connection pool.
         """
-        current_usage = await asyncio.shield(self._decrement_usage())
-        if current_usage == 0:
-            # This was the last active context, so disconnect the pool.
-            await asyncio.shield(self.aclose())
+        await asyncio.shield(self._release_usage())
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
@@ -1682,6 +1692,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
@@ -1738,8 +1750,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -2186,13 +2198,20 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         )
 
         response = []
-        for args, options in commands:
-            try:
-                response.append(
-                    await self.parse_response(connection, args[0], **options)
-                )
-            except ResponseError as e:
-                response.append(e)
+        try:
+            for args, options in commands:
+                try:
+                    response.append(
+                        await self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    response.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            await connection.disconnect(nowait=True)
+            raise
 
         # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
         # raised regardless of raise_on_error as it was before folding -- only now
@@ -2212,7 +2231,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def annotate_exception(
         self, exception: Exception, number: int, command: Iterable[object]
     ) -> None:
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
             f"of pipeline caused error: {exception.args[0]}"

@@ -89,6 +89,7 @@ from redis.utils import (
     SENTINEL,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     experimental_method,
     safe_str,
@@ -503,21 +504,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
-                if metadata_resolver is not None:
-                    # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
-                    # reaches the pool without also being forwarded to every connection.
-                    kwargs.update(
-                        {
-                            "metadata_resolver": metadata_resolver,
-                        }
-                    )
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
@@ -539,6 +525,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
+                )
+            if metadata_resolver is not None:
+                # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                # reaches the pool without also being forwarded to every connection.
+                kwargs.update(
+                    {
+                        "metadata_resolver": metadata_resolver,
+                    }
+                )
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -1681,6 +1682,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
 
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
@@ -1738,8 +1741,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -2174,11 +2177,20 @@ class Pipeline(Redis):
         prep_error = _himport_exec.drain_pipeline_prepares(self, connection, fieldsets)
 
         responses = []
-        for args, options in commands:
-            try:
-                responses.append(self.parse_response(connection, args[0], **options))
-            except ResponseError as e:
-                responses.append(e)
+        try:
+            for args, options in commands:
+                try:
+                    responses.append(
+                        self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    responses.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            connection.disconnect()
+            raise
 
         # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
         # raised regardless of raise_on_error as it was before folding -- only now
@@ -2197,7 +2209,7 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"

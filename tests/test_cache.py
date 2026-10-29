@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import redis
 
+from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
     CacheConfigurationInterface,
@@ -34,6 +36,7 @@ from redis.event import (
 )
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.conftest import (
     _get_client,
@@ -131,6 +134,16 @@ def tracked_key_count(client) -> int:
     other test uses, from a client that is not itself tracking.
     """
     return int(client.info("stats")["tracking_total_keys"])
+
+
+def cmdstat_get_calls(client) -> int:
+    """
+    Reads how many GET commands the server has run, across all clients.
+
+    Server-wide like ``tracked_key_count``, so callers compare a before/after delta around a
+    read to tell whether it reached the server.
+    """
+    return client.info("commandstats").get("cmdstat_get", {}).get("calls", 0)
 
 
 @pytest.fixture()
@@ -1398,6 +1411,34 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
+    def test_topology_refresh_keeps_cached_entries(self, r):
+        """
+        The cache is shared by every node pool and is emptied whenever one of
+        its connections disconnects, so a refresh that keeps the topology must
+        not recycle any connection.
+        """
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        # The constructor disconnects the connections of the first CLUSTER
+        # SLOTS to enable maintenance notifications on them, and their first
+        # reconnect empties the cache. Use every node once first, so the refresh
+        # below meets only connections that are already set up.
+        r.ping(target_nodes=r.ALL_NODES)
+        r.set("foo", "bar")
+        assert r.get("foo") in [b"bar", "bar"]
+        key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        assert cache.get(key) is not None
+
+        r.nodes_manager.initialize()
+
+        assert cache.get(key) is not None
+        assert r.get("foo") in [b"bar", "bar"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": DefaultCache(CacheConfig(max_size=128))}],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
     def test_a_user_sent_client_tracking_or_reset_is_refused(self, r):
         # Every node connection of a cached cluster is a cache proxy, so the guard covers
         # the fan-out of ``client_tracking_off`` and the cluster pipeline as well.
@@ -2322,6 +2363,67 @@ class TestSSLCache:
             ).cache_value
             == b"baz"
         )
+
+
+# The standalone test server also listens on this socket, see docker-compose.yml
+UNIX_SOCKET_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "dockers", "standalone", "redis.sock")
+)
+
+
+@pytest.fixture()
+def unix_socket_path():
+    """
+    Returns ``UNIX_SOCKET_PATH``, skipping the test when no server answers on it.
+
+    The socket file alone proves nothing: Docker Desktop for macOS shows the container's
+    socket in ``dockers/standalone/`` but refuses connections to it from the host, and a
+    killed container leaves its socket file behind. Pings without retries, so the skip is
+    immediate.
+    """
+    try:
+        with redis.Redis(
+            unix_socket_path=UNIX_SOCKET_PATH, retry=Retry(NoBackoff(), 0)
+        ) as client:
+            client.ping()
+    except redis.ConnectionError:
+        pytest.skip(f"No Redis server on the Unix socket {UNIX_SOCKET_PATH}")
+
+    return UNIX_SOCKET_PATH
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.4.0")
+class TestUnixSocketCache:
+    def test_get_from_cache(self, unix_socket_path):
+        key = f"unix-socket-cache-{uuid.uuid4()}"
+        r = redis.Redis(
+            unix_socket_path=unix_socket_path, protocol=3, cache_config=CacheConfig()
+        )
+        r2 = redis.Redis(unix_socket_path=unix_socket_path)
+        try:
+            cache = r.get_cache()
+            r2.set(key, "bar")
+            # get key from redis and save in local cache
+            assert r.get(key) == b"bar"
+            assert (
+                cache.get(
+                    CacheKey(command="GET", redis_keys=(key,), redis_args=("GET", key))
+                ).cache_value
+                == b"bar"
+            )
+            # get key from local cache, without sending GET to the server
+            calls = cmdstat_get_calls(r2)
+            assert r.get(key) == b"bar"
+            assert cmdstat_get_calls(r2) == calls
+            # change key in redis (cause invalidation)
+            r2.set(key, "barbar")
+            assert wait_for_invalidated_value(r, key, [b"barbar"]) == b"barbar"
+        finally:
+            r2.delete(key)
+            r.close()
+            r2.close()
 
 
 @pytest.mark.fixed_client
