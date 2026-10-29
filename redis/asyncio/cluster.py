@@ -3207,8 +3207,58 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         )
         # result = [True, "1", 1, {"F": "V"}, True, True, "2", "3", 1, 1, 1]
 
-    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `UNLINK`, `mset_nonatomic`, which
-    are split across multiple nodes, you'll get multiple results for them in the array.
+    Note: For commands `DELETE`, `EXISTS`, `TOUCH`, `mset_nonatomic`, which are split
+    across multiple nodes, you'll get multiple results for them in the array.
+
+    Which methods must be awaited:
+
+    Staging a command returns the pipeline itself, so commands chain and are not
+    awaited, as in the example above. The coroutines defined on this class must be
+    awaited individually::
+
+        watch, unwatch, unlink, discard, reset, execute, initialize,
+        himport_prepare, himport_discard, himport_discard_all
+
+    Of those, only ``initialize`` returns the pipeline, so it is the only one that
+    chains once awaited. ``reset``, ``discard``, ``watch``, ``unwatch`` and ``unlink``
+    return ``None``, ``execute`` returns a ``list``, ``himport_prepare`` a ``bool`` and
+    the two ``himport_discard`` methods an ``int``.
+
+    That list covers only the methods defined on this class. Inherited command
+    coroutines are not pipeline steps. ``client_tracking_on`` and
+    ``client_tracking_off`` await the pipeline itself, which re-initializes it and
+    discards everything staged so far. Others cannot run on a pipeline at all:
+    ``command_info`` and the ``hotkeys_*`` family raise ``NotImplementedError``, and
+    ``cluster_delslots`` raises ``TypeError``.
+
+    `unlink` is the surprising one, because the inherited `delete` behaves the other
+    way::
+
+        pipe = rc.pipeline()
+        pipe.delete("A")          # stages, chainable
+        await pipe.unlink("B")    # stages, must be awaited, returns None
+        await pipe.execute()
+
+    Between :meth:`watch` and :meth:`multi` a command returns a coroutine rather than
+    the pipeline. It is executed only when awaited and resolves to the response, so it
+    must be awaited. After :meth:`multi` commands are queued again and chain as usual::
+
+        async with rc.pipeline(transaction=True) as pipe:
+            await pipe.watch("a")
+            a = await pipe.get("a")     # executed when awaited
+            pipe.multi()
+            pipe.set("a", int(a) + 1)   # queued, chains
+            await pipe.execute()
+
+    The split commands from the note above and ``unlink`` are the exception: between
+    :meth:`watch` and :meth:`multi`, ``delete``, ``exists`` and ``touch`` return the
+    pipeline and ``unlink`` returns ``None``, and all four drop the command unsent, so
+    do not use them there. ``mset_nonatomic`` raises ``NotImplementedError`` in a
+    transactional pipeline.
+
+    Outside a transactional pipeline ``watch``, ``unwatch`` and ``discard`` raise
+    :class:`~.RedisClusterException`, and the ``himport_*`` methods act on the shared
+    fieldset registry rather than staging a command.
 
     Retryable errors:
         - :class:`~.ClusterDownError`
@@ -3367,7 +3417,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._execution_strategy.multi()
 
     async def discard(self):
-        """ """
+        """Discards the transactional block. Must be awaited."""
         await self._execution_strategy.discard()
 
     async def watch(self, *names):
@@ -3379,6 +3429,16 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         await self._execution_strategy.unwatch()
 
     async def unlink(self, *names):
+        """
+        Stages an `UNLINK` for keys ``names``. Must be awaited, and returns ``None``
+        rather than the pipeline, so unlike `delete` it does not chain::
+
+            await pipe.unlink("A")
+
+        Outside a transactional block only one key is accepted; more raises
+        :class:`~.RedisClusterException`. Between :meth:`watch` and :meth:`multi`
+        nothing is sent, so do not use it there.
+        """
         await self._execution_strategy.unlink(*names)
 
     def mset_nonatomic(
