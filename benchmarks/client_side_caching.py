@@ -285,8 +285,18 @@ def run_phase(
     time.sleep(duration_seconds)
     stop_event.set()
 
+    # A worker blocked in a request (socket_timeout=None by default) never
+    # sees stop_event; bound the wait instead of hanging. The threads are
+    # daemons, so they do not keep the process alive.
+    join_deadline = time.monotonic() + max(10.0, duration_seconds)
     for thread in threads:
-        thread.join()
+        thread.join(max(0.0, join_deadline - time.monotonic()))
+    stuck = sum(thread.is_alive() for thread in threads)
+    if stuck:
+        raise RuntimeError(
+            f"{stuck} of {worker_count} workers still blocked in a request "
+            "after the phase ended"
+        )
 
     return time.perf_counter() - phase_start, results
 

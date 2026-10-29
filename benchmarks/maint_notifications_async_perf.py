@@ -288,23 +288,28 @@ async def run_throughput_flow(args):
         errors: list[str] = []
         stop = asyncio.Event()
 
+        async def timed(name: str, command, *command_args):
+            # each command is timed and counted on its own, so a SET that
+            # succeeds before its GET fails still counts
+            t0 = time.perf_counter()
+            try:
+                await command(*command_args)
+                latencies.append(time.perf_counter() - t0)
+                stats["ok"] += 1
+            except Exception as e:
+                stats["err"] += 1
+                msg = f"{type(e).__name__}: {e}"
+                errors.append(msg)
+                logger.error(f"[{name}] command failed: {msg}")
+
         async def worker(name: str):
             worker_keys = worker_keys_by_name[name]
             while not stop.is_set():
                 for key in worker_keys:
                     if stop.is_set():
                         break
-                    t0 = time.perf_counter()
-                    try:
-                        await client.set(key, "v")
-                        await client.get(key)
-                        latencies.append(time.perf_counter() - t0)
-                        stats["ok"] += 2
-                    except Exception as e:
-                        stats["err"] += 1
-                        msg = f"{type(e).__name__}: {e}"
-                        errors.append(msg)
-                        logger.error(f"[{name}] command failed: {msg}")
+                    await timed(name, client.set, key, "v")
+                    await timed(name, client.get, key)
                 await asyncio.sleep(0.001)
 
         workers = [
@@ -398,7 +403,9 @@ async def run_notifications_flow(args):
 
         deadline = time.time() + args.duration
         seen_maintenance = set()
-        while time.time() < deadline:
+        # keep draining until the migration completes, or its last pushes stay
+        # buffered and the report shows a stale state
+        while time.time() < deadline or not trigger_task.done():
             for node, conn in held.items():
                 try:
                     if await conn.can_read():

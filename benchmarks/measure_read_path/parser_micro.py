@@ -35,13 +35,14 @@ import worker  # noqa: E402
 
 N = 10_000
 BULK = 10 * 1024 * 1024
-# scenario -> (wire bytes, expected len() of the reply)
+# scenario -> (wire bytes, expected reply), compared in full after timing so
+# a parser that corrupts the content fails instead of looking fast
 REPLIES = {
     "lrange_10k_parse": (
         b"*%d\r\n" % N + b"".join(b"$10\r\nitem%06d\r\n" % i for i in range(N)),
-        N,
+        [b"item%06d" % i for i in range(N)],
     ),
-    "get_10mb_parse": (b"$%d\r\n" % BULK + b"x" * BULK + b"\r\n", BULK),
+    "get_10mb_parse": (b"$%d\r\n" % BULK + b"x" * BULK + b"\r\n", b"x" * BULK),
 }
 
 
@@ -92,7 +93,7 @@ async def time_async(parser_class, timeout, wire, expected, rounds):
         res = await parser.read_response(disable_decoding=True)
         if i:
             samples.append(time.perf_counter() - start)
-        assert len(res) == expected
+        assert res == expected
     return statistics.median(samples) * 1e3
 
 
@@ -110,7 +111,7 @@ def time_sync(parser_class, wire, expected, rounds):
         res = parser.read_response(disable_decoding=True)
         if i:
             samples.append(time.perf_counter() - start)
-        assert len(res) == expected
+        assert res == expected
         parser.on_disconnect()
     return statistics.median(samples) * 1e3
 
