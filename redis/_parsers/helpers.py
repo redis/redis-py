@@ -98,13 +98,21 @@ def parse_memory_stats(response, **kwargs):
 def parse_memory_stats_unified(response, **kwargs):
     """Parse MEMORY STATS for unified RESP2 output.
 
-    Unified responses decode structural keys while preserving string-like
-    values as delivered, matching the approved RESP2/RESP3 unification shape.
+    Unified responses decode structural keys and use native numeric values.
+    The RESP2 reply holds the ratios and percentages, such as
+    ``fragmentation``, as bulk strings, while RESP3 sends doubles. Convert
+    them to ``float`` so both wires give the same values; the integer
+    replies, and any string that isn't a number, are left as they are.
     """
     stats = pairs_to_dict(response, decode_keys=True)
     for key, value in stats.items():
         if key.startswith("db.") and isinstance(value, list):
             stats[key] = pairs_to_dict(value, decode_keys=True)
+        elif isinstance(value, (bytes, str)):
+            try:
+                stats[key] = float(value)
+            except ValueError:
+                pass
     return stats
 
 
