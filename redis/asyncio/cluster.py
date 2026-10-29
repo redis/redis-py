@@ -49,6 +49,7 @@ from redis._defaults import (
 )
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import get_response_callbacks
+from redis._parsers.response_callbacks import _get_response_callback
 from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
@@ -2365,8 +2366,9 @@ class ClusterNode:
         kwargs.pop("keys", None)
 
         # Return response
-        if command in self.response_callbacks:
-            return self.response_callbacks[command](response, **kwargs)
+        callback = _get_response_callback(self.response_callbacks, command, connection)
+        if callback is not None:
+            return callback(response, **kwargs)
 
         return response
 
@@ -4443,10 +4445,14 @@ class TransactionStrategy(AbstractStrategy):
         for r, cmd in zip(response, self._command_queue):
             if not isinstance(r, Exception):
                 command_name = cmd.args[0]
-                if command_name in self._pipe.cluster_client.response_callbacks:
-                    r = self._pipe.cluster_client.response_callbacks[command_name](
-                        r, **cmd.kwargs
-                    )
+                callback = _get_response_callback(
+                    self._pipe.cluster_client.response_callbacks,
+                    command_name,
+                    connection,
+                )
+                if callback is not None:
+                    cmd.kwargs.pop("keys", None)
+                    r = callback(r, **cmd.kwargs)
             data.append(r)
 
         await record_operation_duration(
