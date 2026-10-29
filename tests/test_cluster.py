@@ -1044,6 +1044,27 @@ class TestRedisClusterObjMocked:
             "RedisCluster requires at least one node to discover the cluster"
         ), str_if_bytes(ex.value)
 
+    def test_ssl_with_non_ssl_connection_class_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                ssl=True,
+                connection_class=Connection,
+            )
+
+        assert "SSLConnection subclass" in str(ex.value)
+
+    def test_unix_socket_path_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                unix_socket_path="/tmp/redis.sock",
+            )
+
+        assert "Unix Domain Socket" in str(ex.value)
+
     def test_get_node_name(self):
         assert (
             get_node_name(default_host, default_port)
@@ -5851,29 +5872,6 @@ class TestNodesManager:
             connection = node.redis_connection.connection_pool.make_connection()
             assert isinstance(connection, SSLConnection)
             assert connection.cert_reqs == ssl.CERT_NONE
-
-    @pytest.mark.fixed_client
-    def test_ssl_with_non_ssl_connection_class_raises(self):
-        with pytest.raises(RedisClusterException) as ex:
-            RedisCluster(
-                host=default_host,
-                port=default_port,
-                ssl=True,
-                connection_class=Connection,
-            )
-
-        assert "SSLConnection subclass" in str(ex.value)
-
-    @pytest.mark.fixed_client
-    def test_unix_socket_path_raises(self):
-        with pytest.raises(RedisClusterException) as ex:
-            RedisCluster(
-                host=default_host,
-                port=default_port,
-                unix_socket_path="/tmp/redis.sock",
-            )
-
-        assert "Unix Domain Socket" in str(ex.value)
 
     @pytest.mark.fixed_client
     def test_connection_pool_with_host_and_port(self):
