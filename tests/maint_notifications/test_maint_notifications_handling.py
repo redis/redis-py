@@ -3375,6 +3375,8 @@ def test_pool_close_in_forked_child_does_not_block_on_inherited_pool_lock(
     finally:
         release.set()
         holder.join(5)
+        # The handoff started a non-daemon timer in the parent.
+        pool.close()
 
     assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
 
