@@ -478,6 +478,8 @@ def save(args, heads, payload, suffix="timing"):
     os.makedirs(args.output_dir, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tag = "-".join(f"{k}{v}" for k, v in heads.items())
+    # a label like feature/parser would name a directory that does not exist
+    tag = "".join(c if c.isalnum() or c in "._-" else "_" for c in tag)
     path = os.path.join(args.output_dir, f"{stamp}-{suffix}-{tag}.json")
     with open(path, "w") as f:
         json.dump({"heads": heads, **payload}, f, indent=1)

@@ -228,7 +228,7 @@ async def sc_pipeline_1k_get(r):
             pipe.get(K_SMALL)
         res = await pipe.execute()
     elapsed = time.perf_counter() - start
-    assert len(res) == 1000 and res[-1] == SMALL
+    assert res == [SMALL] * 1000
     return n, elapsed
 
 
@@ -352,7 +352,7 @@ def sync_pipeline_1k_get(r):
             pipe.get(K_SMALL)
         res = pipe.execute()
     elapsed = time.perf_counter() - start
-    assert len(res) == 1000 and res[-1] == SMALL
+    assert res == [SMALL] * 1000
     return n, elapsed
 
 
