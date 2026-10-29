@@ -7621,6 +7621,46 @@ class TestClusterPipeline:
 class TestClusterPipelineMocked:
     """ClusterPipeline behaviour checked against mocked nodes; no server needed."""
 
+    async def test_transaction_runs_resp2_callbacks_without_the_keys_option(
+        self,
+    ) -> None:
+        """
+        Commands record a ``keys`` option for the client cache. The RESP2 HGETALL
+        callback takes no options, so the transaction has to drop it before running
+        the callback, as the other execution paths do.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, protocol=2
+        )
+        pipe = r.pipeline(transaction=True)
+        strategy = pipe._execution_strategy
+
+        async def parse_response(_connection, command_name):
+            if command_name == "EXEC":
+                return [[b"a", b"1"]]
+            return b"QUEUED"
+
+        node = mock.MagicMock()
+        node.parse_response = mock.AsyncMock(side_effect=parse_response)
+        node.disconnect_if_needed = mock.AsyncMock()
+        node._himport_prepare_pipeline = mock.AsyncMock()
+        connection = mock.MagicMock()
+        connection.send_packed_command = mock.AsyncMock()
+        with (
+            mock.patch.object(
+                RedisCluster, "_determine_slot", mock.AsyncMock(return_value=1)
+            ),
+            mock.patch.object(
+                type(strategy),
+                "_get_client_and_connection_for_transaction",
+                return_value=(node, connection),
+            ),
+        ):
+            pipe.hgetall("{k}h")
+            result = await pipe.execute()
+
+        assert result == [{b"a": b"1"}]
+
     @pytest.mark.parametrize("initialized", [False, True])
     @pytest.mark.parametrize("slot_error", [False, True])
     @pytest.mark.parametrize("disconnect_error", [False, True])
