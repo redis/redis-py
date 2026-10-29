@@ -4509,6 +4509,11 @@ class BlockingConnectionPool(ConnectionPool):
             # A parent thread may have held the lock at fork time, and the
             # handler reset below takes it to revert an active MOVING.
             self._lock = threading.RLock()
+            # The thread applying a MOVING in the parent does not exist here
+            # to clear these, and a stale flag makes a checkout nest on the
+            # lock and leak it.
+            self._in_maintenance = False
+            self._locked = False
 
         # Create and fill up a thread safe queue with ``None`` values.
         try:

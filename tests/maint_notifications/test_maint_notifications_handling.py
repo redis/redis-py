@@ -3377,3 +3377,34 @@ def test_pool_close_in_forked_child_does_not_block_on_inherited_pool_lock(
         holder.join(5)
 
     assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+def test_blocking_pool_fork_in_maintenance_does_not_stay_in_maintenance():
+    """
+    The process forks while a parent thread is applying a MOVING, with the
+    pool flagged as in maintenance: no thread in the child will ever clear the
+    flag, and a later checkout would nest on the pool lock and leak it.
+    """
+    pool = _moving_pool(BlockingConnectionPool)
+    pool.set_in_maintenance(True)
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        status = 1
+        try:
+            signal.alarm(5)
+            pool._checkpid()
+            free = pool._lock.acquire(blocking=False)
+            if free:
+                pool._lock.release()
+            if free and not pool._in_maintenance and not pool._locked:
+                status = 0
+        finally:
+            os._exit(status)
+    _, wait_status = os.waitpid(pid, 0)
+    pool.set_in_maintenance(False)
+    pool.disconnect()
+
+    assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
