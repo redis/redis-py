@@ -5765,6 +5765,55 @@ class TestNodesManager:
             )
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
+    )
+    def test_connection_pool_class_with_host_and_port(self, connection_pool_class):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=connection_pool_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert isinstance(
+                node.redis_connection.connection_pool, connection_pool_class
+            )
+
+    @pytest.mark.fixed_client
+    def test_connection_class_with_host_and_port(self):
+        class MyConnection(Connection):
+            pass
+
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_class=MyConnection,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            pool = node.redis_connection.connection_pool
+            assert pool.connection_class is MyConnection
+            assert isinstance(pool.make_connection(), MyConnection)
+
+    @pytest.mark.fixed_client
+    def test_ssl_options_without_ssl_with_host_and_port(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            ssl=False,
+            ssl_cert_reqs="none",
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            pool = node.redis_connection.connection_pool
+            assert pool.connection_class is Connection
+            assert isinstance(pool.make_connection(), Connection)
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
     def test_allow_custom_queue_class(self, queue_class):
         rc = get_mocked_redis_client(

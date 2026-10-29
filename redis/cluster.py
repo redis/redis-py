@@ -56,6 +56,7 @@ from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
     ConnectionPool,
+    SSLConnection,
     parse_url,
 )
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -3034,23 +3035,20 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        if self.from_url:
-            # Create a redis node with a custom connection pool
-            kwargs.update({"host": host})
-            kwargs.update({"port": port})
-            kwargs.update({"cache": self._cache})
-            kwargs.update({"metadata_resolver": self._metadata_resolver})
-            kwargs.update({"retry": node_retry_config})
-            r = Redis(connection_pool=self.connection_pool_class(**kwargs))
-        else:
-            r = Redis(
-                host=host,
-                port=port,
-                cache=self._cache,
-                metadata_resolver=self._metadata_resolver,
-                retry=node_retry_config,
-                **kwargs,
-            )
+        if not self.from_url:
+            # parse_url already turns rediss:// into SSLConnection, do the same
+            # for ssl=True, and drop the TLS options Redis() would ignore without it
+            if kwargs.pop("ssl", False):
+                kwargs.setdefault("connection_class", SSLConnection)
+            else:
+                kwargs = {k: v for k, v in kwargs.items() if not k.startswith("ssl_")}
+        # Create a redis node with a custom connection pool
+        kwargs.update({"host": host})
+        kwargs.update({"port": port})
+        kwargs.update({"cache": self._cache})
+        kwargs.update({"metadata_resolver": self._metadata_resolver})
+        kwargs.update({"retry": node_retry_config})
+        r = Redis.from_pool(self.connection_pool_class(**kwargs))
         # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
         # here (rather than forwarded via connection_kwargs) so every node reuses the
         # same object; the node has no connections yet, so this is safe.
