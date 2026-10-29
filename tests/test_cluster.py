@@ -5834,6 +5834,29 @@ class TestNodesManager:
             assert connection.cert_reqs == ssl.CERT_NONE
 
     @pytest.mark.fixed_client
+    def test_ssl_with_non_ssl_connection_class_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                ssl=True,
+                connection_class=Connection,
+            )
+
+        assert "SSLConnection subclass" in str(ex.value)
+
+    @pytest.mark.fixed_client
+    def test_unix_socket_path_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                unix_socket_path="/tmp/redis.sock",
+            )
+
+        assert "Unix Domain Socket" in str(ex.value)
+
+    @pytest.mark.fixed_client
     def test_connection_pool_with_host_and_port(self):
         pool = ConnectionPool(host=default_host, port=default_port)
         rc = get_mocked_redis_client(

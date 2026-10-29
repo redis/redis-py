@@ -1012,6 +1012,19 @@ class RedisCluster(
                 "The 'retry' argument cannot be used in kwargs when running in cluster mode."
             )
 
+        if kwargs.get("ssl") and not issubclass(
+            kwargs.get("connection_class", SSLConnection), SSLConnection
+        ):
+            raise RedisClusterException(
+                "The 'ssl' argument requires 'connection_class' to be an "
+                "SSLConnection subclass"
+            )
+
+        if kwargs.get("unix_socket_path") is not None:
+            raise RedisClusterException(
+                "RedisCluster does not currently support Unix Domain Socket connections"
+            )
+
         # Get the startup node/s
         from_url = False
         if url is not None:
@@ -3035,6 +3048,7 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
+        kwargs.pop("unix_socket_path", None)
         connection_pool = kwargs.pop("connection_pool", None)
         if connection_pool is not None:
             r = Redis(connection_pool=connection_pool)
