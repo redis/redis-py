@@ -229,6 +229,7 @@ async def get_mocked_redis_client(
         ) as cmd_parser_initialize:
 
             def cmd_init_mock(self, r: ClusterNode) -> None:
+                self.node = r
                 self.commands = {
                     "get": {
                         "name": "get",
@@ -7664,6 +7665,7 @@ class TestClusterPipelineMocked:
             connections.append(connection)
 
         def set_topology():
+            client.commands_parser.node = cached_node
             client.nodes_manager.default_node = cached_node
             client.nodes_manager.nodes_cache[cached_node.name] = cached_node
             client._initialize = False
@@ -7710,78 +7712,80 @@ class TestClusterPipelineMocked:
             await client.aclose()
 
     @pytest.mark.parametrize("caller_connected", [False, True])
+    @pytest.mark.parametrize("slot_error", [False, True])
     @pytest.mark.parametrize("disconnect_error", [False, True])
     async def test_transaction_movablekeys_isolates_caller_and_private_loop_connections(
-        self, caller_connected, disconnect_error
+        self, caller_connected, slot_error, disconnect_error
     ) -> None:
-        client = RedisCluster(host=default_host, port=default_port)
+        client = RedisCluster(host=default_host, port=default_port, max_connections=3)
         parser_node = ClusterNode(
-            default_host, default_port, max_connections=1 if caller_connected else 4
+            default_host, default_port, **client.nodes_manager.connection_kwargs
         )
         caller_loop = asyncio.get_running_loop()
-        private_connect_loops = []
-        private_disconnect_loops = []
+        parser_io_nodes = []
+        parser_io_loops = []
+        disconnect_nodes = []
+        disconnect_loops = []
+        private_connections = []
 
-        caller_conn = mock.AsyncMock(spec=Connection)
-        caller_conn.is_connected = caller_connected
-        caller_conn.should_reconnect.return_value = False
+        for _ in range(parser_node.max_connections):
+            connection = mock.AsyncMock(spec=Connection)
+            connection.is_connected = caller_connected
+            connection.should_reconnect.return_value = False
+            connection.pack_command.return_value = [b"COMMAND GETKEYS"]
+            connection.read_response.return_value = ["{tag}a", "{tag}b"]
 
-        async def connect_caller():
-            private_connect_loops.append(asyncio.get_running_loop())
-            caller_conn.is_connected = True
+            async def disconnect_caller(connection=connection):
+                connection.is_connected = False
 
-        async def disconnect_caller():
-            if caller_connected and asyncio.get_running_loop() is not caller_loop:
-                raise RuntimeError("Future attached to a different loop")
-            private_disconnect_loops.append(asyncio.get_running_loop())
-            caller_conn.is_connected = False
-            if (
-                disconnect_error
-                and not caller_connected
-                and caller_conn.disconnect.await_count == 1
-            ):
-                raise TimeoutError("close timed out")
+            connection.disconnect.side_effect = disconnect_caller
+            parser_node._connections.append(connection)
+        parser_node._free.extend(reversed(parser_node._connections))
+        caller_connections = list(parser_node._connections)
+        caller_free = list(parser_node._free)
+        connections_pool = parser_node._connections
+        free_pool = parser_node._free
 
-        caller_conn.connect.side_effect = connect_caller
-        caller_conn.disconnect.side_effect = disconnect_caller
-        caller_conn.pack_command.return_value = [b"COMMAND GETKEYS"]
-        caller_conn.read_response.return_value = ["{tag}a", "{tag}b"]
-        parser_node._connections.append(caller_conn)
-        parser_node._free.append(caller_conn)
+        def make_private_connection(**kwargs):
+            connection = mock.AsyncMock(spec=Connection)
+            connection.is_connected = False
+            connection.should_reconnect.return_value = False
 
-        created_private_conns = []
+            async def send_packed_command(*args, **kwargs):
+                parser_io_nodes.append(client.commands_parser.node)
+                parser_io_loops.append(asyncio.get_running_loop())
+                connection.is_connected = True
 
-        def make_private_conn(**kwargs):
-            priv_conn = mock.AsyncMock(spec=Connection)
-            priv_conn.is_connected = False
-            priv_conn.should_reconnect.return_value = False
-
-            async def send_packed_command(*args, **kw):
-                private_connect_loops.append(asyncio.get_running_loop())
-                priv_conn.is_connected = True
-
-            async def disconnect_priv():
-                private_disconnect_loops.append(asyncio.get_running_loop())
-                priv_conn.is_connected = False
-                if disconnect_error and priv_conn.disconnect.await_count == 1:
+            async def disconnect():
+                disconnect_loops.append(asyncio.get_running_loop())
+                connection.is_connected = False
+                if disconnect_error:
                     raise TimeoutError("close timed out")
 
-            priv_conn.send_packed_command.side_effect = send_packed_command
-            priv_conn.disconnect.side_effect = disconnect_priv
-            priv_conn.pack_command.return_value = [b"COMMAND GETKEYS"]
-            priv_conn.read_response.return_value = ["{tag}a", "{tag}b"]
-            created_private_conns.append(priv_conn)
-            return priv_conn
+            connection.send_packed_command.side_effect = send_packed_command
+            connection.disconnect.side_effect = disconnect
+            connection.pack_command.return_value = [b"COMMAND GETKEYS"]
+            if slot_error:
+                connection.read_response.side_effect = RedisClusterException(
+                    "slot resolution failed"
+                )
+            else:
+                connection.read_response.return_value = ["{tag}a", "{tag}b"]
+            private_connections.append(connection)
+            return connection
 
-        async def send_on_unconnected(*args, **kw):
-            if caller_connected and asyncio.get_running_loop() is not caller_loop:
-                raise RuntimeError("Future attached to a different loop")
-            private_connect_loops.append(asyncio.get_running_loop())
-            caller_conn.is_connected = True
+        node_disconnect = ClusterNode.disconnect
 
-        caller_conn.send_packed_command.side_effect = send_on_unconnected
-        parser_node.connection_class = make_private_conn
+        async def disconnect_node(node):
+            disconnect_nodes.append(node)
+            # Restore the caller's parser before cleanup, even if cleanup raises.
+            assert client.commands_parser.node is parser_node
+            await node_disconnect(node)
 
+        client.nodes_manager.connection_kwargs["connection_class"] = (
+            make_private_connection
+        )
+        parser_node.connection_class = make_private_connection
         client.nodes_manager.default_node = parser_node
         client.nodes_manager.nodes_cache[parser_node.name] = parser_node
         client._initialize = False
@@ -7792,18 +7796,52 @@ class TestClusterPipelineMocked:
         }
 
         try:
-            pipe = client.pipeline(transaction=True)
-            assert pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"]) is pipe
-            assert len(private_connect_loops) == 1
-            assert private_connect_loops[0] is not caller_loop
-            assert private_disconnect_loops == [private_connect_loops[0]]
-            assert caller_conn.is_connected is caller_connected
-            assert parser_node._free[0] is caller_conn
-            assert len(parser_node._connections) <= parser_node.max_connections
-            for conn in created_private_conns:
-                assert not conn.is_connected
+            with mock.patch.object(ClusterNode, "disconnect", disconnect_node):
+                pipe = client.pipeline(transaction=True)
+                if slot_error:
+                    with pytest.raises(
+                        RedisClusterException, match="slot resolution failed"
+                    ):
+                        pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"])
+                    assert not pipe._execution_strategy._command_queue
+                else:
+                    assert pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"]) is pipe
+                    assert pipe._execution_strategy._command_queue[0].args == (
+                        "ZUNIONSTORE",
+                        "{tag}out",
+                        2,
+                        "{tag}a",
+                        "{tag}b",
+                    )
+
+            assert client.commands_parser.node is parser_node
+            assert client.get_default_node() is parser_node
+            assert parser_node._connections is connections_pool
+            assert parser_node._connections == caller_connections
+            assert parser_node._free is free_pool
+            assert list(parser_node._free) == caller_free
+            assert parser_node._free.maxlen == parser_node.max_connections
+            for connection in caller_connections:
+                assert connection.is_connected is caller_connected
+                connection.send_packed_command.assert_not_awaited()
+                connection.disconnect.assert_not_awaited()
+
+            assert len(parser_io_nodes) == 1
+            temporary_node = parser_io_nodes[0]
+            assert temporary_node is not parser_node
+            assert temporary_node.host == parser_node.host
+            assert temporary_node.port == parser_node.port
+            assert temporary_node.max_connections == parser_node.max_connections
+            assert temporary_node.connection_class is make_private_connection
+            assert len(disconnect_nodes) == 1
+            assert disconnect_nodes[0] is temporary_node
+            assert len(parser_io_loops) == 1
+            assert parser_io_loops[0] is not caller_loop
+            assert disconnect_loops == parser_io_loops
+            assert len(private_connections) == 1
+            private_connections[0].disconnect.assert_awaited_once()
+            assert not private_connections[0].is_connected
         finally:
-            caller_conn.is_connected = False
             await client.aclose()
 
     async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:

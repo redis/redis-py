@@ -4040,31 +4040,17 @@ class TransactionStrategy(AbstractStrategy):
         )
         parser_node = (
             None
-            if initialize_here
-            else getattr(cluster_client.commands_parser, "node", None)
+            if initialize_here or args[0] in self.NO_SLOTS_COMMANDS
+            else cluster_client.commands_parser.node
         )
-        if not isinstance(parser_node, ClusterNode):
-            parser_node = None
-        caller_connections: List[Connection] = []
-        caller_free: List[Connection] = []
-        if parser_node is not None and args[0] not in self.NO_SLOTS_COMMANDS:
-            # Slot resolution on an initialized client may run COMMAND GETKEYS
-            # (movablekeys commands) or COMMAND (uncached commands) on this
-            # private worker-thread loop. Hold out connections already bound to
-            # the caller's loop so acquire_connection() neither reuses them
-            # across loops nor hits max_connections because of them.
-            caller_connections = [
-                conn for conn in parser_node._connections if conn.is_connected
-            ]
-            caller_free = [conn for conn in parser_node._free if conn.is_connected]
-            if caller_connections:
-                parser_node._connections = [
-                    conn for conn in parser_node._connections if not conn.is_connected
-                ]
-            if caller_free:
-                parser_node._free = collections.deque(
-                    conn for conn in parser_node._free if not conn.is_connected
-                )
+        if parser_node is not None:
+            # Parser I/O during slot resolution belongs to this private loop,
+            # not to the caller's node or its connection pool.
+            cluster_client.commands_parser.node = ClusterNode(
+                parser_node.host,
+                parser_node.port,
+                **cluster_client.nodes_manager.connection_kwargs,
+            )
         slot_number: Optional[int] = None
         try:
             if initialize_here:
@@ -4084,37 +4070,12 @@ class TransactionStrategy(AbstractStrategy):
                     *(node.disconnect() for node in nodes.values()),
                     return_exceptions=True,
                 )
-            elif parser_node is not None and args[0] not in self.NO_SLOTS_COMMANDS:
-                # Disconnect any socket that slot resolution connected on the
-                # private loop, then restore the caller's connected sockets.
-                private_connections = [
-                    conn for conn in parser_node._connections if conn.is_connected
-                ]
-                try:
-                    if private_connections:
-                        await asyncio.gather(
-                            *(conn.disconnect() for conn in private_connections),
-                            return_exceptions=True,
-                        )
-                finally:
-                    if caller_connections:
-                        excess = (
-                            len(caller_connections)
-                            + len(parser_node._connections)
-                            - parser_node.max_connections
-                        )
-                        for _ in range(max(0, excess)):
-                            if parser_node._free:
-                                dropped = parser_node._free.pop()
-                                try:
-                                    parser_node._connections.remove(dropped)
-                                except ValueError:
-                                    pass
-                        parser_node._connections = (
-                            caller_connections + parser_node._connections
-                        )
-                    if caller_free:
-                        parser_node._free.extendleft(reversed(caller_free))
+            elif parser_node is not None:
+                temporary_node = cluster_client.commands_parser.node
+                cluster_client.commands_parser.node = parser_node
+                await asyncio.gather(
+                    temporary_node.disconnect(), return_exceptions=True
+                )
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
