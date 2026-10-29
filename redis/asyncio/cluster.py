@@ -2,7 +2,6 @@ import asyncio
 import collections
 import logging
 import random
-import socket
 import threading
 import time
 import warnings
@@ -78,6 +77,7 @@ from redis.cluster import (
     LoadBalancer,
     LoadBalancingStrategy,
     _error_to_raise,
+    _resolve_localhost,
     _should_request_refresh,
     _topology_refresh_delay,
     block_pipeline_command,
@@ -2120,7 +2120,7 @@ class ClusterNode:
         **connection_kwargs: Any,
     ) -> None:
         if host == "localhost":
-            host = socket.gethostbyname(host)
+            host = _resolve_localhost()
 
         connection_kwargs["host"] = host
         connection_kwargs["port"] = port
@@ -2625,7 +2625,7 @@ class NodesManager:
         if host and port:
             # the user passed host and port
             if host == "localhost":
-                host = socket.gethostbyname(host)
+                host = _resolve_localhost()
             return self.nodes_cache.get(get_node_name(host=host, port=port))
         elif node_name:
             return self.nodes_cache.get(node_name)

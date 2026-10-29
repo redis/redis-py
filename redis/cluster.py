@@ -11,7 +11,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from enum import Enum
-from functools import partial
+from functools import cache, partial
 from itertools import chain
 from types import MethodType
 from typing import (
@@ -129,6 +129,16 @@ def is_debug_log_enabled():
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
+
+
+@cache
+def _resolve_localhost() -> str:
+    """
+    The address a node given as ``localhost`` is cached under. Resolved once,
+    so lookups such as the one on every MOVED or ASK redirect don't each pay
+    for a resolver call.
+    """
+    return socket.gethostbyname("localhost")
 
 
 @deprecated_args(
@@ -2532,7 +2542,7 @@ class RedisCluster(
 class ClusterNode:
     def __init__(self, host, port, server_type=None, redis_connection=None):
         if host == "localhost":
-            host = socket.gethostbyname(host)
+            host = _resolve_localhost()
 
         self.host = host
         self.port = port
@@ -2761,7 +2771,7 @@ class NodesManager:
         if host and port:
             # the user passed host and port
             if host == "localhost":
-                host = socket.gethostbyname(host)
+                host = _resolve_localhost()
             with self._lock:
                 return self.nodes_cache.get(get_node_name(host=host, port=port))
         elif node_name:

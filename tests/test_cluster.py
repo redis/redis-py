@@ -35,6 +35,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
+    _resolve_localhost,
     get_node_name,
     parse_cluster_shards,
     parse_cluster_shards_unified,
@@ -6240,6 +6241,32 @@ class TestNodesManager:
 
         assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8006"]
         assert "127.0.0.1:7006" not in nm.nodes_cache
+
+    @pytest.mark.fixed_client
+    def test_move_slot_resolves_localhost_once(self):
+        """
+        A remap to localhost must be resolved once and reused, not on every
+        node created or redirect looked up.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        _resolve_localhost.cache_clear()
+        try:
+            with patch("socket.gethostbyname", return_value="127.0.0.1") as resolve:
+                r = get_mocked_redis_client(
+                    host=default_host, port=default_port, address_remap=address_remap
+                )
+                nm = r.nodes_manager
+                nm.move_slot(MovedError("0 127.0.0.1:7001"))
+                nm.move_slot(MovedError("0 127.0.0.1:7002"))
+
+            assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8002"]
+            resolve.assert_called_once_with("localhost")
+        finally:
+            _resolve_localhost.cache_clear()
 
     @pytest.mark.fixed_client
     def test_move_node_to_end_of_cached_nodes(self):

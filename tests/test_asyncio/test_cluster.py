@@ -44,6 +44,7 @@ from redis.cluster import (
     PRIMARY,
     REPLICA,
     LoadBalancingStrategy,
+    _resolve_localhost,
     get_node_name,
 )
 from redis.commands.cluster import AsyncClusterMultiKeyCommands
@@ -6663,6 +6664,7 @@ class TestNodesManager:
         listener.listen.assert_not_called()
         await r.aclose()
 
+    @pytest.mark.fixed_client
     async def test_move_slot_remaps_redirect_address(self) -> None:
         """
         move_slot() must apply address_remap to the redirect address, which is
@@ -6690,6 +6692,35 @@ class TestNodesManager:
         assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8006"]
         assert "127.0.0.1:7006" not in nm.nodes_cache
         await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_resolves_localhost_once(self) -> None:
+        """
+        A remap to localhost must be resolved once and reused, not on every
+        node created or redirect looked up.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        _resolve_localhost.cache_clear()
+        try:
+            with mock.patch(
+                "socket.gethostbyname", return_value="127.0.0.1"
+            ) as resolve:
+                r = await get_mocked_redis_client(
+                    host=default_host, port=default_port, address_remap=address_remap
+                )
+                nm = r.nodes_manager
+                await nm.move_slot(MovedError("0 127.0.0.1:7001"))
+                await nm.move_slot(MovedError("0 127.0.0.1:7002"))
+
+            assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8002"]
+            resolve.assert_called_once_with("localhost")
+            await r.aclose()
+        finally:
+            _resolve_localhost.cache_clear()
 
 
 @pytest.mark.fixed_client
