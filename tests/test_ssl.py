@@ -4,7 +4,7 @@ import socket
 import ssl
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pytest
 import redis
@@ -926,7 +926,7 @@ class TestOCSPCertificateBinding:
             if url == "http://ca.test/ca.der":
                 return Response(ca.public_bytes(serialization.Encoding.DER))
             request = ocsp.load_der_ocsp_request(
-                base64.b64decode(urlparse(url).path.lstrip("/"))
+                base64.b64decode(unquote(urlparse(url).path.lstrip("/")))
             )
             queries.append(request.serial_number)
             if len(queries) == 1:
@@ -960,3 +960,29 @@ class TestOCSPCertificateBinding:
             redis.ocsp.OCSPVerifier(Socket(), "localhost", 6666).is_valid()
         assert direct_fetches == []
         assert queries == [cert.serial_number]
+
+    @pytest.mark.parametrize("server", ["http://ocsp.test", "http://ocsp.test/"])
+    def test_build_certificate_url_round_trips_request(self, server):
+        # The serial is the last field of the request, so whatever the keys,
+        # this one makes the base64 end in "Agh/////++++/w==": a "//" that
+        # urljoin collapsed, and "/" and "+" that have to be url-encoded.
+        import base64
+
+        from cryptography.x509 import ocsp
+
+        from redis.ocsp import OCSPVerifier
+
+        ca, ca_key = self._make_certificate("Test CA", 1, ca=True)
+        cert, _ = self._make_certificate("node", 0x7FFFFFFFFBEFBEFF, signing_key=ca_key)
+
+        url = OCSPVerifier(None, "localhost", 6666).build_certificate_url(
+            server, cert, ca
+        )
+
+        assert url.startswith("http://ocsp.test/")
+        encoded = url.removeprefix("http://ocsp.test/")
+        assert "/" not in encoded and "+" not in encoded
+        request = unquote(encoded)
+        assert "//" in request and "+" in request
+        loaded = ocsp.load_der_ocsp_request(base64.b64decode(request))
+        assert loaded.serial_number == cert.serial_number
