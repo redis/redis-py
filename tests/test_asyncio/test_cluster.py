@@ -3512,6 +3512,11 @@ class TestClusterRedisCommands:
         assert isinstance(info, dict)
         assert info["db0"]["keys"] == 3
 
+    async def test_info_with_custom_callback(self, decoded_r: RedisCluster) -> None:
+        decoded_r.set_response_callback("INFO", lambda response: response)
+        info = await decoded_r.info("server", target_nodes=decoded_r.get_random_node())
+        assert "redis_version" in info
+
     async def _init_slowlog_test(self, r: RedisCluster, node: ClusterNode) -> str:
         slowlog_lim = await r.config_get("slowlog-log-slower-than", target_nodes=node)
         assert (

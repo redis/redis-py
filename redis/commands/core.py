@@ -1769,6 +1769,7 @@ class ManagementCommands(CommandsProtocol):
             and codecs.lookup(encoder.encoding).name == "utf-8"
             and getattr(self, "response_callbacks", {}).get("INFO", parse_info)
             is parse_info
+            and "INFO" not in getattr(self, "cluster_response_callbacks", {})
         ):
             kwargs[NEVER_DECODE] = []
         if section is None:
