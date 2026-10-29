@@ -2475,6 +2475,23 @@ class TestRedisCommands:
         assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
         assert float(r[key]) == pytest.approx(1.75)
 
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("8.7.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    def test_increx_unified_responses(self, request, protocol):
+        r = _get_client(redis.Redis, request, protocol=protocol, legacy_responses=False)
+        key = "increx:unified"
+        assert r.set(key, "1.5")
+        assert r.increx(key, byfloat=0.25) == [1.75, 0.25]
+        # A rejected increment returns the current value and a zero increment.
+        result = r.increx(key, byfloat=0.75, ubound=2)
+        assert result == [1.75, 0.0]
+        assert all(type(value) is float for value in result)
+        assert r.set(key, 20)
+        result = r.increx(key, byint=4)
+        assert result == [24, 4]
+        assert all(type(value) is int for value in result)
+
     @skip_if_server_version_lt("8.7.0")
     def test_increx_saturating_bounds(self, r):
         key = "increx:sat"
@@ -5273,6 +5290,81 @@ class TestRedisCommands:
 
         # rev
         assert r.zrange("a", 0, 1, desc=True) == [b"a5", b"a4"]
+
+    def test_zrange_desc_sends_zrevrange_by_default(self):
+        """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True)
+        execute.assert_called_once_with(
+            "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
+    def test_zrange_desc_default_withscores_sends_zrevrange(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, withscores=True, score_cast_func=int)
+        execute.assert_called_once_with(
+            "ZREVRANGE",
+            "a",
+            0,
+            -1,
+            b"WITHSCORES",
+            withscores=True,
+            score_cast_func=int,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_sends_zrange_rev(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            withscores=False,
+            score_cast_func=float,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_withscores_and_score_cast(self):
+        def cast_score(value):
+            return value
+
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange(
+                "a",
+                0,
+                -1,
+                desc=True,
+                withscores=True,
+                score_cast_func=cast_score,
+                use_rev=True,
+            )
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            "WITHSCORES",
+            withscores=True,
+            score_cast_func=cast_score,
+            keys=["a"],
+        )
+
+    def test_zrange_use_rev_without_desc_sends_plain_zrange(self):
+        """use_rev only affects the rank-based reverse path."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")

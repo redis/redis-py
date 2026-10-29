@@ -1121,6 +1121,17 @@ def parse_zmscore(response, **options):
     return [float(score) if score is not None else None for score in response]
 
 
+def parse_increx_unified(response, **options):
+    """RESP2-wire INCREX -> unified ``[value, increment]``.
+
+    With ``BYFLOAT`` the RESP2 reply holds both numbers as bulk strings,
+    while RESP3 sends doubles. Convert the strings to ``float`` so both
+    wires give the same values; the integer replies of the default and
+    ``BYINT`` forms are left as they are.
+    """
+    return [float(x) if isinstance(x, (bytes, str)) else x for x in response]
+
+
 def parse_slowlog_get(response, **options):
     space = " " if options.get("decode_responses", False) else b" "
 
