@@ -3053,23 +3053,24 @@ class NodesManager:
         if connection_pool is not None:
             r = Redis(connection_pool=connection_pool)
         else:
-            if not self.from_url:
-                # parse_url already turns rediss:// into SSLConnection, do the same
-                # for ssl=True, and drop the TLS options a plain connection rejects
-                if kwargs.pop("ssl", False):
-                    kwargs.setdefault("connection_class", SSLConnection)
-                connection_class = kwargs.get("connection_class", Connection)
-                if not issubclass(connection_class, SSLConnection):
-                    kwargs = {
-                        k: v for k, v in kwargs.items() if not k.startswith("ssl_")
-                    }
+            # parse_url already turns rediss:// into SSLConnection, do the same
+            # for ssl=True
+            if not self.from_url and kwargs.pop("ssl", False):
+                kwargs.setdefault("connection_class", SSLConnection)
             # Create a redis node with a custom connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
             kwargs.update({"metadata_resolver": self._metadata_resolver})
             kwargs.update({"retry": node_retry_config})
-            r = Redis.from_pool(self.connection_pool_class(**kwargs))
+            pool = self.connection_pool_class(**kwargs)
+            if not self.from_url and not issubclass(
+                pool.connection_class, SSLConnection
+            ):
+                # a plain connection rejects the TLS options Redis() used to ignore
+                for key in [k for k in pool.connection_kwargs if k.startswith("ssl_")]:
+                    del pool.connection_kwargs[key]
+            r = Redis.from_pool(pool)
         # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
         # here (rather than forwarded via connection_kwargs) so every node reuses the
         # same object; the node has no connections yet, so this is safe.
