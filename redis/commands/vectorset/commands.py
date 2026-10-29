@@ -396,7 +396,9 @@ class VectorSetCommands(CommandsProtocol):
                 )
             ) or (
                 hasattr(self.client, "nodes_manager")
-                and self.client.nodes_manager.connection_kwargs["decode_responses"]
+                and self.client.nodes_manager.connection_kwargs.get(
+                    "decode_responses", False
+                )
             ):
                 # allow decoding in the postprocessing callback
                 # if the user set decode_responses=True
