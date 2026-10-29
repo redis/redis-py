@@ -197,7 +197,7 @@ its reply, so a broken read path cannot pass as a fast one.
 | `get_small_seq`, `set_small_seq` | one short reply per round trip |
 | `pipeline_1k_get` | 1000 replies already buffered |
 | `lrange_10k`, `hgetall_1k` | one aggregate reply, many line and bulk reads |
-| `get_1mb`, `get_10mb` | one bulk that spans many stream reads |
+| `get_200kb`, `get_1mb`, `get_10mb` | one bulk that spans several to many stream reads |
 | `concurrent_get` | 64 tasks on a 64-connection pool |
 | `pool_checkout` | `get_connection()` + `release()`, no round trip |
 
@@ -230,11 +230,14 @@ across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The
 noise rule may raise the limit only up to `--max-limit` percent (default 10),
 or the allowed regression when that is higher: a cell that would need a
 higher limit is inconclusive, because it is too noisy to catch a regression
-that size, and it fails the gate instead of passing unseen. With `--fail-on-regression` the tool exits 1 on a regression
-or an inconclusive cell, and `--summary FILE` appends the summary to a file
-such as `$GITHUB_STEP_SUMMARY`. `run_bench` gives regressed and inconclusive
-cells `--recheck-rounds` more rounds (default 3) before the verdict. The
-timeout counts from `--count-arms` are informational and never fail a run.
+that size, and it fails the gate instead of passing unseen. With
+`--fail-on-regression` the tool exits 1 on a regression or an inconclusive
+cell. `--warn-inconclusive` still lists inconclusive cells but fails only on
+a regression; the workflow passes it, because a shared runner is too noisy
+to judge some cells. `--summary FILE` appends the summary to a file such as
+`$GITHUB_STEP_SUMMARY`. `run_bench` gives regressed and inconclusive cells
+`--recheck-rounds` more rounds (default 3) before the verdict. The timeout
+counts from `--count-arms` are informational and never fail a run.
 
 ```shell
 python -m benchmarks.measure_read_path.parser_micro --trees $TREES \
@@ -258,12 +261,14 @@ parser-only benchmark, and one `run_bench` job per config, every client,
 topology, pool class, parser, protocol and socket timeout combination (58
 jobs). The `run_bench` jobs leave out `get_small_seq` and `set_small_seq`:
 they send one small command per round trip, so on a shared runner they time
-the network more than the client. Each job measures both trees on the same runner, with the tools from
-the workflow's own commit, so the ref under test does not need the
-benchmarks, and against only the standalone server and the cluster, so no
-other container competes for the runner's CPU. The workflow is
-informational: keep it out of the required status checks, so a regression
-shows as a failed check without blocking the merge.
+the network more than the client. They also run `get_200kb` instead of
+`get_1mb` and `get_10mb`, which swing by 10-35% between rounds of the same
+code on a shared runner. Each job measures both trees on the same runner,
+with the tools from the workflow's own commit, so the ref under test does
+not need the benchmarks, and against only the standalone server and the
+cluster, so no other container competes for the runner's CPU. The workflow
+is informational: keep it out of the required status checks, so a
+regression shows as a failed check without blocking the merge.
 
 ## Maintenance Notifications Harness
 

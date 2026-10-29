@@ -16,7 +16,9 @@ Every tool ends with the same summary: whether the gate passed, the allowed
 percentage, and for every regressed or inconclusive cell the baseline and
 candidate numbers, the delta and the limit. With
 --fail-on-regression the tool exits 1 when a cell regressed or is
-inconclusive, after writing its results.
+inconclusive, after writing its results. --warn-inconclusive still reports
+inconclusive cells but fails only on regressions, for runners too noisy to
+judge every cell.
 """
 
 import sys
@@ -59,6 +61,12 @@ def add_gate_args(parser, default_allowed=DEFAULT_ALLOWED_PCT):
         "--fail-on-regression",
         action="store_true",
         help="exit 1 when a compared pair regressed or is inconclusive",
+    )
+    parser.add_argument(
+        "--warn-inconclusive",
+        action="store_true",
+        help="report inconclusive cells without failing the gate, for "
+        "runners too noisy to judge some cells",
     )
     parser.add_argument(
         "--summary",
@@ -119,7 +127,16 @@ def table(rows, new, old):
     return lines
 
 
-def render(title, evaluated, new, old, allowed_pct, unit, max_limit_pct=None):
+def render(
+    title,
+    evaluated,
+    new,
+    old,
+    allowed_pct,
+    unit,
+    max_limit_pct=None,
+    inconclusive_fails=True,
+):
     if max_limit_pct is None:
         max_limit_pct = DEFAULT_MAX_LIMIT_PCT
     regressed = sorted(
@@ -131,9 +148,14 @@ def render(title, evaluated, new, old, allowed_pct, unit, max_limit_pct=None):
     problems = []
     if regressed:
         problems.append(f"{len(regressed)} regression(s)")
-    if inconclusive:
+    if inconclusive and inconclusive_fails:
         problems.append(f"{len(inconclusive)} inconclusive")
-    status = f"**FAILED: {', '.join(problems)}**" if problems else "**passed**"
+    if problems:
+        status = f"**FAILED: {', '.join(problems)}**"
+    elif inconclusive:
+        status = f"**passed, {len(inconclusive)} inconclusive**"
+    else:
+        status = "**passed**"
     lines = [
         f"### {title}: {new} vs {old}, {status}",
         "",
@@ -165,8 +187,9 @@ def render(title, evaluated, new, old, allowed_pct, unit, max_limit_pct=None):
 
 
 def finish(args, summaries):
-    """Print and optionally append the summaries; exit 1 on a regression or
-    an inconclusive cell when --fail-on-regression is set."""
+    """Print and optionally append the summaries; exit 1 on a regression,
+    or on an inconclusive cell without --warn-inconclusive, when
+    --fail-on-regression is set."""
     text = "\n\n".join(s for s, _ in summaries)
     print("\n" + text)
     if args.summary:

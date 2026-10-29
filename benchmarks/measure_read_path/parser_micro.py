@@ -276,6 +276,7 @@ def main():
             args.allowed_regression,
             "milliseconds per reply",
             args.max_limit,
+            inconclusive_fails=not args.warn_inconclusive,
         )
         for new, old in pairs
     ]

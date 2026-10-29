@@ -56,8 +56,10 @@ env:
   ALLOWED_REGRESSION: ${{ inputs.allowed_regression || '3' }}
   # get_small_seq and set_small_seq send one small command per round trip, so
   # they time the runner's network more than the client; concurrent_get keeps
-  # many commands in flight and stays.
-  SCENARIOS: 'pipeline_1k_get,lrange_10k,hgetall_1k,get_1mb,get_10mb,concurrent_get,pool_checkout'
+  # many commands in flight and stays. get_1mb and get_10mb swing by 10-35%
+  # between rounds of the same code on a shared runner; get_200kb covers the
+  # multi-read bulk path instead.
+  SCENARIOS: 'pipeline_1k_get,lrange_10k,hgetall_1k,get_200kb,concurrent_get,pool_checkout'
 
 jobs:
   plan:
@@ -161,6 +163,7 @@ jobs:
             --compare test:base \
             --allowed-regression "$ALLOWED_REGRESSION" \
             --fail-on-regression \
+            --warn-inconclusive \
             --summary "$GITHUB_STEP_SUMMARY" \
             --output-dir "$RUNNER_TEMP/results" \
             $extra

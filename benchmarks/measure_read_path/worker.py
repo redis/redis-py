@@ -32,6 +32,7 @@ import time
 
 PREFIX = "bench_read_path:"
 SMALL = b"v" * 100
+BIG_200K = b"k" * (200 * 1024)
 BIG_1M = b"m" * (1024 * 1024)
 BIG_10M = b"M" * (10 * 1024 * 1024)
 LIST_LEN = 10_000
@@ -42,6 +43,7 @@ LIST_ITEMS = [b"item%06d" % i for i in range(LIST_LEN)]
 HASH_ITEMS = {b"f%05d" % i: b"x" * 10 for i in range(HASH_LEN)}
 
 K_SMALL = PREFIX + "small"
+K_200K = PREFIX + "big200k"
 K_1M = PREFIX + "big1m"
 K_10M = PREFIX + "big10m"
 K_LIST = PREFIX + "list10k"
@@ -252,6 +254,17 @@ async def sc_hgetall_1k(r):
     return n, elapsed
 
 
+async def sc_get_200kb(r):
+    # same total bytes as get_1mb, in more and smaller replies
+    n = 1500
+    start = time.perf_counter()
+    for _ in range(n):
+        v = await r.get(K_200K)
+    elapsed = time.perf_counter() - start
+    assert v == BIG_200K
+    return n, elapsed
+
+
 async def sc_get_1mb(r):
     n = 300
     start = time.perf_counter()
@@ -315,6 +328,7 @@ SCENARIOS = {
     "pipeline_1k_get": sc_pipeline_1k_get,
     "lrange_10k": sc_lrange_10k,
     "hgetall_1k": sc_hgetall_1k,
+    "get_200kb": sc_get_200kb,
     "get_1mb": sc_get_1mb,
     "get_10mb": sc_get_10mb,
     "concurrent_get": sc_concurrent_get,
@@ -373,6 +387,17 @@ def sync_hgetall_1k(r):
         res = r.hgetall(K_HASH)
     elapsed = time.perf_counter() - start
     assert res == HASH_ITEMS
+    return n, elapsed
+
+
+def sync_get_200kb(r):
+    # same total bytes as get_1mb, in more and smaller replies
+    n = 1500
+    start = time.perf_counter()
+    for _ in range(n):
+        v = r.get(K_200K)
+    elapsed = time.perf_counter() - start
+    assert v == BIG_200K
     return n, elapsed
 
 
@@ -444,6 +469,7 @@ SYNC_SCENARIOS = {
     "pipeline_1k_get": sync_pipeline_1k_get,
     "lrange_10k": sync_lrange_10k,
     "hgetall_1k": sync_hgetall_1k,
+    "get_200kb": sync_get_200kb,
     "get_1mb": sync_get_1mb,
     "get_10mb": sync_get_10mb,
     "concurrent_get": sync_concurrent_get,
@@ -453,6 +479,7 @@ SYNC_SCENARIOS = {
 
 async def setup(r):
     await r.set(K_SMALL, SMALL)
+    await r.set(K_200K, BIG_200K)
     await r.set(K_1M, BIG_1M)
     await r.set(K_10M, BIG_10M)
     await r.delete(K_LIST)

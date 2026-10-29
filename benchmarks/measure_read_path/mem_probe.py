@@ -317,6 +317,7 @@ def main():
             args.allowed_regression,
             "MiB per operation",
             args.max_limit,
+            inconclusive_fails=not args.warn_inconclusive,
         )
         for new, old in pairs
     ]

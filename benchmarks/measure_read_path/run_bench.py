@@ -399,6 +399,7 @@ def report(args, run, heads, pairs, total):
             args.allowed_regression,
             "microseconds per operation",
             args.max_limit,
+            inconclusive_fails=not args.warn_inconclusive,
         )
         for new, old in pairs
     ]
