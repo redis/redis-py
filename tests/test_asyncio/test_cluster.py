@@ -89,6 +89,7 @@ from tests.conftest import (
     assert_resp_response,
     expects_resp2_shape,
     expects_unified_shape,
+    get_protocol_version,
     patch_monotonic,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
@@ -7206,7 +7207,7 @@ class TestClusterPipeline:
         )
         client = RedisCluster.from_url(
             request.config.getoption("--redis-url"),
-            protocol=request.config.getoption("--protocol"),
+            protocol=get_protocol_version(r),
             dynamic_startup_nodes=dynamic_startup_nodes,
         )
         try:
