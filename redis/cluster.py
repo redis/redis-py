@@ -3035,20 +3035,27 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        if not self.from_url:
-            # parse_url already turns rediss:// into SSLConnection, do the same
-            # for ssl=True, and drop the TLS options Redis() would ignore without it
-            if kwargs.pop("ssl", False):
-                kwargs.setdefault("connection_class", SSLConnection)
-            else:
-                kwargs = {k: v for k, v in kwargs.items() if not k.startswith("ssl_")}
-        # Create a redis node with a custom connection pool
-        kwargs.update({"host": host})
-        kwargs.update({"port": port})
-        kwargs.update({"cache": self._cache})
-        kwargs.update({"metadata_resolver": self._metadata_resolver})
-        kwargs.update({"retry": node_retry_config})
-        r = Redis.from_pool(self.connection_pool_class(**kwargs))
+        connection_pool = kwargs.pop("connection_pool", None)
+        if connection_pool is not None:
+            r = Redis(connection_pool=connection_pool)
+        else:
+            if not self.from_url:
+                # parse_url already turns rediss:// into SSLConnection, do the same
+                # for ssl=True, and drop the TLS options a plain connection rejects
+                if kwargs.pop("ssl", False):
+                    kwargs.setdefault("connection_class", SSLConnection)
+                connection_class = kwargs.get("connection_class", Connection)
+                if not issubclass(connection_class, SSLConnection):
+                    kwargs = {
+                        k: v for k, v in kwargs.items() if not k.startswith("ssl_")
+                    }
+            # Create a redis node with a custom connection pool
+            kwargs.update({"host": host})
+            kwargs.update({"port": port})
+            kwargs.update({"cache": self._cache})
+            kwargs.update({"metadata_resolver": self._metadata_resolver})
+            kwargs.update({"retry": node_retry_config})
+            r = Redis.from_pool(self.connection_pool_class(**kwargs))
         # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
         # here (rather than forwarded via connection_kwargs) so every node reuses the
         # same object; the node has no connections yet, so this is safe.

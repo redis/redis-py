@@ -51,7 +51,12 @@ from redis.commands.metadata import (
     StaticMetadataResolver,
 )
 from redis.commands.policies import StaticPolicyResolver
-from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
+from redis.connection import (
+    BlockingConnectionPool,
+    Connection,
+    ConnectionPool,
+    SSLConnection,
+)
 from redis.crc import key_slot
 from redis.credentials import StreamingCredentialProvider
 from redis.event import (
@@ -5812,6 +5817,35 @@ class TestNodesManager:
             pool = node.redis_connection.connection_pool
             assert pool.connection_class is Connection
             assert isinstance(pool.make_connection(), Connection)
+
+    @pytest.mark.fixed_client
+    def test_ssl_connection_class_keeps_ssl_options_with_host_and_port(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_class=SSLConnection,
+            ssl_cert_reqs="none",
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            connection = node.redis_connection.connection_pool.make_connection()
+            assert isinstance(connection, SSLConnection)
+            assert connection.cert_reqs == ssl.CERT_NONE
+
+    @pytest.mark.fixed_client
+    def test_connection_pool_with_host_and_port(self):
+        pool = ConnectionPool(host=default_host, port=default_port)
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_pool=pool,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert node.redis_connection.connection_pool is pool
+            assert node.redis_connection.auto_close_connection_pool is False
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
