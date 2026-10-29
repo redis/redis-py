@@ -37,6 +37,7 @@ class WorkerResult:
     errors: int = 0
     first_error: str | None = None
     latencies_ms: list[float] | None = None
+    sampled_operations: int = 0
 
     def __post_init__(self) -> None:
         if self.latencies_ms is None:
@@ -236,6 +237,7 @@ def run_worker(
 
         operation_index += 1
 
+    result.sampled_operations = sampled_operations
     results[worker_index] = result
 
 
@@ -299,6 +301,26 @@ def run_phase(
         )
 
     return time.perf_counter() - phase_start, results
+
+
+def merge_latency_samples(results: list[WorkerResult], seed: int | None) -> list[float]:
+    """Merge the per-worker reservoirs into one sample of all operations.
+
+    Each worker keeps an equal-sized reservoir, so a worker that completed
+    fewer operations is sampled at a higher rate. Subsample every reservoir
+    down to the lowest rate so each worker contributes in proportion to the
+    operations it sampled.
+    """
+    sampled = [r for r in results if r.sampled_operations and r.latencies_ms]
+    if not sampled:
+        return []
+    rate = min(len(r.latencies_ms) / r.sampled_operations for r in sampled)
+    rng = random.Random(seed)
+    merged = []
+    for r in sampled:
+        k = min(len(r.latencies_ms), round(rate * r.sampled_operations))
+        merged.extend(rng.sample(r.latencies_ms, k))
+    return merged
 
 
 def percentile(sorted_values: list[float], percent: float) -> float:
@@ -367,10 +389,7 @@ def build_summary(
         (result.first_error for result in warmup_results if result.first_error), None
     )
 
-    latencies = []
-    for result in results:
-        latencies.extend(result.latencies_ms or [])
-    sorted_latencies = sorted(latencies)
+    sorted_latencies = sorted(merge_latency_samples(results, args.seed))
 
     if sorted_latencies:
         min_latency_ms = min(sorted_latencies)

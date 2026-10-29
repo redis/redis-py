@@ -172,6 +172,7 @@ async def setup_cluster(
     maint_enabled: bool,
     socket_timeout: float,
     socket_connect_timeout: float,
+    keep_db: bool,
 ) -> tuple:
     """Create the DB and return (client, endpoints_config)."""
     # Delete any leftover DB with the same name.
@@ -187,18 +188,19 @@ async def setup_cluster(
     endpoints_config = await fault_injector.create_database(bdb_config)
     logger.info(f"DB created: bdb_id={endpoints_config.get('bdb_id')}")
 
-    client = get_async_cluster_client_maint_notifications(
-        endpoints_config=endpoints_config,
-        enable_maintenance_notifications=maint_enabled,
-        disable_retries=True,
-        socket_timeout=socket_timeout,
-        socket_connect_timeout=socket_connect_timeout,
-    )
+    client = None
     try:
+        client = get_async_cluster_client_maint_notifications(
+            endpoints_config=endpoints_config,
+            enable_maintenance_notifications=maint_enabled,
+            disable_retries=True,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
+        )
         await client.initialize()
     except BaseException:
         # the caller never gets the client or the DB to clean up
-        await teardown(client, fault_injector, endpoints_config, keep_db=False)
+        await teardown(client, fault_injector, endpoints_config, keep_db)
         raise
     logger.info(
         f"Cluster initialized; maint_notifications={'on' if maint_enabled else 'off'}; "
@@ -255,6 +257,7 @@ async def run_throughput_flow(args):
             maint_enabled=args.maint == "on",
             socket_timeout=args.socket_timeout,
             socket_connect_timeout=args.connect_timeout,
+            keep_db=args.keep_db,
         )
 
         keys = KeyGenerationHelpers.generate_keys_for_all_shards(
@@ -389,6 +392,7 @@ async def run_notifications_flow(args):
             maint_enabled=True,  # this flow only makes sense with maint on
             socket_timeout=args.socket_timeout,
             socket_connect_timeout=args.connect_timeout,
+            keep_db=args.keep_db,
         )
 
         # Acquire and connect one connection per node so notifications land on them.
