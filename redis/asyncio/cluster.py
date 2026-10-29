@@ -4029,15 +4029,34 @@ class TransactionStrategy(AbstractStrategy):
         # on the caller's loop: running it here would do I/O on connections
         # bound to that loop. Only a client that never initialized has no
         # topology to queue against.
-        if (
+        initialize_here = (
             cluster_client._initialize
             and cluster_client.nodes_manager.default_node is None
-        ):
-            await cluster_client.initialize()
-
+        )
+        startup_nodes = (
+            tuple(cluster_client.nodes_manager.startup_nodes.values())
+            if initialize_here
+            else ()
+        )
         slot_number: Optional[int] = None
-        if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._resolve_transaction_slot(*args)
+        try:
+            if initialize_here:
+                await cluster_client.initialize()
+            if args[0] not in self.NO_SLOTS_COMMANDS:
+                slot_number = await self._resolve_transaction_slot(*args)
+        finally:
+            if initialize_here:
+                # Keep the discovered topology and metadata, but not sockets bound
+                # to the private loop that closes when this command is queued.
+                # Same-address nodes can have distinct pools; deduplicate by identity.
+                nodes = {
+                    id(node): node
+                    for node in chain(startup_nodes, cluster_client.get_nodes())
+                }
+                await asyncio.gather(
+                    *(node.disconnect() for node in nodes.values()),
+                    return_exceptions=True,
+                )
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
