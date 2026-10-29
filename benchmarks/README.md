@@ -225,9 +225,10 @@ every regressed or inconclusive cell the baseline and candidate numbers and
 the delta. A cell regresses when the candidate is worse by more than
 `--allowed-regression` percent (default 5) and by more than twice the noise
 measured for either tree. The noise is the relative IQR of a tree's results
-across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The noise rule may raise the limit only up to `--max-limit` percent
-(default 10): a cell that would need a higher limit is inconclusive, because it
-is too noisy to catch a regression that size, and it fails the gate instead of
+across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The
+noise rule may raise the limit only up to `--max-limit` percent (default 10):
+a cell that would need a higher limit is inconclusive, because it is too
+noisy to catch a regression that size, and it fails the gate instead of
 passing unseen. With `--fail-on-regression` the tool exits 1 on a regression
 or an inconclusive cell, and `--summary FILE` appends the summary to a file
 such as `$GITHUB_STEP_SUMMARY`. `run_bench` gives regressed and inconclusive
@@ -245,9 +246,10 @@ gates on request, not on every pull request:
 - by hand, from Actions > Benchmarks > Run workflow, with a base ref (default
   `master`), a ref under test (a branch, tag, SHA or
   `refs/pull/<number>/head`) and the allowed regression (default 3%);
-- on a pull request labeled `with-benchmarks` or `run-benchmark`, when the
-  label is added and on every push while it stays. The tree under test is
-  GitHub's merge of the PR onto its target branch, and the base is the
+- on a pull request labeled `with-benchmarks` or `run-benchmark`, alongside
+  the regular PR checks: when it is opened or reopened and on every push.
+  Adding the label starts nothing; the next push does. The tree under test
+  is GitHub's merge of the PR onto its target branch, and the base is the
   commit it was merged onto, so only the PR's own effect is measured.
 
 `ci_matrix.py` generates the jobs: one each for peak memory and the
@@ -256,9 +258,9 @@ topology, pool class, parser, protocol and socket timeout combination (58
 jobs). Each job measures both trees on the same runner, with the tools from
 the workflow's own commit, so the ref under test does not need the
 benchmarks, and against only the standalone server and the cluster, so no
-other container competes for the runner's CPU. The workflow is informational: keep it out of the required
-status checks, so a regression shows as a failed check without blocking the
-merge.
+other container competes for the runner's CPU. The workflow is
+informational: keep it out of the required status checks, so a regression
+shows as a failed check without blocking the merge.
 
 ## Maintenance Notifications Harness
 
@@ -266,8 +268,7 @@ merge.
 while a fault injector triggers a slot migration, and reports throughput,
 latency percentiles, errors and event-loop stalls. It needs the same Redis
 Enterprise and fault-injector setup as the scenario tests, and it creates and
-deletes its own database. It runs in the CAE pipeline with the scenario tests,
-not in the `Benchmarks` workflow.
+deletes its own database. It is not part of the `Benchmarks` workflow.
 
 ```shell
 python -m benchmarks.maint_notifications_async_perf --flow throughput --maint on \

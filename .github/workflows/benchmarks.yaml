@@ -10,9 +10,10 @@ name: Benchmarks
 # - by hand (Actions > Benchmarks > Run workflow), with any base ref (default
 #   master) and any ref under test;
 # - on a pull request that carries the `with-benchmarks` or `run-benchmark`
-#   label, when the label is added and on every push while it stays. The tree
-#   under test is GitHub's merge of the PR onto its target branch, and the
-#   base is the commit it was merged onto, so only the PR's own effect is
+#   label, alongside the regular PR checks: when it is opened or reopened and
+#   on every push. Adding the label starts nothing; the next push does. The
+#   tree under test is GitHub's merge of the PR onto its target branch, and
+#   the base is the commit it was merged onto, so only the PR's own effect is
 #   measured.
 #
 # The tools run from the workflow's own commit, checked out apart from the
@@ -35,9 +36,9 @@ on:
         default: '3'
         required: true
   pull_request:
-    # A PR opened with the label sends `labeled` too, so `opened` would only
-    # start a second run.
-    types: [labeled, reopened, synchronize]
+    # No `labeled`: label changes would start runs in the PR's concurrency
+    # group and cancel a benchmark run in progress.
+    types: [opened, reopened, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}..{1}', inputs.base_ref, inputs.test_ref) }}
@@ -59,15 +60,11 @@ env:
 jobs:
   plan:
     name: Plan
-    # A labeled event runs only for these labels; other PR events run while
-    # the PR carries one of them.
+    # A PR event runs only while the PR carries one of the labels.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.action == 'labeled' &&
-        contains(fromJSON('["with-benchmarks", "run-benchmark"]'), github.event.label.name)) ||
-      (github.event.action != 'labeled' &&
-        (contains(github.event.pull_request.labels.*.name, 'with-benchmarks') ||
-          contains(github.event.pull_request.labels.*.name, 'run-benchmark')))
+      contains(github.event.pull_request.labels.*.name, 'with-benchmarks') ||
+      contains(github.event.pull_request.labels.*.name, 'run-benchmark')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
