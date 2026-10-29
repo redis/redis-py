@@ -835,6 +835,17 @@ class TestRedisCommands:
     async def test_ping(self, r: redis.Redis):
         assert await r.ping()
 
+    @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
+    async def test_command_getkeysandflags(self, r: redis.Redis):
+        res = await r.command_getkeysandflags(
+            "LMOVE", "mylist1", "mylist2", "left", "left"
+        )
+        assert res == [
+            [b"mylist1", [b"RW", b"access", b"delete"]],
+            [b"mylist2", [b"RW", b"insert"]],
+        ]
+
     @pytest.mark.onlynoncluster
     async def test_slowlog_get(self, r: redis.Redis, slowlog):
         assert await r.slowlog_reset()

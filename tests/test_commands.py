@@ -8778,7 +8778,6 @@ class TestRedisCommands:
         assert "set" in cmds
         assert "get" in cmds
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
