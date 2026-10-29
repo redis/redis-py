@@ -48,7 +48,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers import AsyncCommandsParser, Encoder
-from redis._parsers.helpers import get_response_callbacks
+from redis._parsers.helpers import decode_info, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
@@ -2351,6 +2351,11 @@ class ClusterNode:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
                 kwargs.pop(NEVER_DECODE)
+            elif command == "INFO":
+                response = decode_info(
+                    await connection.read_response(disable_decoding=True),
+                    self.get_encoder(),
+                )
             else:
                 response = await connection.read_response()
         except ResponseError:

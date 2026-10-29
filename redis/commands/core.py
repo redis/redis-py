@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import codecs
 import datetime
 import hashlib
 import inspect
@@ -34,7 +33,6 @@ from typing import (
     overload,
 )
 
-from redis._parsers.helpers import parse_info
 from redis.asyncio.observability.recorder import (
     record_streaming_lag_from_response as async_record_streaming_lag,
 )
@@ -1760,18 +1758,6 @@ class ManagementCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/info
         """
-        from redis.client import NEVER_DECODE
-
-        encoder = self.get_encoder()
-        if (
-            encoder.decode_responses
-            and encoder.encoding_errors == "strict"
-            and codecs.lookup(encoder.encoding).name == "utf-8"
-            and getattr(self, "response_callbacks", {}).get("INFO", parse_info)
-            is parse_info
-            and "INFO" not in getattr(self, "cluster_response_callbacks", {})
-        ):
-            kwargs[NEVER_DECODE] = []
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:
