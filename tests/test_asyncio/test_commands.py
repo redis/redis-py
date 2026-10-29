@@ -4014,6 +4014,63 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    async def test_zrange_desc_sends_zrevrange_by_default(self):
+        """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange("a", 0, -1, desc=True)
+        execute.assert_called_once_with(
+            "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
+    async def test_zrange_desc_use_rev_sends_zrange_rev(self):
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange("a", 0, -1, desc=True, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            withscores=False,
+            score_cast_func=float,
+            keys=["a"],
+        )
+
+    async def test_zrange_desc_use_rev_withscores_and_score_cast(self):
+        def cast_score(value):
+            return value
+
+        r = redis.Redis()
+        with patch.object(
+            r, "execute_command", new=AsyncMock(return_value=[])
+        ) as execute:
+            await r.zrange(
+                "a",
+                0,
+                -1,
+                desc=True,
+                withscores=True,
+                score_cast_func=cast_score,
+                use_rev=True,
+            )
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            "WITHSCORES",
+            withscores=True,
+            score_cast_func=cast_score,
+            keys=["a"],
+        )
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
     @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
