@@ -6700,8 +6700,9 @@ class TestRedisCommands:
         for key in ("dataset.percentage", "peak.percentage", "fragmentation"):
             assert type(stats[key]) is float
         assert type(stats["peak.allocated"]) is int
-        db_stats = next(v for k, v in stats.items() if k.startswith("db."))
-        assert all(type(value) is int for value in db_stats.values())
+        for key, value in stats.items():
+            if key.startswith("db.") and isinstance(value, dict):
+                assert all(type(v) is int for v in value.values())
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):
