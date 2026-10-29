@@ -3,13 +3,15 @@
 Each round runs worker.py once per (config, tree) in a fresh interpreter,
 with the tree order rotated per round so drift (thermal, other load) is
 spread evenly. The reported value per cell is the median over rounds of the
-worker's median time per operation; the spread is the relative IQR across
-rounds, which is the noise floor a delta has to beat. The report also lists
-how long every scenario, worker run and the whole benchmark took.
+worker's median time per operation, shown with the relative IQR across
+rounds. The report also lists how long every scenario, worker run and the
+whole benchmark took.
 
 With --compare, the run ends with a regression summary per pair (see
-gate.py). Cells that regress get --recheck-rounds more rounds before the
-verdict, so a single noisy round cannot fail the run.
+gate.py). Cells that regress or are inconclusive get --recheck-rounds more
+rounds before the verdict, so a single noisy round cannot fail the run, and
+with --recheck-passes the cells still flagged get them again: more rounds
+narrow the uncertainty of a delta.
 
 Run from the repository root, against a Redis server that nothing else is
 using:
@@ -76,6 +78,13 @@ def parse_args():
         type=int,
         default=3,
         help="extra rounds for regressed cells before the verdict (0 = off)",
+    )
+    p.add_argument(
+        "--recheck-passes",
+        type=int,
+        default=1,
+        help="recheck again, up to this many times, while cells stay "
+        "regressed or inconclusive; more rounds narrow their uncertainty",
     )
     p.add_argument(
         "--grid",
@@ -219,7 +228,7 @@ def rel_iqr(values):
         return (max(values) - min(values)) / statistics.median(values)
     # inclusive: the quartiles stay within the samples; the default
     # exclusive method pushes them out to the extremes on a handful of
-    # rounds, which inflates the noise and the limit
+    # rounds, which inflates the spread shown in the report
     q = statistics.quantiles(values, n=4, method="inclusive")
     return (q[2] - q[0]) / statistics.median(values)
 
@@ -270,10 +279,8 @@ class Run:
                     {
                         "config": cfg,
                         "scenario": sc,
-                        "old": statistics.median(per_tree[old][sc]),
-                        "new": statistics.median(per_tree[new][sc]),
-                        "old_noise": rel_iqr(per_tree[old][sc]),
-                        "new_noise": rel_iqr(per_tree[new][sc]),
+                        "old_samples": per_tree[old][sc],
+                        "new_samples": per_tree[new][sc],
                     }
                 )
         return out
@@ -318,30 +325,32 @@ def main():
 
 def recheck(args, run, pairs, configs):
     """Give the regressed and inconclusive cells more rounds, so the verdict
-    on them rests on rounds + recheck_rounds samples instead of one noisy
-    round."""
+    on them rests on more samples instead of a few noisy rounds. The
+    uncertainty of a delta narrows as rounds are added, so a cell that is
+    still flagged is rechecked again, up to --recheck-passes times."""
     if not args.recheck_rounds or not pairs:
         return
-    flagged = {}
-    for new, old in pairs:
-        for c in gate.evaluate(
-            run.cells(new, old), args.allowed_regression, args.max_limit
-        ):
-            if c["regressed"] or c["inconclusive"]:
-                flagged.setdefault(c["config"], set()).add(c["scenario"])
-    if not flagged:
-        return
-    scenarios_for = {cfg: ",".join(sorted(sc)) for cfg, sc in flagged.items()}
-    flagged_configs = [c for c in configs if config_label(*c) in flagged]
-    print(
-        f"rechecking {sum(len(s) for s in flagged.values())} regressed or "
-        "inconclusive cell(s) "
-        f"with {args.recheck_rounds} more rounds",
-        file=sys.stderr,
-    )
-    for _ in range(args.recheck_rounds):
-        run.round(flagged_configs, scenarios_for)
-    run.extra_rounds = args.recheck_rounds
+    for _ in range(args.recheck_passes):
+        flagged = {}
+        for new, old in pairs:
+            for c in gate.evaluate(
+                run.cells(new, old), args.allowed_regression, args.max_limit
+            ):
+                if c["regressed"] or c["inconclusive"]:
+                    flagged.setdefault(c["config"], set()).add(c["scenario"])
+        if not flagged:
+            return
+        scenarios_for = {cfg: ",".join(sorted(sc)) for cfg, sc in flagged.items()}
+        flagged_configs = [c for c in configs if config_label(*c) in flagged]
+        print(
+            f"rechecking {sum(len(s) for s in flagged.values())} regressed or "
+            "inconclusive cell(s) "
+            f"with {args.recheck_rounds} more rounds",
+            file=sys.stderr,
+        )
+        for _ in range(args.recheck_rounds):
+            run.round(flagged_configs, scenarios_for)
+        run.extra_rounds += args.recheck_rounds
 
 
 def report(args, run, heads, pairs, total):
@@ -350,10 +359,11 @@ def report(args, run, heads, pairs, total):
         f"# Read-path benchmark ({datetime.datetime.now():%Y-%m-%d %H:%M})",
         "",
         "Trees: " + ", ".join(f"`{k}`={heads[k]}" for k in trees),
-        f"Rounds: {args.rounds} (+{run.extra_rounds} recheck rounds for "
-        f"regressed and inconclusive cells), repeats per round: {args.repeats}. Values are "
-        "median microseconds per operation; noise is the relative IQR "
-        "across rounds.",
+        f"Rounds: {args.rounds} (up to +{run.extra_rounds} recheck rounds for "
+        f"regressed and inconclusive cells), repeats per round: {args.repeats}. "
+        "Values are median microseconds per operation, with the relative IQR "
+        "across rounds; the gate's limit comes from the uncertainty of the "
+        "delta.",
         "",
     ]
     header = "| config | scenario | " + " | ".join(trees) + " |"
@@ -411,7 +421,7 @@ def report(args, run, heads, pairs, total):
         {
             "samples": run.samples,
             "wall_s": run.wall,
-            "report": text + "\n\n" + "\n\n".join(s for s, _ in summaries),
+            "report": text + "\n\n" + "\n\n".join(s for s, _, _ in summaries),
         },
     )
     gate.finish(args, summaries)

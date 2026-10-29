@@ -12,6 +12,32 @@ Connection.read_response(), not by the parser, so it is out of scope here;
 run_bench times both timeouts through the connection. Each tree runs in its
 own interpreter.
 
+Only the OS socket is replaced; every parser, its on_connect() and
+read_response(), the pure-Python SocketBuffer and the hiredis reader are
+the library code of the tree under test. A real socket (a socketpair with a
+writer thread) would add kernel copies, syscalls and thread scheduling,
+which cost more than parsing a 10 MB reply and swing a lot on a shared
+runner. run_bench and mem_probe measure that real path through Connection,
+real sockets and a Redis server.
+
+Each parser still reads the way it does on a real socket: the pure-Python
+parsers call recv(), which allocates a new bytes object per read that
+SocketBuffer then copies into its BytesIO, and hiredis calls recv_into()
+into its preallocated buffer and feeds that to the C reader. So the
+user-space difference between them, an allocation and an extra copy per
+read, is timed. What is not:
+
+- the syscall per read, about the same cost for recv() and recv_into();
+- short reads: a real socket returns what has arrived, often less than
+  requested, while the in-memory one always fills the request, so a large
+  reply takes fewer reads here than over a network. More reads cost the
+  pure-Python SocketBuffer more than hiredis, so this hides part of the
+  per-read overhead of the pure-Python parsers;
+- the async transport delivering a reply in chunks as it arrives: the
+  whole reply is fed to the StreamReader at once, though each async parser
+  still reads it with its own calls (readline() and readexactly() for the
+  pure-Python ones, read() for hiredis).
+
 Run from the repository root:
 
   python -m benchmarks.measure_read_path.parser_micro \\
@@ -49,7 +75,15 @@ REPLIES = {
 
 
 class BufferSocket:
-    """The part of a socket the sync parsers use, reading from bytes."""
+    """The part of a socket the sync parsers use, reading from bytes.
+
+    It stands in for the OS socket only, so the library's parsers run
+    unchanged against it. recv() returns a new bytes object and recv_into()
+    copies into the caller's buffer, as a real socket does, so the
+    pure-Python and hiredis parsers keep their different read paths. Unlike
+    a real socket it always fills the requested size; see the module
+    docstring for what that leaves out.
+    """
 
     def __init__(self, data):
         self._view = memoryview(data)
@@ -183,7 +217,7 @@ def main():
         "--passes",
         type=int,
         default=5,
-        help="runs per tree; their spread is the noise the gate allows for",
+        help="runs per tree; their spread sets the uncertainty of a delta",
     )
     p.add_argument(
         "--output-dir",
@@ -261,10 +295,8 @@ def main():
                     {
                         "config": cfg,
                         "scenario": scenario,
-                        "old": statistics.median(values(old, cfg, scenario)),
-                        "new": statistics.median(values(new, cfg, scenario)),
-                        "old_noise": run_bench.rel_iqr(values(old, cfg, scenario)),
-                        "new_noise": run_bench.rel_iqr(values(new, cfg, scenario)),
+                        "old_samples": values(old, cfg, scenario),
+                        "new_samples": values(new, cfg, scenario),
                     }
                     for cfg, scenario in cells
                 ],
@@ -285,7 +317,7 @@ def main():
         heads,
         {
             "passes": passes,
-            "report": text + "\n\n" + "\n\n".join(s for s, _ in summaries),
+            "report": text + "\n\n" + "\n\n".join(s for s, _, _ in summaries),
         },
         suffix="parser",
     )

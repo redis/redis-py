@@ -132,6 +132,25 @@ python -m benchmarks.client_side_caching \
     --key-range 100
 ```
 
+### A/B comparison
+
+`measure_read_path/csc_bench.py` runs `client_side_caching.py` unchanged
+against two or more trees, the way the read-path tools do: each pass runs
+every config once per tree, in a fresh interpreter that imports redis from
+that tree, with the tree order rotated from pass to pass. A config is a
+topology, a workload and the cache on or off; cache off is the control that
+tells a slowdown in the cache path from one in the plain sync path. It gates
+the time per operation and the p50 latency with the shared regression gate
+(see "Regression gate" below). It uses one client thread and 1000 keys by
+default, so a run is short and GIL contention stays out of the numbers.
+Only the sync client has a client-side cache, so there is no async side.
+
+```shell
+python -m benchmarks.measure_read_path.csc_bench \
+    --trees base=../redis-py-bench-base pr=../redis-py-bench-pr \
+    --compare pr:base --mode standalone cluster
+```
+
 ## Read-Path Benchmarks
 
 `measure_read_path/` compares the read path (the parsers, the connections and
@@ -188,8 +207,8 @@ connections use the requested parser before timing. Each round runs every
 tree once per config, in an order rotated from round to round, so with N
 trees every tree runs first once in every N rounds; pick a round count that
 is a multiple of N to balance them exactly. A delta is flagged only above the
-allowed regression and above twice the larger noise (relative IQR across
-rounds) of the two trees; see "Regression gate" below. Every scenario checks
+allowed regression and above its own uncertainty; see "Regression gate"
+below. Every scenario checks
 its reply, so a broken read path cannot pass as a fast one.
 
 | scenario | read-path shape |
@@ -220,24 +239,33 @@ tree SHAs in the file name. Use `--output-dir` to write them elsewhere.
 
 ### Regression gate
 
-`run_bench`, `mem_probe` and `parser_micro` end with a regression summary for
-every `--compare candidate:baseline` pair: whether the gate passed, and for
-every regressed or inconclusive cell the baseline and candidate numbers and
-the delta. A cell regresses when the candidate is worse by more than
-`--allowed-regression` percent (default 5) and by more than twice the noise
-measured for either tree. The noise is the relative IQR of a tree's results
-across rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`). The
-noise rule may raise the limit only up to `--max-limit` percent (default 10),
-or the allowed regression when that is higher: a cell that would need a
-higher limit is inconclusive, because it is too noisy to catch a regression
-that size, and it fails the gate instead of passing unseen. With
-`--fail-on-regression` the tool exits 1 on a regression or an inconclusive
-cell. `--warn-inconclusive` still lists inconclusive cells but fails only on
-a regression; the workflow passes it, because a shared runner is too noisy
-to judge some cells. `--summary FILE` appends the summary to a file such as
+`run_bench`, `mem_probe`, `parser_micro` and `csc_bench` end with a
+regression summary for every `--compare candidate:baseline` pair: whether
+the gate passed, and for every regressed or inconclusive cell the baseline
+and candidate numbers and the delta. A cell regresses when the candidate
+is worse by more than `--allowed-regression` percent (default 5) and by
+more than the uncertainty of the delta. The delta compares the two trees'
+medians over rounds (`run_bench`) or passes (`mem_probe`, `parser_micro`,
+`csc_bench`), so its uncertainty is how far those medians could move, not
+how much one round varies: 1.5 times half the 95% bootstrap interval of the
+delta. More rounds narrow it, and with fewer than 4 per tree a cell gets no
+verdict. The
+uncertainty may raise the limit only up to `--max-limit` percent (default
+10), or the allowed regression when that is higher: a cell that would need
+a higher limit is inconclusive, because it is too noisy to catch a
+regression that size, and it fails the gate instead of passing unseen.
+
+With `--fail-on-regression` the tool exits 1 on a regression or an
+inconclusive cell. `--warn-inconclusive` still lists inconclusive cells but
+fails only on a regression; the workflow passes it, because a shared runner
+is too noisy to judge some cells. On GitHub Actions every regressed and
+inconclusive cell is also annotated, so the checks page shows it even when
+the job passes. `--summary FILE` appends the summary to a file such as
 `$GITHUB_STEP_SUMMARY`. `run_bench` gives regressed and inconclusive cells
-`--recheck-rounds` more rounds (default 3) before the verdict. The timeout
-counts from `--count-arms` are informational and never fail a run.
+`--recheck-rounds` more rounds (default 3), and again up to
+`--recheck-passes` times (default 1, 3 in the workflow) while they stay
+flagged. The timeout counts from `--count-arms` are informational and never
+fail a run.
 
 ```shell
 python -m benchmarks.measure_read_path.parser_micro --trees $TREES \
@@ -256,12 +284,13 @@ gates on request, not on every pull request:
   is GitHub's merge of the PR onto its target branch, and the base is the
   commit it was merged onto, so only the PR's own effect is measured.
 
-`ci_matrix.py` generates the jobs: one each for peak memory and the
-parser-only benchmark, and one `run_bench` job per config, every client,
-topology, pool class, parser, protocol and socket timeout combination (58
-jobs). The `run_bench` jobs leave out `get_small_seq` and `set_small_seq`:
-they send one small command per round trip, so on a shared runner they time
-the network more than the client. They also run `get_200kb` instead of
+`ci_matrix.py` generates the jobs: one each for peak memory, the
+parser-only benchmark and the client-side cache on each topology, and one
+`run_bench` job per config, every client, topology, pool class, parser,
+protocol and socket timeout combination (60 jobs). The `run_bench` jobs
+leave out `get_small_seq` and `set_small_seq`: they send one small command
+per round trip, so on a shared runner they time the network more than the
+client. They also run `get_200kb` instead of
 `get_1mb` and `get_10mb`, which swing by 10-35% between rounds of the same
 code on a shared runner. Each job measures both trees on the same runner,
 with the tools from the workflow's own commit, so the ref under test does
@@ -269,27 +298,6 @@ not need the benchmarks, and against only the standalone server and the
 cluster, so no other container competes for the runner's CPU. The workflow
 is informational: keep it out of the required status checks, so a
 regression shows as a failed check without blocking the merge.
-
-## Maintenance Notifications Harness
-
-`maint_notifications_async_perf.py` runs the async cluster client under load
-while a fault injector triggers a slot migration, and reports throughput,
-latency percentiles, errors and event-loop stalls. It needs the same Redis
-Enterprise and fault-injector setup as the scenario tests, and it creates and
-deletes its own database. It is not part of the `Benchmarks` workflow.
-
-```shell
-python -m benchmarks.maint_notifications_async_perf --flow throughput --maint on \
-    --fault-injector-url http://127.0.0.1:20324
-python -m benchmarks.maint_notifications_async_perf --flow throughput --maint off
-python -m benchmarks.maint_notifications_async_perf --flow notifications --effect slot-shuffle
-```
-
-`--fault-injector-url` defaults to `FAULT_INJECTION_API_URL`, like the
-scenario tests. `--db-name`, `--db-port`, `--shards`, `--effect` and
-`--trigger` set the database and the migration, and `--op-timeout` (default
-300 seconds, the scenario tests' slot-shuffle budget) how long to wait for
-it. Run with `--help` for the load options.
 
 ## OpenTelemetry Benchmarks
 

@@ -4,7 +4,7 @@ Runs one operation per scenario under tracemalloc and reports the peak
 traced allocation above the starting point, in MiB and as a multiple of the
 payload. Each config runs the same scenarios through the async client and
 through the sync client, in --passes runs per tree whose median is reported
-and whose spread is the noise the gate allows for. tracemalloc slows the
+and whose spread sets the uncertainty of a delta. tracemalloc slows the
 run, so these numbers are for memory only; use run_bench.py for timing.
 Memory allocated inside hiredis' C reader is not traced, so the hiredis rows
 understate its peak.
@@ -175,7 +175,10 @@ def child(argv):
     p.add_argument("--host", default="localhost")
     p.add_argument("--port", type=int, default=6379)
     p.add_argument("--db", type=int, default=13)
-    p.add_argument("--repeats", type=int, default=3)
+    # Some peaks have two modes, depending on how the reply arrives in
+    # socket reads (0.50 or 0.68 MiB for async hiredis lrange_10k); enough
+    # repeats make the least-disturbed one land on the lower mode.
+    p.add_argument("--repeats", type=int, default=10)
     args = p.parse_args(argv)
     redis = worker.import_redis(args.tree)
     asyncio.run(prepare(args, redis))
@@ -209,7 +212,7 @@ def main():
         "--passes",
         type=int,
         default=5,
-        help="runs per tree and config; their spread is the noise the gate allows for",
+        help="runs per tree and config; their spread sets the uncertainty of a delta",
     )
     p.add_argument("--output-dir", default=os.path.join(HERE, "results"))
     gate.add_gate_args(p)
@@ -288,7 +291,7 @@ def main():
     print(text)
     # The peak of one run is the least-disturbed of its repeats, but it still
     # depends on how the reply arrives in socket reads, so it moves between
-    # runs of the same code: the spread across passes is the noise term.
+    # runs of the same code: the spread across passes sets the uncertainty.
     summaries = [
         gate.render(
             "Read path, peak traced memory",
@@ -297,14 +300,8 @@ def main():
                     {
                         "config": cfg,
                         "scenario": sc,
-                        "old": statistics.median(values(res[old], sc, "peak_mib")),
-                        "new": statistics.median(values(res[new], sc, "peak_mib")),
-                        "old_noise": run_bench.rel_iqr(
-                            values(res[old], sc, "peak_mib")
-                        ),
-                        "new_noise": run_bench.rel_iqr(
-                            values(res[new], sc, "peak_mib")
-                        ),
+                        "old_samples": values(res[old], sc, "peak_mib"),
+                        "new_samples": values(res[new], sc, "peak_mib"),
                     }
                     for cfg, res in results.items()
                     for sc in res[old][0]
@@ -326,7 +323,7 @@ def main():
         heads,
         {
             "memory": results,
-            "report": text + "\n\n" + "\n\n".join(s for s, _ in summaries),
+            "report": text + "\n\n" + "\n\n".join(s for s, _, _ in summaries),
         },
         suffix="memory",
     )

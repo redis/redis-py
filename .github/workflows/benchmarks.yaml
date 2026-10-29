@@ -52,7 +52,7 @@ env:
   REDIS_VERSION: '8.10.2'
   BASE_REF: ${{ inputs.base_ref || github.base_ref }}
   TEST_REF: ${{ inputs.test_ref || github.sha }}
-  # Accepted slowdown or growth in percent, on top of the noise rule.
+  # Accepted slowdown or growth in percent, on top of the uncertainty rule.
   ALLOWED_REGRESSION: ${{ inputs.allowed_regression || '3' }}
   # get_small_seq and set_small_seq send one small command per round trip, so
   # they time the runner's network more than the client; concurrent_get keeps
@@ -156,7 +156,7 @@ jobs:
           extra="${{ matrix.args }}"
           if [ "${{ matrix.tool }}" = "run_bench" ]; then
             # even counts, so each of the two trees runs first equally often
-            extra="$extra --scenarios $SCENARIOS --rounds 8 --recheck-rounds 4"
+            extra="$extra --scenarios $SCENARIOS --rounds 8 --recheck-rounds 4 --recheck-passes 3"
           fi
           python -m benchmarks.measure_read_path.${{ matrix.tool }} \
             --trees base=../base test=../test \
