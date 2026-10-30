@@ -293,7 +293,7 @@ class OCSPVerifier:
             request.public_bytes(hazmat.primitives.serialization.Encoding.DER)
         )
         # RFC 6960 Appendix A.1: the base64 is url-encoded and appended to the
-        # responder url. urljoin collapsed any "//" in it, corrupting the request.
+        # responder url.
         if not server.endswith("/"):
             server += "/"
         url = server + quote(path.decode("ascii"), safe="")

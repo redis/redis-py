@@ -964,8 +964,8 @@ class TestOCSPCertificateBinding:
     @pytest.mark.parametrize("server", ["http://ocsp.test", "http://ocsp.test/"])
     def test_build_certificate_url_round_trips_request(self, server):
         # The serial is the last field of the request, so whatever the keys,
-        # this one makes the base64 end in "Agh/////++++/w==": a "//" that
-        # urljoin collapsed, and "/" and "+" that have to be url-encoded.
+        # this one makes the base64 end in "Agh/////++++/w==", so it always
+        # contains "//" and "+".
         import base64
 
         from cryptography.x509 import ocsp
