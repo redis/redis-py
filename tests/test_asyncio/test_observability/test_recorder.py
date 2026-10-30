@@ -37,6 +37,7 @@ from redis.observability.attributes import (
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
+from redis.observability.providers import ObservabilityInstance
 from redis.observability.registry import get_observables_registry_instance
 
 
@@ -943,6 +944,69 @@ class TestRecorderDisabled:
         recorder.reset_collector()
 
 
+class _Config:
+    enabled_telemetry = True
+
+
+class _MeterProvider:
+    def __init__(self, hook):
+        self._hook = hook
+
+    def get_meter(self, *_args, **_kwargs):
+        # The read a concurrent reset can land in, after the "resolved" flag has
+        # been set and before the collector is published.
+        self._hook()
+        return MagicMock(name="meter")
+
+
+class _ProviderManager:
+    def __init__(self, hook):
+        self.config = _Config()
+        self._provider = _MeterProvider(hook)
+
+    def get_meter_provider(self):
+        return self._provider
+
+
+class _Observability:
+    def __init__(self, manager):
+        self._manager = manager
+
+    def get_provider_manager(self):
+        return self._manager
+
+
+class _StandInCollector:
+    """Keeps the class attributes the resolver reads off the collector class.
+
+    Replacing the collector class with a plain callable raises AttributeError on
+    the ``METER_NAME`` read, which the resolver's broad ``except`` swallows, and
+    the resolution then looks like a miss for the wrong reason.
+    """
+
+    METER_NAME = "redis-py"
+    METER_VERSION = "1"
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def record_operation_duration(self, **_kwargs):
+        pass
+
+
+async def _record_with_the_real_resolver(hook):
+    """One recording, with ``hook`` called during the meter read."""
+    manager = _ProviderManager(hook)
+    with (
+        patch.object(
+            recorder, "get_observability_instance", lambda: _Observability(manager)
+        ),
+        patch.object(recorder, "RedisMetricsCollector", _StandInCollector),
+    ):
+        recorder.reset_collector()
+        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
+
+
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestCollectorResolution:
@@ -1006,7 +1070,9 @@ class TestCollectorResolution:
         recorder._async_metrics_collector = None
         recorder._async_collector_resolved = True
 
-        recorder.get_observability_instance().init(OTelConfig())
+        # A fresh instance, not the global singleton: initializing the singleton
+        # here would leave observability enabled for every later async test.
+        ObservabilityInstance().init(OTelConfig())
 
         assert recorder._async_collector_resolved is False, (
             "init() must drop the recorder's cached miss, or the recorder "
@@ -1015,42 +1081,52 @@ class TestCollectorResolution:
         assert recorder._async_metrics_collector is None
         recorder.reset_collector()
 
-    async def test_resolution_spanning_a_reset_is_not_cached_as_a_miss(
-        self, monkeypatch
-    ):
-        """A resolution that spans a reset must not leave the cache resolved.
+    async def test_resolution_spanning_a_reset_does_not_cache_its_answer(self):
+        """A reset during the resolution must leave the cache unresolved.
 
-        The async twin of the sync test: the resolving call sets
-        ``_async_collector_resolved`` *before* it consults the provider manager
-        and assigns the collector only on a hit, so a resolution that a reset
-        replaced cannot re-set the flag the reset just cleared and cache its miss
-        on top of the fresh cache.
+        The async twin of the sync test: this drives the real resolver, with the
+        reset injected during the provider-manager read. The resolution starts
+        before the reset and finishes after it, so the collector it builds
+        belongs to the configuration the reset replaced. Publishing it would pin
+        a stale value into the cache; leaving the flag set would be worse,
+        because the next caller would read a cached miss and metrics would stay
+        off until the next init.
         """
         recorder.reset_collector()
+        resets = []
 
-        state = {"resets": 0}
+        def inject_reset():
+            if not resets:
+                resets.append(1)
+                recorder.reset_collector()
 
-        def resolver_cycling_through_a_reset():
-            # The reset lands while this resolution is in flight, i.e. after the
-            # flag was set and before an answer is published.
-            recorder.reset_collector()
-            state["resets"] += 1
-            return None
+        await _record_with_the_real_resolver(inject_reset)
 
-        monkeypatch.setattr(
-            recorder, "_get_or_create_collector", resolver_cycling_through_a_reset
+        assert resets == [1], "the reset must land inside the resolution"
+        assert recorder._async_metrics_collector is None, (
+            "the collector was built against the configuration the reset "
+            "replaced, so it must not be published as the cache"
         )
-
-        await recorder.record_operation_duration("GET", 0.001, "localhost", 6379)
-
-        assert state["resets"] == 1, "the reset must land inside the resolution"
-        assert recorder._async_metrics_collector is None
         assert recorder._async_collector_resolved is False, (
-            "the resolution spanned a reset, so its answer describes the "
-            "configuration that was replaced. Caching it (the flag left set, or "
-            "an assigned collector) is the stale miss that keeps metrics off "
-            "until the next init"
+            "the cache must be left unresolved; a cached miss here is what "
+            "silences metrics until the next init"
         )
+        recorder.reset_collector()
+
+    async def test_resolution_without_a_reset_does_cache_its_answer(self):
+        """The control: with no reset the resolution publishes normally.
+
+        Without this, the test above would also pass if the resolver simply
+        never cached anything.
+        """
+        recorder.reset_collector()
+        await _record_with_the_real_resolver(lambda: None)
+
+        assert recorder._async_metrics_collector is not None, (
+            "an uninterrupted resolution must cache the collector it built"
+        )
+        assert recorder._async_collector_resolved is True
+
         recorder.reset_collector()
 
 

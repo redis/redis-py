@@ -876,15 +876,6 @@ def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     next call resolves again. This mirrors
     ``redis.asyncio.observability.recorder._get_or_create_collector``.
 
-    One window is left open, and it is narrow: a reset landing *between* the
-    flag assignment below and the provider-manager read still re-sets the flag
-    the reset cleared, so that answer is cached even though it describes the
-    configuration that was just replaced - a cached miss that silences metrics
-    until the next init. Closing it needs either a re-check that re-enters the
-    lookup or a lock on the cold path; both cost more than the window is worth
-    here, and the flag-before-lookup order already removes the wide version of
-    the race (the one where the flag was set after the lookup succeeded).
-
     Returns:
         RedisMetricsCollector instance if observability is enabled, None otherwise
     """

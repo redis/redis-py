@@ -540,9 +540,7 @@ class TestPipelineMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             # Create pipeline with mocked connection pool
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
@@ -611,9 +609,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             # Create pipeline with transaction=False
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
@@ -652,9 +648,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
                 response_callbacks={},
@@ -714,9 +708,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             # First pipeline execution
             pipeline1 = Pipeline(
                 connection_pool=mock_connection_pool,
@@ -759,9 +751,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
                 response_callbacks={},
@@ -824,9 +814,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
                 response_callbacks={},
@@ -914,9 +902,7 @@ class TestPipelineMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             pipeline = Pipeline(
                 connection_pool=mock_connection_pool,
                 response_callbacks={},

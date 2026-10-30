@@ -2303,9 +2303,7 @@ class TestPubSubMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             # Create event dispatcher (real one, to test the full chain)
             event_dispatcher = EventDispatcher()
 
@@ -2374,9 +2372,7 @@ class TestPubSubMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             event_dispatcher = EventDispatcher()
 
             pubsub = PubSub(
@@ -2467,9 +2463,7 @@ class TestPubSubMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             event_dispatcher = EventDispatcher()
 
             pubsub = PubSub(
@@ -2555,9 +2549,7 @@ class TestPubSubMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             event_dispatcher = EventDispatcher()
 
             pubsub = PubSub(
@@ -2623,9 +2615,7 @@ class TestPubSubMetricsRecording:
         with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with mock.patch.object(
-            recorder, "_get_or_create_collector", return_value=collector
-        ):
+        with mock.patch.object(recorder, "_metrics_collector", collector):
             event_dispatcher = EventDispatcher()
 
             pubsub = PubSub(
