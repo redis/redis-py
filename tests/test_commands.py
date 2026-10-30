@@ -5015,8 +5015,10 @@ class TestRedisCommands:
         r.sadd("test:set", "member1", "member2")
         r.spexpire("test:set", 1800, "member1")
         ttl = r.sttl("test:set", "member1", "member2", "member3")
-        # STTL rounds up to the next second
-        assert ttl == [2, -1, -2]
+        # STTL rounds up, so a live member never reports 0; the exact rounding is
+        # pinned by test_sexpiretime_and_spexpiretime_multiple_members
+        assert ttl[0] in (1, 2)
+        assert ttl[1:] == [-1, -2]
         pttl = r.spttl("test:set", "member1", "member2", "member3")
         assert 0 < pttl[0] <= 1800
         assert pttl[1:] == [-1, -2]
