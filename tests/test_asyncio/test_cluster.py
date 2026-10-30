@@ -89,6 +89,7 @@ from tests.conftest import (
     assert_resp_response,
     expects_resp2_shape,
     expects_unified_shape,
+    get_protocol_version,
     patch_monotonic,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
@@ -228,6 +229,7 @@ async def get_mocked_redis_client(
         ) as cmd_parser_initialize:
 
             def cmd_init_mock(self, r: ClusterNode) -> None:
+                self.node = r
                 self.commands = {
                     "get": {
                         "name": "get",
@@ -3511,6 +3513,11 @@ class TestClusterRedisCommands:
         info = await r.info(target_nodes=node)
         assert isinstance(info, dict)
         assert info["db0"]["keys"] == 3
+
+    async def test_info_with_custom_callback(self, decoded_r: RedisCluster) -> None:
+        decoded_r.set_response_callback("INFO", lambda response: response)
+        info = await decoded_r.info("server", target_nodes=decoded_r.get_random_node())
+        assert "redis_version" in info
 
     async def _init_slowlog_test(self, r: RedisCluster, node: ClusterNode) -> str:
         slowlog_lim = await r.config_get("slowlog-log-slower-than", target_nodes=node)
@@ -7188,6 +7195,63 @@ class TestClusterConnectionErrorHandling:
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
+    @pytest.mark.parametrize("dynamic_startup_nodes", [False, True])
+    @pytest.mark.parametrize("use_default_node", [False, True])
+    async def test_lazy_transaction_does_not_reuse_private_loop_connections(
+        self,
+        r: RedisCluster,
+        request,
+        dynamic_startup_nodes,
+        use_default_node,
+    ) -> None:
+        default_node = r.get_default_node()
+        key = next(
+            f"lazy-transaction-{i}"
+            for i in range(1000)
+            if (r.get_node_from_key(f"lazy-transaction-{i}") == default_node)
+            == use_default_node
+        )
+        client = RedisCluster.from_url(
+            request.config.getoption("--redis-url"),
+            protocol=get_protocol_version(r),
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        try:
+            pipe = client.pipeline(transaction=True)
+            assert pipe.set(key, "value") is pipe
+            nodes = (
+                list(client.nodes_manager.startup_nodes.values()) + client.get_nodes()
+            )
+            assert all(
+                not connection.is_connected
+                for node in nodes
+                for connection in node._connections
+            )
+            assert await pipe.execute() == [True]
+            assert await client.get(key) == b"value"
+            assert await client.ping(target_nodes=RedisCluster.PRIMARIES)
+            # Queuing again must preserve the caller's connections and WATCH state.
+            await pipe.watch(key)
+            assert await pipe.get(key) == b"value"
+            pipe.multi()
+            assert pipe.set(key, "updated") is pipe
+            assert await pipe.execute() == [True]
+            assert await client.get(key) == b"updated"
+            # Queuing movablekeys commands (COMMAND GETKEYS) on an initialized
+            # transaction pipeline must neither reuse caller-loop sockets on the
+            # private worker loop nor leave private-loop sockets open afterward.
+            zset_a = f"{{{key}}}:zset-a"
+            zset_b = f"{{{key}}}:zset-b"
+            zset_out = f"{{{key}}}:zset-out"
+            await client.zadd(zset_a, {"member": 1})
+            await client.zadd(zset_b, {"member": 2})
+            assert pipe.zunionstore(zset_out, [zset_a, zset_b]) is pipe
+            assert await pipe.execute() == [1]
+            assert await client.zscore(zset_out, "member") == 3.0
+            await client.delete(key, zset_a, zset_b, zset_out)
+        finally:
+            await client.aclose()
+
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
 
@@ -7573,6 +7637,217 @@ class TestClusterPipeline:
 @pytest.mark.fixed_client
 class TestClusterPipelineMocked:
     """ClusterPipeline behaviour checked against mocked nodes; no server needed."""
+
+    @pytest.mark.parametrize("initialized", [False, True])
+    @pytest.mark.parametrize("slot_error", [False, True])
+    @pytest.mark.parametrize("disconnect_error", [False, True])
+    async def test_transaction_closes_only_connections_initialized_on_private_loop(
+        self, initialized, slot_error, disconnect_error
+    ) -> None:
+        client = RedisCluster(host=default_host, port=default_port)
+        startup_node = next(iter(client.nodes_manager.startup_nodes.values()))
+        # Equal addresses need not mean identical node objects or connection pools.
+        cached_node = ClusterNode(default_host, default_port)
+        connections = []
+        disconnect_loops = []
+        initialize_loops = []
+        for node in (startup_node, cached_node):
+            connection = mock.AsyncMock(spec=Connection)
+            connection.is_connected = True
+
+            async def disconnect(connection=connection):
+                disconnect_loops.append(asyncio.get_running_loop())
+                connection.is_connected = False
+                if (
+                    disconnect_error
+                    and not initialized
+                    and connection.disconnect.await_count == 1
+                ):
+                    raise TimeoutError("close timed out")
+
+            connection.disconnect.side_effect = disconnect
+            node._connections.append(connection)
+            connections.append(connection)
+
+        def set_topology():
+            client.commands_parser.node = cached_node
+            client.nodes_manager.default_node = cached_node
+            client.nodes_manager.nodes_cache[cached_node.name] = cached_node
+            client._initialize = False
+            client._topology_ready = True
+
+        async def initialize(self):
+            initialize_loops.append(asyncio.get_running_loop())
+            set_topology()
+            return self
+
+        async def determine_slot(self, *args):
+            if slot_error:
+                raise RedisClusterException("slot resolution failed")
+            return 123
+
+        if initialized:
+            set_topology()
+        try:
+            with (
+                mock.patch.object(RedisCluster, "initialize", initialize),
+                mock.patch.object(RedisCluster, "_determine_slot", determine_slot),
+            ):
+                pipe = client.pipeline(transaction=True)
+                if slot_error:
+                    with pytest.raises(
+                        RedisClusterException, match="slot resolution failed"
+                    ):
+                        pipe.get("key")
+                else:
+                    assert pipe.get("key") is pipe
+                    assert pipe._execution_strategy._command_queue[0].args == (
+                        "GET",
+                        "key",
+                    )
+
+            assert client.get_default_node() is cached_node
+            assert len(initialize_loops) == (0 if initialized else 1)
+            assert len(disconnect_loops) == (0 if initialized else 2)
+            for connection in connections:
+                assert connection.is_connected is initialized
+            if not initialized:
+                assert all(loop is initialize_loops[0] for loop in disconnect_loops)
+        finally:
+            await client.aclose()
+
+    @pytest.mark.parametrize("caller_connected", [False, True])
+    @pytest.mark.parametrize("slot_error", [False, True])
+    @pytest.mark.parametrize("disconnect_error", [False, True])
+    async def test_transaction_movablekeys_isolates_caller_and_private_loop_connections(
+        self, caller_connected, slot_error, disconnect_error
+    ) -> None:
+        client = RedisCluster(host=default_host, port=default_port, max_connections=3)
+        parser_node = ClusterNode(
+            default_host, default_port, **client.nodes_manager.connection_kwargs
+        )
+        caller_loop = asyncio.get_running_loop()
+        parser_io_nodes = []
+        parser_io_loops = []
+        disconnect_nodes = []
+        disconnect_loops = []
+        private_connections = []
+
+        for _ in range(parser_node.max_connections):
+            connection = mock.AsyncMock(spec=Connection)
+            connection.is_connected = caller_connected
+            connection.should_reconnect.return_value = False
+            connection.pack_command.return_value = [b"COMMAND GETKEYS"]
+            connection.read_response.return_value = ["{tag}a", "{tag}b"]
+
+            async def disconnect_caller(connection=connection):
+                connection.is_connected = False
+
+            connection.disconnect.side_effect = disconnect_caller
+            parser_node._connections.append(connection)
+        parser_node._free.extend(reversed(parser_node._connections))
+        caller_connections = list(parser_node._connections)
+        caller_free = list(parser_node._free)
+        connections_pool = parser_node._connections
+        free_pool = parser_node._free
+
+        def make_private_connection(**kwargs):
+            connection = mock.AsyncMock(spec=Connection)
+            connection.is_connected = False
+            connection.should_reconnect.return_value = False
+
+            async def send_packed_command(*args, **kwargs):
+                parser_io_nodes.append(client.commands_parser.node)
+                parser_io_loops.append(asyncio.get_running_loop())
+                connection.is_connected = True
+
+            async def disconnect():
+                disconnect_loops.append(asyncio.get_running_loop())
+                connection.is_connected = False
+                if disconnect_error:
+                    raise TimeoutError("close timed out")
+
+            connection.send_packed_command.side_effect = send_packed_command
+            connection.disconnect.side_effect = disconnect
+            connection.pack_command.return_value = [b"COMMAND GETKEYS"]
+            if slot_error:
+                connection.read_response.side_effect = RedisClusterException(
+                    "slot resolution failed"
+                )
+            else:
+                connection.read_response.return_value = ["{tag}a", "{tag}b"]
+            private_connections.append(connection)
+            return connection
+
+        node_disconnect = ClusterNode.disconnect
+
+        async def disconnect_node(node):
+            disconnect_nodes.append(node)
+            # Restore the caller's parser before cleanup, even if cleanup raises.
+            assert client.commands_parser.node is parser_node
+            await node_disconnect(node)
+
+        client.nodes_manager.connection_kwargs["connection_class"] = (
+            make_private_connection
+        )
+        parser_node.connection_class = make_private_connection
+        client.nodes_manager.default_node = parser_node
+        client.nodes_manager.nodes_cache[parser_node.name] = parser_node
+        client._initialize = False
+        client._topology_ready = True
+        client.commands_parser.node = parser_node
+        client.commands_parser.commands = {
+            "zunionstore": {"name": "zunionstore", "flags": ["movablekeys"]}
+        }
+
+        try:
+            with mock.patch.object(ClusterNode, "disconnect", disconnect_node):
+                pipe = client.pipeline(transaction=True)
+                if slot_error:
+                    with pytest.raises(
+                        RedisClusterException, match="slot resolution failed"
+                    ):
+                        pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"])
+                    assert not pipe._execution_strategy._command_queue
+                else:
+                    assert pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"]) is pipe
+                    assert pipe._execution_strategy._command_queue[0].args == (
+                        "ZUNIONSTORE",
+                        "{tag}out",
+                        2,
+                        "{tag}a",
+                        "{tag}b",
+                    )
+
+            assert client.commands_parser.node is parser_node
+            assert client.get_default_node() is parser_node
+            assert parser_node._connections is connections_pool
+            assert parser_node._connections == caller_connections
+            assert parser_node._free is free_pool
+            assert list(parser_node._free) == caller_free
+            assert parser_node._free.maxlen == parser_node.max_connections
+            for connection in caller_connections:
+                assert connection.is_connected is caller_connected
+                connection.send_packed_command.assert_not_awaited()
+                connection.disconnect.assert_not_awaited()
+
+            assert len(parser_io_nodes) == 1
+            temporary_node = parser_io_nodes[0]
+            assert temporary_node is not parser_node
+            assert temporary_node.host == parser_node.host
+            assert temporary_node.port == parser_node.port
+            assert temporary_node.max_connections == parser_node.max_connections
+            assert temporary_node.connection_class is make_private_connection
+            assert len(disconnect_nodes) == 1
+            assert disconnect_nodes[0] is temporary_node
+            assert len(parser_io_loops) == 1
+            assert parser_io_loops[0] is not caller_loop
+            assert disconnect_loops == parser_io_loops
+            assert len(private_connections) == 1
+            private_connections[0].disconnect.assert_awaited_once()
+            assert not private_connections[0].is_connected
+        finally:
+            await client.aclose()
 
     async def test_async_script_queues_evalsha_on_cluster_pipeline(self) -> None:
         """AsyncScript must queue EVALSHA on ClusterPipeline without dropping it."""

@@ -1190,6 +1190,35 @@ class TestRedisCommands:
         assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
+    def test_info_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response: response)
+        assert "redis_version:" in decoded_r.info("server")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
+    def test_info_with_non_utf8_errorstat(self, request, r, decoded_r):
+        r.config_resetstat()
+        with pytest.raises(redis.ResponseError):
+            r.eval(b"return redis.error_reply('\xff\xfeBAD oops')", 0)
+        try:
+            info = decoded_r.info("errorstats")
+            assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
+            assert "redis_version" in decoded_r.info()
+
+            with _get_client(
+                redis.Redis,
+                request,
+                flushdb=False,
+                decode_responses=True,
+                encoding_errors="backslashreplace",
+            ) as client:
+                info = client.info("errorstats")
+                assert info["errorstat_\\xff\\xfeBAD"] == {"count": 1}
+        finally:
+            r.config_resetstat()
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     def test_info_multi_sections(self, r):
         res = r.info("clients", "server")
@@ -8670,6 +8699,22 @@ class TestRedisCommands:
         for key, value in stats.items():
             if key.startswith("db."):
                 assert not isinstance(value, list)
+
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
+    @pytest.mark.parametrize("protocol", [2, 3])
+    def test_memory_stats_unified_responses(self, request, protocol):
+        r = _get_client(redis.Redis, request, protocol=protocol, legacy_responses=False)
+        r.set("foo", "bar")
+        stats = r.memory_stats()
+        # Redis replies with doubles for these, which RESP2 sends as bulk strings.
+        for key in ("dataset.percentage", "peak.percentage", "fragmentation"):
+            assert type(stats[key]) is float
+        assert type(stats["peak.allocated"]) is int
+        for key, value in stats.items():
+            if key.startswith("db.") and isinstance(value, dict):
+                assert all(type(v) is int for v in value.values())
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_usage(self, r):

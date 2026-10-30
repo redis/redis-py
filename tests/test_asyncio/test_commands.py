@@ -822,6 +822,35 @@ class TestRedisCommands:
         assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
+    async def test_info_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response: response)
+        assert "redis_version:" in await decoded_r.info("server")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
+    async def test_info_with_non_utf8_errorstat(
+        self, create_redis, r: redis.Redis, decoded_r: redis.Redis
+    ):
+        await r.config_resetstat()
+        with pytest.raises(redis.ResponseError):
+            await r.eval(b"return redis.error_reply('\xff\xfeBAD oops')", 0)
+        try:
+            info = await decoded_r.info("errorstats")
+            assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
+            assert "redis_version" in await decoded_r.info()
+
+            client = await create_redis(
+                flushdb=False,
+                decode_responses=True,
+                encoding_errors="backslashreplace",
+            )
+            info = await client.info("errorstats")
+            assert info["errorstat_\\xff\\xfeBAD"] == {"count": 1}
+        finally:
+            await r.config_resetstat()
+
+    @pytest.mark.onlynoncluster
     async def test_lastsave(self, r: redis.Redis):
         assert isinstance(await r.lastsave(), datetime.datetime)
 
@@ -6744,6 +6773,22 @@ class TestRedisCommands:
         for key, value in stats.items():
             if key.startswith("db."):
                 assert not isinstance(value, list)
+
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
+    @pytest.mark.parametrize("protocol", [2, 3])
+    async def test_memory_stats_unified_responses(self, create_redis, protocol):
+        r = await create_redis(protocol=protocol, legacy_responses=False)
+        await r.set("foo", "bar")
+        stats = await r.memory_stats()
+        # Redis replies with doubles for these, which RESP2 sends as bulk strings.
+        for key in ("dataset.percentage", "peak.percentage", "fragmentation"):
+            assert type(stats[key]) is float
+        assert type(stats["peak.allocated"]) is int
+        for key, value in stats.items():
+            if key.startswith("db.") and isinstance(value, dict):
+                assert all(type(v) is int for v in value.values())
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):

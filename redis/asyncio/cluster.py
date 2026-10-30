@@ -48,7 +48,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers import AsyncCommandsParser, Encoder
-from redis._parsers.helpers import get_response_callbacks
+from redis._parsers.helpers import decode_info, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.client import PubSub, ResponseCallbackT
 from redis.asyncio.connection import (
@@ -2351,6 +2351,8 @@ class ClusterNode:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
                 kwargs.pop(NEVER_DECODE)
+                if command == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = await connection.read_response()
         except ResponseError:
@@ -4029,15 +4031,53 @@ class TransactionStrategy(AbstractStrategy):
         # on the caller's loop: running it here would do I/O on connections
         # bound to that loop. Only a client that never initialized has no
         # topology to queue against.
-        if (
+        initialize_here = (
             cluster_client._initialize
             and cluster_client.nodes_manager.default_node is None
-        ):
-            await cluster_client.initialize()
-
+        )
+        startup_nodes = (
+            tuple(cluster_client.nodes_manager.startup_nodes.values())
+            if initialize_here
+            else ()
+        )
+        parser_node = (
+            None
+            if initialize_here or args[0] in self.NO_SLOTS_COMMANDS
+            else cluster_client.commands_parser.node
+        )
+        if parser_node is not None:
+            # Parser I/O during slot resolution belongs to this private loop,
+            # not to the caller's node or its connection pool.
+            cluster_client.commands_parser.node = ClusterNode(
+                parser_node.host,
+                parser_node.port,
+                **cluster_client.nodes_manager.connection_kwargs,
+            )
         slot_number: Optional[int] = None
-        if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._resolve_transaction_slot(*args)
+        try:
+            if initialize_here:
+                await cluster_client.initialize()
+            if args[0] not in self.NO_SLOTS_COMMANDS:
+                slot_number = await self._resolve_transaction_slot(*args)
+        finally:
+            if initialize_here:
+                # Keep the discovered topology and metadata, but not sockets bound
+                # to the private loop that closes when this command is queued.
+                # Same-address nodes can have distinct pools; deduplicate by identity.
+                nodes = {
+                    id(node): node
+                    for node in chain(startup_nodes, cluster_client.get_nodes())
+                }
+                await asyncio.gather(
+                    *(node.disconnect() for node in nodes.values()),
+                    return_exceptions=True,
+                )
+            elif parser_node is not None:
+                temporary_node = cluster_client.commands_parser.node
+                cluster_client.commands_parser.node = parser_node
+                await asyncio.gather(
+                    temporary_node.disconnect(), return_exceptions=True
+                )
 
         if (
             self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS

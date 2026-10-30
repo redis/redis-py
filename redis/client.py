@@ -30,7 +30,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -968,6 +968,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = connection.read_response()
         except ResponseError:
