@@ -119,6 +119,7 @@ from .utils import (
     deprecated_args,
     ensure_string,
     format_error_message,
+    get_shared_ssl_context,
     is_os_level_timeout,
     str_if_bytes,
 )
@@ -2947,15 +2948,12 @@ class SSLConnection(Connection):
             sock.close()
             raise
 
-    def _wrap_socket_with_ssl(self, sock):
+    def _build_ssl_context(self):
         """
-        Wraps the socket with SSL support.
-
-        Args:
-            sock: The plain socket to wrap with SSL.
+        Builds an SSL context from the connection's TLS settings.
 
         Returns:
-            An SSL wrapped socket.
+            A new ssl.SSLContext.
         """
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
@@ -2984,6 +2982,34 @@ class SSLConnection(Connection):
             context.minimum_version = self.ssl_min_version
         if self.ssl_ciphers:
             context.set_ciphers(self.ssl_ciphers)
+        return context
+
+    def _wrap_socket_with_ssl(self, sock):
+        """
+        Wraps the socket with SSL support.
+
+        Args:
+            sock: The plain socket to wrap with SSL.
+
+        Returns:
+            An SSL wrapped socket.
+        """
+        context = get_shared_ssl_context(
+            self._build_ssl_context,
+            (
+                type(self),
+                self.cert_reqs,
+                self.check_hostname,
+                tuple(self.ssl_include_verify_flags or ()),
+                tuple(self.ssl_exclude_verify_flags or ()),
+                self.certificate_password,
+                self.ca_data,
+                self.ca_path,
+                self.ssl_min_version,
+                self.ssl_ciphers,
+            ),
+            (self.certfile, self.keyfile, self.ca_certs),
+        )
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
 

@@ -1,10 +1,12 @@
 import datetime
 import inspect
 import logging
+import os
 import sys
 import textwrap
 import warnings
-from collections.abc import Callable
+import weakref
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from functools import cache, wraps
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
@@ -48,6 +50,49 @@ from importlib import metadata
 # explicit value. Import this object from redis.utils instead of creating local
 # sentinels, and compare it by identity only (`is` / `is not`).
 SENTINEL = object()
+
+# Weak values: a context stays cached only while a live connection holds it.
+_SHARED_SSL_CONTEXTS: "weakref.WeakValueDictionary[Any, ssl.SSLContext]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _file_signature(path: Any) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except (OSError, TypeError, ValueError):
+        # Left for the context build to report, as it would without the cache
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def get_shared_ssl_context(
+    build: Callable[[], "ssl.SSLContext"], settings: Any, files: Iterable[Any]
+) -> "ssl.SSLContext":
+    """
+    Return an SSLContext shared by the connections with the same TLS configuration.
+
+    Building a context loads the CA bundle into a new certificate store, which costs
+    far more memory than the TLS connection using it.
+
+    Args:
+        build: Builds the context when no live one matches.
+        settings: Hashable values that determine the context.
+        files: The certificate files the context is loaded from. They are identified
+            by modification time and size, so that a rotated file is picked up by
+            the next context built for it. The default CA bundle is always included.
+    """
+    paths = (*files, ssl.get_default_verify_paths().cafile)
+    key = (settings, tuple((path, _file_signature(path)) for path in paths if path))
+    try:
+        context = _SHARED_SSL_CONTEXTS.get(key)
+    except TypeError:
+        # An unhashable setting, such as ssl_ca_data given as a bytearray
+        return build()
+    if context is None:
+        context = build()
+        _SHARED_SSL_CONTEXTS[key] = context
+    return context
 
 
 def from_url(url: str, **kwargs: Any) -> "Redis":
