@@ -3048,7 +3048,6 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        kwargs.pop("unix_socket_path", None)
         connection_pool = kwargs.pop("connection_pool", None)
         if connection_pool is not None:
             r = Redis(connection_pool=connection_pool)

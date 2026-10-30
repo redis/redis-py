@@ -5888,6 +5888,16 @@ class TestNodesManager:
             assert node.redis_connection.auto_close_connection_pool is False
 
     @pytest.mark.fixed_client
+    def test_url_node_clients_close_their_pool(self):
+        rc = get_mocked_redis_client(
+            url="redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert node.redis_connection.auto_close_connection_pool is True
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
     def test_allow_custom_queue_class(self, queue_class):
         rc = get_mocked_redis_client(
