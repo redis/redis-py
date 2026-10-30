@@ -1020,7 +1020,7 @@ class RedisCluster(
                 "SSLConnection subclass"
             )
 
-        if kwargs.get("unix_socket_path") is not None:
+        if kwargs.pop("unix_socket_path", None) is not None:
             raise RedisClusterException(
                 "RedisCluster does not currently support Unix Domain Socket connections"
             )

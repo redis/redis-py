@@ -1065,6 +1065,18 @@ class TestRedisClusterObjMocked:
 
         assert "Unix Domain Socket" in str(ex.value)
 
+    def test_unix_socket_path_none_uses_tcp(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            unix_socket_path=None,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            connection = node.redis_connection.connection_pool.make_connection()
+            assert isinstance(connection, Connection)
+
     def test_get_node_name(self):
         assert (
             get_node_name(default_host, default_port)
