@@ -56,6 +56,7 @@ from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
     ConnectionPool,
+    SSLConnection,
     parse_url,
 )
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -566,6 +567,7 @@ class AbstractRedisCluster:
                 "COMMAND COUNT",
                 "COMMAND LIST",
                 "COMMAND GETKEYS",
+                "COMMAND GETKEYSANDFLAGS",
                 "CONFIG GET",
                 "DEBUG",
                 "RANDOMKEY",
@@ -1009,6 +1011,19 @@ class RedisCluster(
             # The retries should be handled on cluster client level.
             raise RedisClusterException(
                 "The 'retry' argument cannot be used in kwargs when running in cluster mode."
+            )
+
+        if kwargs.get("ssl") and not issubclass(
+            kwargs.get("connection_class", SSLConnection), SSLConnection
+        ):
+            raise RedisClusterException(
+                "The 'ssl' argument requires 'connection_class' to be an "
+                "SSLConnection subclass"
+            )
+
+        if kwargs.pop("unix_socket_path", None) is not None:
+            raise RedisClusterException(
+                "RedisCluster does not currently support Unix Domain Socket connections"
             )
 
         # Get the startup node/s
@@ -3034,23 +3049,28 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        if self.from_url:
+        connection_pool = kwargs.pop("connection_pool", None)
+        if connection_pool is not None:
+            r = Redis(connection_pool=connection_pool)
+        else:
+            # parse_url already turns rediss:// into SSLConnection, do the same
+            # for ssl=True
+            if not self.from_url and kwargs.pop("ssl", False):
+                kwargs.setdefault("connection_class", SSLConnection)
             # Create a redis node with a custom connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
             kwargs.update({"metadata_resolver": self._metadata_resolver})
             kwargs.update({"retry": node_retry_config})
-            r = Redis(connection_pool=self.connection_pool_class(**kwargs))
-        else:
-            r = Redis(
-                host=host,
-                port=port,
-                cache=self._cache,
-                metadata_resolver=self._metadata_resolver,
-                retry=node_retry_config,
-                **kwargs,
-            )
+            pool = self.connection_pool_class(**kwargs)
+            if not self.from_url and not issubclass(
+                pool.connection_class, SSLConnection
+            ):
+                # a plain connection rejects the TLS options Redis() used to ignore
+                for key in [k for k in pool.connection_kwargs if k.startswith("ssl_")]:
+                    del pool.connection_kwargs[key]
+            r = Redis.from_pool(pool)
         # Share the one cluster-wide HIMPORT registry with this node's pool. Injected
         # here (rather than forwarded via connection_kwargs) so every node reuses the
         # same object; the node has no connections yet, so this is safe.

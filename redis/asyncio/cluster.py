@@ -4465,6 +4465,9 @@ class TransactionStrategy(AbstractStrategy):
             if not isinstance(r, Exception):
                 command_name = cmd.args[0]
                 if command_name in self._pipe.cluster_client.response_callbacks:
+                    # The keys option is only for the client cache and is
+                    # not an option of the callbacks
+                    cmd.kwargs.pop("keys", None)
                     r = self._pipe.cluster_client.response_callbacks[command_name](
                         r, **cmd.kwargs
                     )
