@@ -1758,6 +1758,9 @@ class ManagementCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/info
         """
+        from redis.client import NEVER_DECODE
+
+        kwargs[NEVER_DECODE] = []
         if section is None:
             return self.execute_command("INFO", **kwargs)
         else:

@@ -51,7 +51,12 @@ from redis.commands.metadata import (
     StaticMetadataResolver,
 )
 from redis.commands.policies import StaticPolicyResolver
-from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
+from redis.connection import (
+    BlockingConnectionPool,
+    Connection,
+    ConnectionPool,
+    SSLConnection,
+)
 from redis.crc import key_slot
 from redis.credentials import StreamingCredentialProvider
 from redis.event import (
@@ -1039,6 +1044,39 @@ class TestRedisClusterObjMocked:
             "RedisCluster requires at least one node to discover the cluster"
         ), str_if_bytes(ex.value)
 
+    def test_ssl_with_non_ssl_connection_class_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                ssl=True,
+                connection_class=Connection,
+            )
+
+        assert "SSLConnection subclass" in str(ex.value)
+
+    def test_unix_socket_path_raises(self):
+        with pytest.raises(RedisClusterException) as ex:
+            RedisCluster(
+                host=default_host,
+                port=default_port,
+                unix_socket_path="/tmp/redis.sock",
+            )
+
+        assert "Unix Domain Socket" in str(ex.value)
+
+    def test_unix_socket_path_none_uses_tcp(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            unix_socket_path=None,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            connection = node.redis_connection.connection_pool.make_connection()
+            assert isinstance(connection, Connection)
+
     def test_get_node_name(self):
         assert (
             get_node_name(default_host, default_port)
@@ -1735,6 +1773,11 @@ class TestClusterRedisCommands:
         info = r.info(target_nodes=node)
         assert isinstance(info, dict)
         assert info["db0"]["keys"] == 3
+
+    def test_info_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response, **options: response)
+        info = decoded_r.info("server", target_nodes=decoded_r.get_random_node())
+        assert "redis_version" in info
 
     def _init_slowlog_test(self, r, node):
         slowlog_lim = r.config_get("slowlog-log-slower-than", target_nodes=node)
@@ -5763,6 +5806,113 @@ class TestNodesManager:
             assert isinstance(
                 node.redis_connection.connection_pool, connection_pool_class
             )
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "connection_pool_class", [ConnectionPool, BlockingConnectionPool]
+    )
+    def test_connection_pool_class_with_host_and_port(self, connection_pool_class):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=connection_pool_class,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert isinstance(
+                node.redis_connection.connection_pool, connection_pool_class
+            )
+
+    @pytest.mark.fixed_client
+    def test_connection_class_with_host_and_port(self):
+        class MyConnection(Connection):
+            pass
+
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_class=MyConnection,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            pool = node.redis_connection.connection_pool
+            assert pool.connection_class is MyConnection
+            assert isinstance(pool.make_connection(), MyConnection)
+
+    @pytest.mark.fixed_client
+    def test_ssl_options_without_ssl_with_host_and_port(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            ssl=False,
+            ssl_cert_reqs="none",
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            pool = node.redis_connection.connection_pool
+            assert pool.connection_class is Connection
+            assert isinstance(pool.make_connection(), Connection)
+
+    @pytest.mark.fixed_client
+    def test_ssl_connection_class_keeps_ssl_options_with_host_and_port(self):
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_class=SSLConnection,
+            ssl_cert_reqs="none",
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            connection = node.redis_connection.connection_pool.make_connection()
+            assert isinstance(connection, SSLConnection)
+            assert connection.cert_reqs == ssl.CERT_NONE
+
+    @pytest.mark.fixed_client
+    def test_ssl_pool_default_keeps_ssl_options_with_host_and_port(self):
+        class SSLConnectionPool(ConnectionPool):
+            def __init__(self, connection_class=SSLConnection, **kwargs):
+                super().__init__(connection_class=connection_class, **kwargs)
+
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_pool_class=SSLConnectionPool,
+            ssl_cert_reqs="none",
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            connection = node.redis_connection.connection_pool.make_connection()
+            assert isinstance(connection, SSLConnection)
+            assert connection.cert_reqs == ssl.CERT_NONE
+
+    @pytest.mark.fixed_client
+    def test_connection_pool_with_host_and_port(self):
+        pool = ConnectionPool(host=default_host, port=default_port)
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_slots=default_cluster_slots,
+            connection_pool=pool,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert node.redis_connection.connection_pool is pool
+            assert node.redis_connection.auto_close_connection_pool is False
+
+    @pytest.mark.fixed_client
+    def test_url_node_clients_close_their_pool(self):
+        rc = get_mocked_redis_client(
+            url="redis://my@DNS.com:7000",
+            cluster_slots=default_cluster_slots,
+        )
+
+        for node in rc.nodes_manager.nodes_cache.values():
+            assert node.redis_connection.auto_close_connection_pool is True
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("queue_class", [Queue, LifoQueue])
