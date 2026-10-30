@@ -11,7 +11,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from enum import Enum
-from functools import partial
+from functools import cache, partial
 from itertools import chain
 from types import MethodType
 from typing import (
@@ -131,6 +131,16 @@ def is_debug_log_enabled():
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
+
+
+@cache
+def _resolve_localhost() -> str:
+    """
+    The address a node given as ``localhost`` is cached under. Resolved once,
+    so lookups such as the one on every MOVED or ASK redirect don't each pay
+    for a resolver call.
+    """
+    return socket.gethostbyname("localhost")
 
 
 @deprecated_args(
@@ -2104,7 +2114,7 @@ class RedisCluster(
             ttl -= 1
             try:
                 if asking:
-                    target_node = self.get_node(node_name=redirect_addr)
+                    target_node = self.get_node(*redirect_addr)
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
@@ -2298,7 +2308,9 @@ class RedisCluster(
                 ):
                     # The refresh also queries the node the error pointed to
                     self.nodes_manager._request_refresh(
-                        additional_startup_nodes_info=[(e.host, e.port)]
+                        additional_startup_nodes_info=[
+                            self.nodes_manager.remap_host_port(e.host, e.port)
+                        ]
                     )
                     # Reset the counter
                     self.reinitialize_counter = 0
@@ -2354,7 +2366,7 @@ class RedisCluster(
                         f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection}, {connection_details}, error: {e}"
                     )
-                redirect_addr = get_node_name(host=e.host, port=e.port)
+                redirect_addr = self.nodes_manager.remap_host_port(e.host, e.port)
                 asking = True
 
                 self._record_command_metric(
@@ -2546,7 +2558,7 @@ class RedisCluster(
 class ClusterNode:
     def __init__(self, host, port, server_type=None, redis_connection=None):
         if host == "localhost":
-            host = socket.gethostbyname(host)
+            host = _resolve_localhost()
 
         self.host = host
         self.port = port
@@ -2775,7 +2787,7 @@ class NodesManager:
         if host and port:
             # the user passed host and port
             if host == "localhost":
-                host = socket.gethostbyname(host)
+                host = _resolve_localhost()
             with self._lock:
                 return self.nodes_cache.get(get_node_name(host=host, port=port))
         elif node_name:
@@ -2789,8 +2801,11 @@ class NodesManager:
         Update the slot's node with the redirected one
         """
         node_changed = False
+        # The redirect carries the address the node advertises, like
+        # CLUSTER SLOTS does, so it needs the same remapping to be reachable
+        host, port = self.remap_host_port(e.host, e.port)
         with self._lock:
-            redirected_node = self.get_node(host=e.host, port=e.port)
+            redirected_node = self.get_node(host=host, port=port)
             if redirected_node is not None:
                 # The node already exists
                 if redirected_node.server_type is not PRIMARY:
@@ -2798,7 +2813,7 @@ class NodesManager:
                     redirected_node.server_type = PRIMARY
             else:
                 # This is a new node, we will add it to the nodes cache
-                redirected_node = ClusterNode(e.host, e.port, PRIMARY)
+                redirected_node = ClusterNode(host, port, PRIMARY)
                 self.nodes_cache[redirected_node.name] = redirected_node
 
             slot_nodes = self.slots_cache[e.slot_id]
@@ -3415,11 +3430,16 @@ class NodesManager:
                 random.shuffle(startup_nodes)
 
             # An address that is already a startup node is queried through that
-            # node's client, so a second client never replaces a live node's one
+            # node's client, so a second client never replaces a live node's one.
+            # Startup nodes are named after the resolved localhost, like
+            # ClusterNode names them.
             additional_startup_nodes = [
                 ClusterNode(host, port)
                 for host, port in additional_startup_nodes_info
-                if get_node_name(host, port) not in startup_node_names
+                if get_node_name(
+                    _resolve_localhost() if host == "localhost" else host, port
+                )
+                not in startup_node_names
             ]
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):

@@ -44,6 +44,7 @@ from redis.cluster import (
     PRIMARY,
     REPLICA,
     LoadBalancingStrategy,
+    _resolve_localhost,
     get_node_name,
 )
 from redis.commands.cluster import AsyncClusterMultiKeyCommands
@@ -2153,6 +2154,46 @@ class TestTopologyRefreshKeepsConnections:
         assert disconnect.await_args_list == []
 
     @pytest.mark.fixed_client
+    async def test_refresh_queries_a_localhost_remapped_startup_node_once(
+        self,
+    ) -> None:
+        """
+        With a remap to localhost, the refresh hint of a MOVED redirect is
+        localhost:port, while the startup node is named after the resolved
+        address. It is the same node, so no temporary ClusterNode is built to
+        query it a second time.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        startup_node = ClusterNode("localhost", 8000)
+        nodes_manager = NodesManager(
+            startup_nodes=[startup_node],
+            require_full_coverage=False,
+            connection_kwargs={},
+            address_remap=address_remap,
+        )
+        # Half of the slots, so every startup node is queried
+        slots = [[0, 8191, [default_host, 7000, "node_0"]]]
+        with (
+            mock.patch.object(
+                ClusterNode, "execute_command", autospec=True, return_value=slots
+            ) as execute_command,
+            mock.patch.object(ClusterNode, "disconnect", autospec=True) as disconnect,
+        ):
+            # The hint _execute_command passes on for a MOVED to 7000
+            await nodes_manager.initialize(
+                additional_startup_nodes_info=[
+                    nodes_manager.remap_host_port(default_host, 7000)
+                ]
+            )
+
+        assert [c.args[0] for c in execute_command.await_args_list] == [startup_node]
+        assert disconnect.await_args_list == []
+
+    @pytest.mark.fixed_client
     async def test_refresh_closes_temporary_startup_nodes(self) -> None:
         """
         An additional startup node is queried through a ClusterNode built only
@@ -2917,6 +2958,68 @@ class TestRedisClusterObj:
         # verify that the proxies were indeed used
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
+
+    @pytest.mark.parametrize(
+        "remap_host, offset",
+        # Not the ports of the other remap tests: their listeners may still be open
+        [("127.0.0.1", 3000), ("localhost", 3100)],
+    )
+    async def test_address_remap_applies_to_redirects(
+        self, create_redis, master_host, remap_host, offset
+    ):
+        """
+        A MOVED or ASK redirect names the address the node advertises, so the
+        retry must go through address_remap like the CLUSTER SLOTS addresses do.
+        A remap to localhost is cached under the resolved address, so the retry
+        must look the node up the same way.
+        """
+        n = 6
+        hostname, master_port = master_host
+        ports = [master_port + i for i in range(n)]
+
+        def address_remap(address):
+            host, port = address
+            if int(port) in ports:
+                host, port = remap_host, int(port) + offset
+            return host, port
+
+        proxies = [
+            NodeProxy(("127.0.0.1", port + offset), (hostname, port)) for port in ports
+        ]
+        await asyncio.gather(*[p.start() for p in proxies])
+        try:
+            r = await create_redis(
+                cls=RedisCluster, flushdb=False, address_remap=address_remap
+            )
+            try:
+                slot = r.keyslot("foo")
+                owner = r.nodes_manager.get_node_from_slot(slot)
+                other = next(p for p in r.get_primaries() if p.name != owner.name)
+                # The address the redirected-to node advertises, not its proxy
+                redirect_port = other.port - offset
+                for redirect_error in (AskError, MovedError):
+                    with mock.patch.object(
+                        ClusterNode, "execute_command", autospec=True
+                    ) as execute_command:
+
+                        def redirect_effect(self, *args, **options):
+                            def ok_response(self, *args, **options):
+                                assert (self.host, self.port) == (
+                                    "127.0.0.1",
+                                    other.port,
+                                )
+                                return "MOCK_OK"
+
+                            execute_command.side_effect = ok_response
+                            raise redirect_error(f"{slot} {hostname}:{redirect_port}")
+
+                        execute_command.side_effect = redirect_effect
+
+                        assert await r.execute_command("SET", "foo", "bar") == "MOCK_OK"
+            finally:
+                await r.aclose()
+        finally:
+            await asyncio.gather(*[p.aclose() for p in proxies])
 
 
 @pytest.mark.fixed_client
@@ -6607,6 +6710,64 @@ class TestNodesManager:
 
         listener.listen.assert_not_called()
         await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_remaps_redirect_address(self) -> None:
+        """
+        move_slot() must apply address_remap to the redirect address, which is
+        the one the node advertises, and never cache the unmapped address.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return host, port + 1000
+
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, address_remap=address_remap
+        )
+        nm = r.nodes_manager
+        # Default layout: slot 0 -> 127.0.0.1:7000, cached as 127.0.0.1:8000.
+        # Redirect to the primary of a different shard, by its advertised address.
+        await nm.move_slot(MovedError("0 127.0.0.1:7001"))
+
+        assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8001"]
+        assert "127.0.0.1:7001" not in nm.nodes_cache
+
+        # A node not in the cache yet is added under its remapped address.
+        await nm.move_slot(MovedError("0 127.0.0.1:7006"))
+
+        assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8006"]
+        assert "127.0.0.1:7006" not in nm.nodes_cache
+        await r.aclose()
+
+    @pytest.mark.fixed_client
+    async def test_move_slot_resolves_localhost_once(self) -> None:
+        """
+        A remap to localhost must be resolved once and reused, not on every
+        node created or redirect looked up.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        _resolve_localhost.cache_clear()
+        try:
+            with mock.patch(
+                "socket.gethostbyname", return_value="127.0.0.1"
+            ) as resolve:
+                r = await get_mocked_redis_client(
+                    host=default_host, port=default_port, address_remap=address_remap
+                )
+                nm = r.nodes_manager
+                await nm.move_slot(MovedError("0 127.0.0.1:7001"))
+                await nm.move_slot(MovedError("0 127.0.0.1:7002"))
+
+            assert [node.name for node in nm.slots_cache[0]] == ["127.0.0.1:8002"]
+            resolve.assert_called_once_with("localhost")
+            await r.aclose()
+        finally:
+            _resolve_localhost.cache_clear()
 
 
 @pytest.mark.fixed_client
