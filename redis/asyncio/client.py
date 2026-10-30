@@ -38,7 +38,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
 )
-from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -101,6 +101,7 @@ from redis.utils import (
     SSL_AVAILABLE,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
@@ -795,9 +796,9 @@ class Redis(
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             # If initialization fails, decrement the counter to keep it in sync
-            await self._decrement_usage()
+            await asyncio.shield(self._decrement_usage())
             raise
 
     async def _increment_usage(self) -> int:
@@ -818,15 +819,24 @@ class Redis(
             self._usage_counter -= 1
             return self._usage_counter
 
+    async def _release_usage(self) -> None:
+        """
+        Decrement the usage counter and close the client on the last exit.
+
+        Hold the lock through closing so a new context cannot use connections
+        that are still being disconnected by the previous context.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            if self._usage_counter == 0:
+                await self.aclose()
+
     async def __aexit__(self, exc_type, exc_value, traceback):
         """
         Async context manager exit. Decrements a usage counter. If this is the
         last exit (counter becomes zero), the client closes its connection pool.
         """
-        current_usage = await asyncio.shield(self._decrement_usage())
-        if current_usage == 0:
-            # This was the last active context, so disconnect the pool.
-            await asyncio.shield(self.aclose())
+        await asyncio.shield(self._release_usage())
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
@@ -1021,6 +1031,8 @@ class Redis(
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = await connection.read_response()
         except ResponseError:
@@ -1682,6 +1694,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
@@ -2219,7 +2233,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def annotate_exception(
         self, exception: Exception, number: int, command: Iterable[object]
     ) -> None:
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
             f"of pipeline caused error: {exception.args[0]}"

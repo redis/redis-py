@@ -30,7 +30,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -89,6 +89,7 @@ from redis.utils import (
     SENTINEL,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     experimental_method,
     safe_str,
@@ -503,21 +504,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
-                if metadata_resolver is not None:
-                    # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
-                    # reaches the pool without also being forwarded to every connection.
-                    kwargs.update(
-                        {
-                            "metadata_resolver": metadata_resolver,
-                        }
-                    )
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
@@ -539,6 +525,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
+                )
+            if metadata_resolver is not None:
+                # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                # reaches the pool without also being forwarded to every connection.
+                kwargs.update(
+                    {
+                        "metadata_resolver": metadata_resolver,
+                    }
+                )
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -967,6 +968,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = connection.read_response()
         except ResponseError:
@@ -1681,6 +1684,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
 
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
@@ -2206,7 +2211,7 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
