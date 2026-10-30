@@ -4446,9 +4446,9 @@ class TransactionStrategy(AbstractStrategy):
                 if command_name in self._pipe.cluster_client.response_callbacks:
                     # The keys option is only for the client cache and is
                     # not an option of the callbacks
-                    options = {k: v for k, v in cmd.kwargs.items() if k != "keys"}
+                    cmd.kwargs.pop("keys", None)
                     r = self._pipe.cluster_client.response_callbacks[command_name](
-                        r, **options
+                        r, **cmd.kwargs
                     )
             data.append(r)
 
