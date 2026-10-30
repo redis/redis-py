@@ -38,7 +38,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_READ_SIZE,
     DEFAULT_SOCKET_TIMEOUT,
 )
-from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
 from redis.asyncio import _himport_exec
 from redis.asyncio.connection import (
     AbstractConnection,
@@ -101,6 +101,7 @@ from redis.utils import (
     SSL_AVAILABLE,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     deprecated_function,
     experimental_method,
@@ -1030,6 +1031,8 @@ class Redis(
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = await connection.read_response()
         except ResponseError:
@@ -2230,7 +2233,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def annotate_exception(
         self, exception: Exception, number: int, command: Iterable[object]
     ) -> None:
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
             f"of pipeline caused error: {exception.args[0]}"

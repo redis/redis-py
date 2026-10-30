@@ -62,6 +62,21 @@ class TestPipeline:
             assert r["c"] == b"c1"
 
     @pytest.mark.onlynoncluster
+    def test_info_in_transaction(self, decoded_r):
+        with decoded_r.pipeline() as pipe:
+            pipe.info("server")
+            (info,) = pipe.execute()
+            assert "redis_version" in info
+
+    @pytest.mark.onlynoncluster
+    def test_info_in_transaction_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response, **options: response)
+        with decoded_r.pipeline() as pipe:
+            pipe.info("server")
+            (info,) = pipe.execute()
+            assert "redis_version:" in info
+
+    @pytest.mark.onlynoncluster
     def test_pipeline_no_transaction_watch(self, r):
         r["a"] = 0
 
@@ -389,6 +404,26 @@ class TestPipeline:
             assert str(ex.value).startswith(expected)
 
         assert r[key] == b"1"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.0.0")
+    def test_exec_error_in_pipeline_redacts_credentials(self, r, request):
+        request.addfinalizer(lambda: r.acl_deluser("redis-py-user"))
+        with r.pipeline(transaction=False) as pipe:
+            pipe.acl_setuser(
+                "redis-py-user",
+                enabled=True,
+                passwords=["+pipeline-secret"],
+                commands=["+nosuchcommand"],
+            )
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+        assert "pipeline-secret" not in str(ex.value)
+        assert str(ex.value).startswith(
+            "Command # 1 (ACL SETUSER <REDACTED>) of pipeline caused error: "
+        )
 
     def test_exec_error_in_pipeline_truncated(self, r):
         key = "a" * 50
