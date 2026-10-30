@@ -1,10 +1,12 @@
+import os
+import signal
 import socket
 import threading
+import time
 from typing import List, Union
 from unittest.mock import MagicMock, patch
 
 import pytest
-from time import sleep
 
 from redis import Redis
 from redis._defaults import DEFAULT_SOCKET_CONNECT_TIMEOUT, DEFAULT_SOCKET_TIMEOUT
@@ -21,6 +23,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
     MaintenanceCompletedEvent,
+    MaintenanceStartedEvent,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
@@ -35,6 +38,7 @@ from redis.maint_notifications import (
     NodeMovingNotification,
     OSSMaintNotificationsHandler,
     OSSNodeMigratedNotification,
+    _build_moving_connection_kwargs,
 )
 
 
@@ -390,6 +394,35 @@ class MockSocket:
         pass
 
 
+class _FakeTimer:
+    """Stands in for ``threading.Timer``; runs only when the test advances time."""
+
+    def __init__(self, test, interval, function, args=None, kwargs=None):
+        self._test = test
+        self.interval = interval
+        self.function = function
+        self.args = args or ()
+        self.kwargs = kwargs or {}
+        self.due = None
+
+    def start(self):
+        self.due = self._test._timer_clock + self.interval
+        self._test._pending_timers.append(self)
+
+
+class _ThreadingWithFakeTimer:
+    """The ``threading`` module, with ``Timer`` replaced by ``_FakeTimer``."""
+
+    def __init__(self, test):
+        self._test = test
+
+    def Timer(self, interval, function, args=None, kwargs=None):
+        return _FakeTimer(self._test, interval, function, args, kwargs)
+
+    def __getattr__(self, name):
+        return getattr(threading, name)
+
+
 class TestMaintenanceNotificationsBase:
     """Base class for maintenance notifications handling tests."""
 
@@ -423,6 +456,15 @@ class TestMaintenanceNotificationsBase:
         self.select_patcher = patch("select.select", side_effect=mock_select)
         self.select_patcher.start()
 
+        # The handlers schedule MOVING follow-ups with threading.Timer. Record
+        # them instead, so tests run them with _advance_timers, not sleeps.
+        self._timer_clock = 0.0
+        self._pending_timers = []
+        self.timer_patcher = patch(
+            "redis.maint_notifications.threading", _ThreadingWithFakeTimer(self)
+        )
+        self.timer_patcher.start()
+
         # Create maintenance notifications config
         self.config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
@@ -432,6 +474,24 @@ class TestMaintenanceNotificationsBase:
         """Clean up test fixtures."""
         self.socket_patcher.stop()
         self.select_patcher.stop()
+        self.timer_patcher.stop()
+
+    def _advance_timers(self, seconds):
+        """Move the fake timer clock forward and run the timers that come due.
+
+        Timers run in due order, on the calling thread. A timer scheduled by
+        another timer's callback runs too if it is due by the new time. The
+        handlers' duplicate detection still expires on real time, so a test
+        that resends the same MOVING after advancing would see it deduped.
+        """
+        self._timer_clock += seconds
+        while True:
+            due = [t for t in self._pending_timers if t.due <= self._timer_clock]
+            if not due:
+                return
+            timer = min(due, key=lambda t: t.due)
+            self._pending_timers.remove(timer)
+            timer.function(*timer.args, **timer.kwargs)
 
     def _get_client(
         self,
@@ -1447,7 +1507,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 connected_to_tmp_address=True,
             )
             # Wait for MOVING timeout to expire and the moving completed handler to run
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
 
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
@@ -1579,7 +1639,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 connected_to_tmp_address=False,
             )
             # Wait for half of MOVING timeout to expire and the proactive reconnect to run
-            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            self._advance_timers(MOVING_TIMEOUT / 2 + 0.2)
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
                 expected_should_reconnect=True,
@@ -1599,7 +1659,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
             self._validate_connected(5)
 
             # Wait for MOVING timeout to expire and the moving completed handler to run
-            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            self._advance_timers(MOVING_TIMEOUT / 2 + 0.2)
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
                 expected_state=MaintenanceState.NONE,
@@ -1761,7 +1821,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
             assert result is True, "SET key_receive_moving command failed"
 
             # Wait for MOVING timeout to expire
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
 
             # Now get several new connections after expiration
             old_connections = []
@@ -2030,7 +2090,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 AFTER_MOVING_ADDRESS = orig_after_moving
 
             # Wait for both MOVING timeouts to expire
-            sleep(MOVING_TIMEOUT + 0.5)
+            self._advance_timers(MOVING_TIMEOUT + 0.5)
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.NONE,
@@ -2768,8 +2828,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         assert conn.maintenance_state == MaintenanceState.NONE
         assert conn.socket_timeout == DEFAULT_SOCKET_TIMEOUT
 
-        # sleep to expire only the first MOVING notifications
-        sleep(1.3)
+        # expire only the first MOVING notifications
+        self._advance_timers(1.3)
         # validate only the connections affected by the first MOVING notification
         # have lost their MOVING state
         Helpers.validate_in_use_connections_state(
@@ -2811,8 +2871,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # TODO validate free connections
 
-        # sleep to expire the second MOVING notifications
-        sleep(1)
+        # expire the second MOVING notifications
+        self._advance_timers(1)
         # validate all connections have lost their MOVING state
         Helpers.validate_in_use_connections_state(
             [
@@ -2832,3 +2892,557 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
             expected_current_peername="any",
         )
         # TODO validate free connections
+
+
+def _moving_pool(pool_class=ConnectionPool, **config_kwargs):
+    config_kwargs.setdefault("enabled", True)
+    config_kwargs.setdefault("proactive_reconnect", True)
+    config_kwargs.setdefault("relaxed_timeout", 10)
+    return pool_class(
+        protocol=3, maint_notifications_config=MaintNotificationsConfig(**config_kwargs)
+    )
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_close_cancels_moving_notification_timers(new_node_host):
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_node_moved_notification = MagicMock()
+    handler.run_proactive_reconnect = MagicMock()
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    # close() runs the cleanup itself; the cancelled timer does not run it again
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+    time.sleep(0.4)
+
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+    if new_node_host is None:
+        handler.run_proactive_reconnect.assert_not_called()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("new_node_host", ["1.2.3.4", None])
+def test_pool_reused_after_close_mid_moving_has_reverted_kwargs(new_node_host):
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        socket_connect_timeout=4,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    original = dict(pool.connection_kwargs)
+    notification = NodeMovingNotification(
+        id=1, new_node_host=new_node_host, new_node_port=6379, ttl=60
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    if new_node_host is not None:
+        assert pool.connection_kwargs["host"] == new_node_host
+    pool.close()
+
+    for key in ("host", "socket_timeout", "socket_connect_timeout"):
+        assert pool.connection_kwargs[key] == original[key]
+    assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
+    assert pool.connection_kwargs["maintenance_notification_hash"] is None
+    # A connection made after the pool is reused does not inherit the MOVING state
+    connection = pool.make_connection()
+    assert connection.host == "localhost"
+    assert connection.socket_timeout == 3
+    assert connection.socket_connect_timeout == 4
+
+
+@pytest.mark.fixed_client
+def test_moving_redelivered_after_close_is_applied_again():
+    pool = ConnectionPool(
+        host="localhost",
+        socket_timeout=3,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+
+    handler.handle_notification(notification)
+    pool.close()
+    assert pool.connection_kwargs["host"] == "localhost"
+
+    # The server redelivers the still-active MOVING to the reused pool
+    handler.handle_notification(notification)
+
+    assert pool.connection_kwargs["host"] == "1.2.3.4"
+    assert pool.connection_kwargs["socket_timeout"] == 10
+    assert handler._pending_handoffs == {notification}
+    pool.close()
+
+
+@pytest.mark.fixed_client
+def test_pool_disconnect_does_not_cancel_moving_notification_timers():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    moved = threading.Event()
+    handler.handle_node_moved_notification = MagicMock(
+        side_effect=lambda _: moved.set()
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=0.2
+    )
+
+    handler.handle_notification(notification)
+    pool.disconnect()
+
+    assert moved.wait(timeout=10)
+    handler.handle_node_moved_notification.assert_called_once_with(notification)
+
+
+@pytest.mark.fixed_client
+def test_timer_firing_during_close_does_not_run_its_callback():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    callback = MagicMock()
+
+    test_thread = threading.current_thread()
+    timer_waiting = threading.Event()
+
+    class SignallingLock:
+        def __init__(self, lock):
+            self._lock = lock
+
+        def __enter__(self):
+            if threading.current_thread() is not test_thread:
+                timer_waiting.set()
+            return self._lock.__enter__()
+
+        def __exit__(self, *exc_info):
+            return self._lock.__exit__(*exc_info)
+
+    handler._lock = SignallingLock(handler._lock)
+
+    with handler._lock:
+        handler._schedule(0.01, callback)
+        (timer,) = handler._scheduled_timers
+        # The timer fires and waits for the lock held here.
+        assert timer_waiting.wait(timeout=10)
+        pool.close()
+    timer.join(timeout=10)
+
+    callback.assert_not_called()
+    assert handler._scheduled_timers == set()
+
+
+@pytest.mark.fixed_client
+def test_pool_close_completes_superseded_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent] * 2
+
+    pool.close()
+
+    # closing ends the relaxation of every pending handoff, also of the one
+    # a newer MOVING superseded, so each started event gets its pair
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert {e.notification for e in completed} == {first, second}
+    assert len(completed) == 2
+
+
+@pytest.mark.fixed_client
+def test_pool_close_completes_pending_handoff_event():
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=1
+    )
+
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+    assert [type(e) for e in events] == [MaintenanceStartedEvent]
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+    assert events[1].notification is notification
+    assert events[1].connection_pool is pool
+
+
+@pytest.mark.fixed_client
+def test_pool_close_retried_after_failed_cleanup_runs_it_again():
+    """
+    A MOVING cleanup that fails halfway, as when a connection is disconnected
+    under it, leaves the handoff pending: a retried close() runs it again and
+    reports its completion once.
+    """
+    events = []
+
+    class Listener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [Listener()],
+                MaintenanceCompletedEvent: [Listener()],
+            }
+        )
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    update_connections_settings = pool.update_connections_settings
+    calls = []
+
+    def failing_once(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise OSError(9, "Bad file descriptor")
+        return update_connections_settings(**kwargs)
+
+    with patch.object(pool, "update_connections_settings", new=failing_once):
+        with pytest.raises(OSError):
+            pool.close()
+        pool.close()
+
+    assert len(calls) == 2
+    assert calls[1]["matching_notification_hash"] == hash(notification)
+    assert handler._pending_handoffs == set()
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert [e.notification for e in completed] == [notification]
+
+
+@pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_reports_completion_once():
+    """
+    A completion listener that closes the pool re-enters close() while the
+    handoff is being cleaned up; the reentrant close must not run the cleanup
+    again and report a second completion.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    pool._maint_notifications_pool_handler.handle_notification(notification)
+
+    pool.close()
+
+    assert [type(e) for e in events] == [
+        MaintenanceStartedEvent,
+        MaintenanceCompletedEvent,
+    ]
+
+
+@pytest.mark.fixed_client
+def test_completed_listener_closing_the_pool_mid_close_reports_each_handoff_once():
+    """
+    close() walks a snapshot of the pending handoffs. A completion listener that
+    closes the pool while the first one is cleaned up re-enters close(), which
+    settles the rest; the outer walk must skip them instead of cleaning them up
+    and reporting their completion a second time.
+    """
+    events = []
+    pool_ref = []
+
+    class ClosingListener(EventListenerInterface):
+        def listen(self, event):
+            events.append(event)
+            if isinstance(event, MaintenanceCompletedEvent) and (
+                sum(isinstance(e, MaintenanceCompletedEvent) for e in events) == 1
+            ):
+                pool_ref[0].close()
+
+    pool = _moving_pool(
+        event_dispatcher=EventDispatcher(
+            {
+                MaintenanceStartedEvent: [ClosingListener()],
+                MaintenanceCompletedEvent: [ClosingListener()],
+            }
+        )
+    )
+    pool_ref.append(pool)
+    first = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    second = NodeMovingNotification(
+        id=2, new_node_host="5.6.7.8", new_node_port=6379, ttl=60
+    )
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(first)
+    handler.handle_notification(second)
+
+    pool.close()
+
+    completed = [e for e in events if isinstance(e, MaintenanceCompletedEvent)]
+    assert sorted(e.notification.id for e in completed) == [1, 2]
+
+
+@pytest.mark.fixed_client
+def test_pool_close_disconnects_even_when_moving_cleanup_fails():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    disconnect = MagicMock()
+
+    failing_reset = patch.object(
+        pool,
+        "update_connections_settings",
+        side_effect=OSError(9, "Bad file descriptor"),
+    )
+    with failing_reset, patch.object(pool, "disconnect", new=disconnect):
+        with pytest.raises(OSError):
+            pool.close()
+
+    # the pool is closed regardless; the handoff stays for a retried close()
+    disconnect.assert_called_once_with()
+    assert handler._pending_handoffs == {notification}
+
+
+@pytest.mark.fixed_client
+def test_pool_reset_in_forked_child_gives_the_handler_fresh_state():
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    handler.handle_notification(notification)
+    inherited_lock = handler._lock
+    assert handler._scheduled_timers and handler._pending_handoffs
+    assert pool.connection_kwargs["host"] == "1.2.3.4"
+
+    # What _checkpid() sees in a forked child
+    pool.pid = -1
+    pool._checkpid()
+
+    assert handler._lock is not inherited_lock
+    assert handler._scheduled_timers == set()
+    assert handler._pending_handoffs == set()
+    # The child starts without the temporary host and relaxed timeout
+    assert pool.connection_kwargs.get("host") != "1.2.3.4"
+    assert pool.connection_kwargs.get("socket_timeout") != 10
+    # Connections made in the child share the fresh state
+    copy = handler.get_handler_for_connection()
+    assert copy._lock is handler._lock
+    pool.close()
+
+
+@pytest.mark.fixed_client
+def test_pool_reset_in_forked_child_restores_moving_kwargs_without_pending_handoff():
+    """
+    The process forks after the MOVING kwargs were applied to the pool but
+    before the handoff was registered: there is no handoff whose cleanup would
+    restore them, so the reset has to.
+    """
+    pool = ConnectionPool(
+        host="10.0.0.1",
+        socket_timeout=5,
+        protocol=3,
+        maint_notifications_config=MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=10
+        ),
+    )
+    handler = pool._maint_notifications_pool_handler
+    notification = NodeMovingNotification(
+        id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+    )
+    pool.update_connection_kwargs(
+        **_build_moving_connection_kwargs(notification, handler.config)
+    )
+    assert pool.connection_kwargs["host"] == "1.2.3.4"
+    assert not handler._pending_handoffs
+
+    # What _checkpid() sees in a forked child
+    pool.pid = -1
+    pool._checkpid()
+
+    assert pool.connection_kwargs["host"] == "10.0.0.1"
+    assert pool.connection_kwargs["socket_timeout"] == 5
+    assert pool.connection_kwargs["maintenance_state"] == MaintenanceState.NONE
+    pool.close()
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+def test_pool_close_in_forked_child_does_not_block_on_inherited_handler_lock():
+    """
+    A parent thread holds the handler lock when the process forks: the child
+    inherits it locked and no thread there will ever release it. close() in the
+    child must reset the pool before it takes that lock.
+    """
+    pool = _moving_pool()
+    handler = pool._maint_notifications_pool_handler
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with handler._lock:
+            holding.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holding.wait(5)
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        status = 1
+        try:
+            signal.alarm(5)
+            pool.close()
+            status = 0
+        finally:
+            os._exit(status)
+    try:
+        _, wait_status = os.waitpid(pid, 0)
+    finally:
+        release.set()
+        holder.join(5)
+
+    assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+def test_pool_close_in_forked_child_does_not_block_on_inherited_pool_lock(
+    pool_class,
+):
+    """
+    A parent thread holds the pool lock while a handoff is pending when the
+    process forks: the child inherits the lock held and no thread there will
+    ever release it, yet resetting the handler takes it to revert the handoff.
+    """
+    pool = _moving_pool(pool_class)
+    handler = pool._maint_notifications_pool_handler
+    handler.handle_notification(
+        NodeMovingNotification(
+            id=1, new_node_host="1.2.3.4", new_node_port=6379, ttl=60
+        )
+    )
+    assert handler._pending_handoffs
+    holding = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        with pool._lock:
+            holding.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold_lock, daemon=True)
+    holder.start()
+    assert holding.wait(5)
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        status = 1
+        try:
+            signal.alarm(5)
+            pool.close()
+            status = 0
+        finally:
+            os._exit(status)
+    try:
+        _, wait_status = os.waitpid(pid, 0)
+    finally:
+        release.set()
+        holder.join(5)
+        # The handoff started a non-daemon timer in the parent.
+        pool.close()
+
+    assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0
+
+
+@pytest.mark.fixed_client
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+def test_blocking_pool_fork_in_maintenance_does_not_stay_in_maintenance():
+    """
+    The process forks while a parent thread is applying a MOVING, with the
+    pool flagged as in maintenance: no thread in the child will ever clear the
+    flag, and a later checkout would nest on the pool lock and leak it.
+    """
+    pool = _moving_pool(BlockingConnectionPool)
+    pool.set_in_maintenance(True)
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - runs in the child
+        status = 1
+        try:
+            signal.alarm(5)
+            pool._checkpid()
+            free = pool._lock.acquire(blocking=False)
+            if free:
+                pool._lock.release()
+            if free and not pool._in_maintenance and not pool._locked:
+                status = 0
+        finally:
+            os._exit(status)
+    _, wait_status = os.waitpid(pid, 0)
+    pool.set_in_maintenance(False)
+    pool.disconnect()
+
+    assert os.WIFEXITED(wait_status) and os.WEXITSTATUS(wait_status) == 0

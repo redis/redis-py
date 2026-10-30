@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, List, Literal, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
+from redis._parsers import Encoder
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.config import (
     DEFAULT_GRACE_PERIOD,
@@ -41,6 +42,8 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
+        # Removed databases, kept so that close() still closes their clients
+        self._removed_databases: List[AsyncDatabase] = []
         self._health_checks = (
             config.default_health_checks()
             if not config.health_checks
@@ -100,12 +103,36 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         for hc_task in self._hc_tasks:
             hc_task.cancel()
 
+        # Stop the scheduler: cancelling the tasks above does not stop the
+        # recurring timer, because run_recurring_async() returns right after
+        # scheduling. Without this, health checks keep being scheduled against
+        # the resources released below.
+        self._bg_scheduler.stop()
+
         # Close health check connection pools
         await self._health_check_policy.close()
 
-        # Close database client
-        if self.command_executor.active_database:
-            await self.command_executor.active_database.client.aclose()
+        # Release resources held by the health checks themselves
+        await asyncio.gather(
+            *(health_check.close() for health_check in self._health_checks),
+            return_exceptions=True,
+        )
+
+        # Close every database client: a failover leaves the previous active
+        # database's client open, so its in-flight commands can complete. A
+        # failing client must not leave the later ones open, so the first error
+        # is raised only after every client was closed.
+        databases = [database for database, _ in self._databases]
+        databases.extend(self._removed_databases)
+        # A removed database is only kept to be closed here
+        self._removed_databases.clear()
+        results = await asyncio.gather(
+            *(database.client.aclose() for database in databases),
+            return_exceptions=True,
+        )
+        error = next((r for r in results if isinstance(r, BaseException)), None)
+        if error is not None:
+            raise error
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.aclose()
@@ -145,6 +172,28 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             )
 
         self.initialized = True
+
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """
+        Get the connection keyword arguments of the active database's client.
+        """
+        return self._underlying_client().get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """
+        Get the encoder of the active database's client.
+        """
+        return self._underlying_client().get_encoder()
+
+    def _underlying_client(self):
+        active_database = self.command_executor.active_database
+        if active_database is not None:
+            return active_database.client
+
+        # Before initialization there is no active database yet, so use the
+        # first configured one (databases are kept in descending weight order).
+        database, _ = self._databases.get_top_n(1)[0]
+        return database.client
 
     def get_databases(self) -> Databases:
         """
@@ -255,6 +304,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Removes a database from the database list.
         """
         weight = self._databases.remove(database)
+        # The client is left open for in-flight commands when the database
+        # was the active one, so it is closed with the others on close()
+        self._removed_databases.append(database)
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
         if (
@@ -483,6 +535,14 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._command_stack = []
         self._client = client
 
+    def get_connection_kwargs(self) -> Dict[str, Any]:
+        """Get the connection keyword arguments of the parent client."""
+        return self._client.get_connection_kwargs()
+
+    def get_encoder(self) -> Encoder:
+        """Get the encoder of the parent client."""
+        return self._client.get_encoder()
+
     async def __aenter__(self: "Pipeline") -> "Pipeline":
         return self
 
@@ -637,6 +697,29 @@ class PubSub:
             "unsubscribe", *args
         )
 
+    async def ssubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "ssubscribe", *args, **kwargs
+        )
+
+    async def sunsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "sunsubscribe", *args
+        )
+
     async def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
     ):
@@ -649,6 +732,22 @@ class PubSub:
         """
         return await self._client.command_executor.execute_pubsub_method(
             "get_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
+        )
+
+    async def get_sharded_message(
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
+    ):
+        """
+        Get the next message if one is available in a sharded channel, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number or None to wait indefinitely.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            "get_sharded_message",
             ignore_subscribe_messages=ignore_subscribe_messages,
             timeout=timeout,
         )

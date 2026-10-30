@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import copy
 import inspect
 import logging
@@ -14,7 +13,6 @@ from itertools import chain
 from types import MappingProxyType
 from typing import (
     Any,
-    AsyncIterator,
     Callable,
     Iterable,
     List,
@@ -52,7 +50,7 @@ else:
 from ..auth.token import TokenInterface
 from ..driver_info import DriverInfo, resolve_driver_info
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import deprecated_args, format_error_message
+from ..utils import deprecated_args, format_error_message, is_os_level_timeout
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -1422,6 +1420,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         except asyncio.TimeoutError as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
             await self.disconnect(nowait=True)
+            if is_os_level_timeout(e):
+                # ETIMEDOUT from the OS: the connection is dead, not slow.
+                raise ConnectionError(
+                    f"Error {e.errno} while writing to socket. {e.strerror}."
+                ) from e
             raise TimeoutError("Timeout writing to socket") from None
         except OSError as e:
             add_debug_log_for_connection_failure(self, e, "writing command")
@@ -1535,6 +1538,16 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     push_request=push_request,
                 )
         except asyncio.TimeoutError as e:
+            if is_os_level_timeout(e):
+                # The OS reported ETIMEDOUT on the socket (e.g. after a network
+                # change): the connection is dead, not slow. Returning None here
+                # made PubSub.listen() re-read the dead socket in a busy loop.
+                if disconnect_on_error:
+                    add_debug_log_for_connection_failure(self, e, "reading response")
+                    await self.disconnect(nowait=True)
+                raise ConnectionError(
+                    f"Error while reading from {host_error} : {e.args}"
+                )
             if timeout is not None:
                 # user requested timeout, return None. Operation can be retried
                 return None
@@ -1571,7 +1584,10 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
             self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
-            raise response from None
+            try:
+                raise response from None
+            finally:
+                del response  # avoid creating ref cycles
         return response
 
     async def _read_response_from_parser(
@@ -1967,7 +1983,6 @@ class UnixDomainSocketConnection(AbstractConnection):
             reader, writer = await asyncio.open_unix_connection(path=self.path)
         self._reader = reader
         self._writer = writer
-        await self.on_connect()
 
     def _host_error(self) -> str:
         return self.path
@@ -2748,9 +2763,7 @@ class AsyncMaintNotificationsAbstractConnectionPool:
                 f"proactive reconnect: {run_proactive_reconnect}"
             )
         async with self._get_pool_lock():
-            # Opt BlockingConnectionPool into serializing its get/release
-            # with this critical section. Other pools do not define
-            # set_in_maintenance and this is a no-op for them.
+            # Record maintenance state for pools that expose the hook.
             self._set_in_maintenance(True)
             try:
                 self._update_connections_settings_without_locking(
@@ -2957,6 +2970,10 @@ class ConnectionPool(
         arguments always win.
         """
         url_options = parse_url(url)
+
+        if "connection_class" in kwargs:
+            url_options["connection_class"] = kwargs["connection_class"]
+
         kwargs.update(url_options)
         return cls(**kwargs)
 
@@ -3306,8 +3323,10 @@ class ConnectionPool(
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""
-        await self._on_close()
-        await self.disconnect()
+        try:
+            await self._on_close()
+        finally:
+            await self.disconnect()
 
     async def __aenter__(self: _CP) -> _CP:
         return self
@@ -3324,19 +3343,32 @@ class ConnectionPool(
             conn.retry = retry
 
     async def re_auth_callback(self, token: TokenInterface):
+        first_error = None
         async with self._lock:
             for conn in self._available_connections:
-                await conn.retry.call_with_retry(
-                    lambda: conn.send_command(
-                        "AUTH", token.try_get("oid"), token.get_value()
-                    ),
-                    lambda error: self._mock(error),
-                )
-                await conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
-                )
+                try:
+                    await conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: self._mock(error),
+                    )
+                    await conn.retry.call_with_retry(
+                        lambda: conn.read_response(),
+                        lambda error: self._mock(error),
+                        is_retryable=lambda error: not isinstance(
+                            error, AuthenticationError
+                        ),
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if first_error is not None:
+            raise first_error
 
     async def _mock(self, error: RedisError):
         """
@@ -3376,14 +3408,14 @@ class BlockingConnectionPool(ConnectionPool):
         >>> client = Redis.from_pool(BlockingConnectionPool())
 
     It performs the same function as the default
-    :py:class:`~redis.asyncio.ConnectionPool` implementation, in that,
+    :py:class:`~redis.asyncio.connection.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple async redis clients.
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a :py:class:`~redis.ConnectionError` (as the default
-    :py:class:`~redis.asyncio.ConnectionPool` implementation does), it
+    raising a :py:class:`~redis.exceptions.MaxConnectionsError` (as the default
+    :py:class:`~redis.asyncio.connection.ConnectionPool` implementation does), it
     blocks the current `Task` for a specified number of seconds until
     a connection becomes available.
 
@@ -3421,24 +3453,13 @@ class BlockingConnectionPool(ConnectionPool):
 
     def set_in_maintenance(self, in_maintenance: bool) -> None:
         """
-        Toggle the pool's maintenance mode.
+        Record the pool's maintenance state.
 
-        While maintenance mode is on, ``get_connection`` and ``release``
-        serialize their pool mutations through ``self._lock`` so they cannot
-        interleave with a MOVING notification handler that is currently
-        rewriting pool state under the same lock. Outside of maintenance the
-        mutations skip the lock, since their critical sections are pure-Python
-        and already atomic under asyncio's single-threaded scheduling.
+        ``get_connection`` and ``release`` always serialize their pool mutations
+        through ``self._lock``, independently of this flag, so they also wait for
+        reauthentication and maintenance handlers.
         """
         self._in_maintenance = in_maintenance
-
-    @contextlib.asynccontextmanager
-    async def _maybe_pool_lock(self) -> AsyncIterator[None]:
-        if self._in_maintenance:
-            async with self._lock:
-                yield
-        else:
-            yield
 
     @deprecated_args(
         args_to_warn=["*"],
@@ -3454,7 +3475,7 @@ class BlockingConnectionPool(ConnectionPool):
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    async with self._maybe_pool_lock():
+                    async with self._lock:
                         # Track connection count before to detect if a new connection is created
                         connections_before = len(self._available_connections) + len(
                             self._in_use_connections

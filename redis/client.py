@@ -30,7 +30,7 @@ from redis._defaults import (
     DEFAULT_SOCKET_TIMEOUT,
 )
 from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import bool_ok, get_response_callbacks
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -89,6 +89,7 @@ from redis.utils import (
     SENTINEL,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
     experimental_method,
     safe_str,
@@ -503,21 +504,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
-                if metadata_resolver is not None:
-                    # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
-                    # reaches the pool without also being forwarded to every connection.
-                    kwargs.update(
-                        {
-                            "metadata_resolver": metadata_resolver,
-                        }
-                    )
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
@@ -539,6 +525,21 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
+                )
+            if metadata_resolver is not None:
+                # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                # reaches the pool without also being forwarded to every connection.
+                kwargs.update(
+                    {
+                        "metadata_resolver": metadata_resolver,
+                    }
+                )
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -967,6 +968,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = connection.read_response()
         except ResponseError:
@@ -1681,6 +1684,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
 
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
@@ -1738,8 +1743,8 @@ class PubSub:
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.discard(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -1819,11 +1824,10 @@ class PubSubWorkerThread(threading.Thread):
         self.exception_handler = exception_handler
         self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
+        # Set before start() so run() cannot undo an early stop() request.
+        self._running.set()
 
     def run(self) -> None:
-        if self._running.is_set():
-            return
-        self._running.set()
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while self._running.is_set():
@@ -1842,11 +1846,22 @@ class PubSubWorkerThread(threading.Thread):
                 self.exception_handler(e, pubsub, self)
         pubsub.close()
 
-    def stop(self) -> None:
+    def stop(self, timeout: Optional[float] = None) -> None:
+        """Wait for the worker to finish after clearing the running flag.
+
+        timeout bounds that wait. None waits until the worker exits.
+        The wait is skipped when stop() runs on the worker thread.
+        """
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
         self._running.clear()
+        # wait for that close before returning, so a caller that
+        # follows stop() with pubsub.close() does not disconnect the
+        # socket while get_message is still reading it. the exception
+        # handler calls stop() from this thread; joining there deadlocks.
+        if threading.current_thread() is not self and self.is_alive():
+            self.join(timeout)
 
 
 class Pipeline(Redis):
@@ -2164,11 +2179,20 @@ class Pipeline(Redis):
         prep_error = _himport_exec.drain_pipeline_prepares(self, connection, fieldsets)
 
         responses = []
-        for args, options in commands:
-            try:
-                responses.append(self.parse_response(connection, args[0], **options))
-            except ResponseError as e:
-                responses.append(e)
+        try:
+            for args, options in commands:
+                try:
+                    responses.append(
+                        self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    responses.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            connection.disconnect()
+            raise
 
         # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
         # raised regardless of raise_on_error as it was before folding -- only now
@@ -2187,7 +2211,7 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"

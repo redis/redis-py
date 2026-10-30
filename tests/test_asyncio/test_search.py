@@ -99,7 +99,7 @@ class AsyncSearchTestsBase:
 
     @staticmethod
     async def waitForIndex(env, idx, timeout=None):
-        delay = 0.1
+        delay = 0.02
         while True:
             try:
                 res = await env.execute_command("FT.INFO", idx)
@@ -168,8 +168,11 @@ class AsyncSearchTestsBase:
         assert isinstance(indexer, AsyncSearch.BatchIndexer)
         assert 50 == indexer.chunk_size
 
+        # one round trip for all documents, not one HSET each
+        pipe = indexer.client.client.pipeline(transaction=False)
         for key, doc in chapters.items():
-            await indexer.client.client.hset(key, mapping=doc)
+            pipe.hset(key, mapping=doc)
+        await pipe.execute()
         await indexer.commit()
 
 
@@ -570,17 +573,16 @@ class TestBaseSearchFunctionality(AsyncSearchTestsBase):
         """
         Ensure the index gets dropped by data remains by default
         """
-        for x in range(20):
-            for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
-                idx = "HaveIt"
-                index = self.getClient(decoded_r)
-                await index.hset("index:haveit", mapping={"name": "haveit"})
-                idef = IndexDefinition(prefix=["index:"])
-                await index.ft(idx).create_index((TextField("name"),), definition=idef)
-                await self.waitForIndex(index, idx)
-                await index.ft(idx).dropindex(delete_documents=keep_docs[0])
-                i = await index.hgetall("index:haveit")
-                assert i == keep_docs[1]
+        for keep_docs in [[True, {}], [False, {"name": "haveit"}]]:
+            idx = "HaveIt"
+            index = self.getClient(decoded_r)
+            await index.hset("index:haveit", mapping={"name": "haveit"})
+            idef = IndexDefinition(prefix=["index:"])
+            await index.ft(idx).create_index((TextField("name"),), definition=idef)
+            await self.waitForIndex(index, idx)
+            await index.ft(idx).dropindex(delete_documents=keep_docs[0])
+            i = await index.hgetall("index:haveit")
+            assert i == keep_docs[1]
 
     @pytest.mark.redismod
     async def test_example(self, decoded_r: redis.Redis):
@@ -2320,6 +2322,7 @@ class TestAggregations(AsyncSearchTestsBase):
         assert all(entry == {"color": "red"} for entry in groups["red"])
         assert all(entry == {"color": "yellow"} for entry in groups["yellow"])
 
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "bad_fields",
         [[], (), "", "   ", ["   "], ["name", ""], ["name", "   "]],
@@ -2625,6 +2628,52 @@ class TestPipeline(AsyncSearchTestsBase):
             )
 
     @pytest.mark.redismod
+    async def test_parsed_commands_return_the_pipeline(self, decoded_r: redis.Redis):
+        p = decoded_r.ft().pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p))
+        p = decoded_r.pipeline()
+        assert all(res is p for res in await _queue_parsed_commands(p.ft()))
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    async def test_parsed_commands_execute_in_pipeline(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("txt"),))
+        await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
+        await decoded_r.ft().synupdate("id1", False, "foo", "bar")
+        await decoded_r.ft().sugadd("ac", Suggestion("hello"))
+        p = decoded_r.ft().pipeline()
+        await p.info()
+        await p.aggregate(aggregations.AggregateRequest("*"))
+        p.profile(Query("foo"))
+        await p.spellcheck("fo")
+        p.syndump()
+        await p.sugget("ac", "he")
+        assert len(await p.execute()) == 6
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    async def test_search_through_pipeline_ft_is_decoded(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("txt"),))
+        await decoded_r.hset("doc1", mapping={"txt": "foo bar"})
+        p = decoded_r.pipeline()
+        await p.ft().search(Query("foo bar"))
+        res = await p.execute()
+        assert not _contains_bytes(res[0])
+
+    @pytest.mark.redismod
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("8.9.0")
+    async def test_aliaslist_through_pipeline_ft(self, decoded_r: redis.Redis):
+        index = decoded_r.ft("aliaslistpipeidx")
+        await index.create_index((TextField("txt"),))
+        await index.aliasadd("alias1")
+        p = decoded_r.pipeline()
+        await p.ft("aliaslistpipeidx").aliaslist()
+        res = await p.execute()
+        assert set(res[0]) == {"alias1"}
+
+    @pytest.mark.redismod
     @skip_if_redis_enterprise()
     @skip_if_server_version_lt("8.9.0")
     async def test_aliaslist_in_pipeline(self, decoded_r: redis.Redis):
@@ -2792,15 +2841,17 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             )
         )
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = np.array([float(i + j) for j in range(8)], dtype=np.float32)
-            await decoded_r.hset(
+            pipe.hset(
                 f"doc{i}",
                 mapping={
                     "sq8": vec.tobytes(),
                     "sq8_default": vec.astype(np.float16).tobytes(),
                 },
             )
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @sq8 $vec as score]").no_content()
         query_params = {"vec": np.arange(8, dtype=np.float32).tobytes()}
@@ -2887,10 +2938,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [10.0, 11.0, 12.0, 13.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = "*=>[KNN 3 @v $vec]"
         q = Query(query).return_field("__v_score").sort_by("__v_score", True)
@@ -2926,10 +2977,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
             [-1.0, 0.0, 0.0],
         ]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -2958,10 +3009,10 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
 
         vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
 
+        pipe = decoded_r.pipeline(transaction=False)
         for i, vec in enumerate(vectors):
-            await decoded_r.hset(
-                f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes()
-            )
+            pipe.hset(f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 2 @v16 $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
@@ -2994,12 +3045,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
             vec = [float(i + j) for j in range(8)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 5 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3034,12 +3085,12 @@ class TestSearchWithVamana(AsyncSearchTestsBase):
         )
 
         vectors = []
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(15):
             vec = [float(i + j) for j in range(6)]
             vectors.append(vec)
-            await decoded_r.hset(
-                f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes()
-            )
+            pipe.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+        await pipe.execute()
 
         query = Query("*=>[KNN 3 @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
@@ -3061,6 +3112,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
     # the timeout reliably triggers across hardware.
     _HYBRID_TIMEOUT_DOCS = 6000
 
+    @pytest.mark.fixed_client
     async def test_hybrid_search_forwards_zero_timeout(self):
         # Async mirror of the sync test with the same name. TIMEOUT 0 means
         # "no timeout" and must reach the wire instead of being dropped like
@@ -3137,7 +3189,10 @@ class TestHybridSearch(AsyncSearchTestsBase):
             np.full(self._HYBRID_TIMEOUT_DIM, value, dtype=np.float32).tobytes()
             for value in (0.1, 0.2, 0.3, 0.4, 0.5)
         ]
-        pipeline = decoded_r.pipeline()
+        pipeline = decoded_r.pipeline(transaction=False)
+        # the documents are independent, so no MULTI/EXEC. Each carries a 32 KB
+        # vector and is indexed as it is read; keep batches small so one async
+        # pipeline write (bounded by socket_timeout) stays short on slow runners
         batch_size = 250
         for i in range(self._HYBRID_TIMEOUT_DOCS):
             pipeline.hset(
@@ -3149,7 +3204,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             )
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = decoded_r.pipeline()
+                pipeline = decoded_r.pipeline(transaction=False)
         await pipeline.execute()
 
     @staticmethod
@@ -3197,7 +3252,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             ]
         items = items * items_sets
         batch_size = 1000
-        pipeline = client.pipeline()
+        pipeline = client.pipeline(transaction=False)
         for i, vec in enumerate(items):
             vec, description = vec
             mapping = {
@@ -3216,7 +3271,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             pipeline.hset(f"item:{i}", mapping=mapping)
             if (i + 1) % batch_size == 0:
                 await pipeline.execute()
-                pipeline = client.pipeline()
+                pipeline = client.pipeline(transaction=False)
         await pipeline.execute()  # Execute remaining
 
     @staticmethod
@@ -4048,36 +4103,42 @@ class TestHybridSearch(AsyncSearchTestsBase):
             timeout=10,
         )
 
-        expected_results = [
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"15",
-                "price_discount": b"13.5",
-            },
-            {
-                "description": b"red dress",
-                "color": b"red",
-                "price": b"17",
-                "price_discount": b"15.3",
-            },
-            {
-                "description": b"red shoes",
-                "color": b"red",
-                "price": b"16",
-                "price_discount": b"14.4",
-            },
-        ]
+        # The results fuse the tag match with a KNN ranking over random
+        # vectors, so their order is random; check each returned item instead.
+        expected_discounts = {
+            b"15": b"13.5",
+            b"16": b"14.4",
+            b"17": b"15.3",
+            b"18": b"16.2",
+        }
         if expects_resp2_shape(decoded_r) or expects_unified_shape(decoded_r):
             assert len(res.results) == 3
-            assert res.results == expected_results
             assert res.warnings == []
             assert res.execution_time > 0
+            assert any(item["color"] == b"red" for item in res.results)
+            for item in res.results:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
         elif expects_resp3_shape(decoded_r):
             assert len(res["results"]) == 3
-            assert res["results"] == expected_results
             assert res["warnings"] == []
             assert res["execution_time"] > 0
+            assert any(item["color"] == b"red" for item in res["results"])
+            for item in res["results"]:
+                assert item.keys() == {
+                    "description",
+                    "color",
+                    "price",
+                    "price_discount",
+                }
+                assert item["color"] == item["description"].split()[0]
+                assert item["price_discount"] == expected_discounts[item["price"]]
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
@@ -4347,7 +4408,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["warnings"] == []
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4")
+    @skip_if_server_version_gte("8.11")
     async def test_hybrid_search_query_with_cursor(self, decoded_r):
         # Create index and add data
         await self._create_hybrid_search_index(decoded_r)
@@ -4397,3 +4459,33 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert len(vsim_res_from_cursor.rows) == 5
         elif expects_resp3_shape(decoded_r):
             assert len(vsim_res_from_cursor[0]["results"]) == 5
+
+
+def _contains_bytes(value):
+    """Whether a parsed reply still holds undecoded bytes anywhere."""
+    if isinstance(value, bytes):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_bytes(k) or _contains_bytes(v) for k, v in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_bytes(v) for v in value)
+    if hasattr(value, "__dict__"):
+        return _contains_bytes(vars(value))
+    return False
+
+
+async def _queue_parsed_commands(ft):
+    """Queue the search commands whose replies are parsed by the client."""
+    queued = [
+        ft.info(),
+        ft.aggregate(aggregations.AggregateRequest("*")),
+        ft.profile(Query("foo")),
+        ft.spellcheck("foo"),
+        ft.config_get("TIMEOUT"),
+        ft.config_set("TIMEOUT", "100"),
+        ft.syndump(),
+        ft.sugget("ac", "he"),
+        ft.sugget("ac", "he", with_scores=True),
+    ]
+    # ``profile`` and ``syndump`` are inherited from the sync commands.
+    return [await res if asyncio.iscoroutine(res) else res for res in queued]

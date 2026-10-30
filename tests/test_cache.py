@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import redis
 
+from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
     CacheConfigurationInterface,
@@ -34,6 +36,7 @@ from redis.event import (
 )
 from redis.exceptions import AskError, MovedError, RedisError, ResponseError
 from redis.observability.attributes import CSCReason
+from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.conftest import (
     _get_client,
@@ -53,9 +56,13 @@ WRITE_KEYED = CommandMetadata(
 )
 
 
-def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05):
+def wait_for_invalidated_value(
+    client, key, expected, timeout=3.0, interval=0.05, read=None
+):
     """
     Reads ``key`` until the client stops serving the value it cached before invalidation.
+
+    ``read`` replaces the default ``client.get(key)`` for keys of other types.
 
     Server-assisted invalidation arrives on its own push message, so a read taken straight
     after another client's write is a race. A fixed sleep answers that race badly in both
@@ -64,11 +71,16 @@ def wait_for_invalidated_value(client, key, expected, timeout=3.0, interval=0.05
     the deadline and returns the last value read, so the caller's own assertion is what
     reports the failure if the invalidation never lands.
     """
+    if read is None:
+
+        def read():
+            return client.get(key)
+
     deadline = time.monotonic() + timeout
-    value = client.get(key)
+    value = read()
     while value not in expected and time.monotonic() < deadline:
         time.sleep(interval)
-        value = client.get(key)
+        value = read()
 
     return value
 
@@ -122,6 +134,16 @@ def tracked_key_count(client) -> int:
     other test uses, from a client that is not itself tracking.
     """
     return int(client.info("stats")["tracking_total_keys"])
+
+
+def cmdstat_get_calls(client) -> int:
+    """
+    Reads how many GET commands the server has run, across all clients.
+
+    Server-wide like ``tracked_key_count``, so callers compare a before/after delta around a
+    read to tell whether it reached the server.
+    """
+    return client.info("commandstats").get("cmdstat_get", {}).get("calls", 0)
 
 
 @pytest.fixture()
@@ -188,11 +210,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -237,10 +259,14 @@ class TestCache:
         assert cache.get(cache_key) is not None
         # change the sorted set from a second client (causes invalidation)
         r2.zadd("myzset", {"c": 3})
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
         # a fresh value is fetched and re-cached
-        assert r.zrevrange("myzset", 0, -1) == [b"c", b"b", b"a"]
+        expected = [b"c", b"b", b"a"]
+        assert (
+            wait_for_invalidated_value(
+                r, "myzset", [expected], read=lambda: r.zrevrange("myzset", 0, -1)
+            )
+            == expected
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -299,11 +325,10 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.hset(hash_key, field_1, "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.hget(hash_key, field_1) in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(
+            r, hash_key, [b"barbar", "barbar"], read=lambda: r.hget(hash_key, field_1)
+        ) in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(
@@ -368,11 +393,11 @@ class TestCache:
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
 
-        # Add a small delay to allow invalidation to be processed
-        time.sleep(0.1)
-
         # Retrieves a new value from server and cache it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -1386,6 +1411,34 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
+    def test_topology_refresh_keeps_cached_entries(self, r):
+        """
+        The cache is shared by every node pool and is emptied whenever one of
+        its connections disconnects, so a refresh that keeps the topology must
+        not recycle any connection.
+        """
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        # The constructor disconnects the connections of the first CLUSTER
+        # SLOTS to enable maintenance notifications on them, and their first
+        # reconnect empties the cache. Use every node once first, so the refresh
+        # below meets only connections that are already set up.
+        r.ping(target_nodes=r.ALL_NODES)
+        r.set("foo", "bar")
+        assert r.get("foo") in [b"bar", "bar"]
+        key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        assert cache.get(key) is not None
+
+        r.nodes_manager.initialize()
+
+        assert cache.get(key) is not None
+        assert r.get("foo") in [b"bar", "bar"]
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": DefaultCache(CacheConfig(max_size=128))}],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
     def test_a_user_sent_client_tracking_or_reset_is_refused(self, r):
         # Every node connection of a cached cluster is a cache proxy, so the guard covers
         # the fan-out of ``client_tracking_off`` and the cluster pipeline as well.
@@ -2175,11 +2228,12 @@ class TestSSLCache:
         ]
         # change key in redis (cause invalidation)
         assert r2.set("foo", "barbar")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        # Retrieves a new value from server and cache_data it
-        assert r.get("foo") in [b"barbar", "barbar"]
+        # Retrieves a new value from server and cache_data it, once the
+        # invalidation has arrived (over SSL it can trail the write)
+        assert wait_for_invalidated_value(r, "foo", [b"barbar", "barbar"]) in [
+            b"barbar",
+            "barbar",
+        ]
         # Make sure that new value was cached
         assert cache.get(
             CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
@@ -2291,10 +2345,8 @@ class TestSSLCache:
         # Invalidate one of the keys and make sure
         # that all associated cached entries was removed
         assert r.set("foo", "baz")
-        # Timeout needed for SSL connection because there's timeout
-        # between data appears in socket buffer
-        time.sleep(0.1)
-        assert r.get("foo") == b"baz"
+        # the invalidation can trail the write (over SSL especially)
+        assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
         assert (
             cache.get(
                 CacheKey(
@@ -2313,6 +2365,68 @@ class TestSSLCache:
         )
 
 
+# The standalone test server also listens on this socket, see docker-compose.yml
+UNIX_SOCKET_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "dockers", "standalone", "redis.sock")
+)
+
+
+@pytest.fixture()
+def unix_socket_path():
+    """
+    Returns ``UNIX_SOCKET_PATH``, skipping the test when no server answers on it.
+
+    The socket file alone proves nothing: Docker Desktop for macOS shows the container's
+    socket in ``dockers/standalone/`` but refuses connections to it from the host, and a
+    killed container leaves its socket file behind. Pings without retries, so the skip is
+    immediate.
+    """
+    try:
+        with redis.Redis(
+            unix_socket_path=UNIX_SOCKET_PATH, retry=Retry(NoBackoff(), 0)
+        ) as client:
+            client.ping()
+    except redis.ConnectionError:
+        pytest.skip(f"No Redis server on the Unix socket {UNIX_SOCKET_PATH}")
+
+    return UNIX_SOCKET_PATH
+
+
+@pytest.mark.fixed_client
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.4.0")
+class TestUnixSocketCache:
+    def test_get_from_cache(self, unix_socket_path):
+        key = f"unix-socket-cache-{uuid.uuid4()}"
+        r = redis.Redis(
+            unix_socket_path=unix_socket_path, protocol=3, cache_config=CacheConfig()
+        )
+        r2 = redis.Redis(unix_socket_path=unix_socket_path)
+        try:
+            cache = r.get_cache()
+            r2.set(key, "bar")
+            # get key from redis and save in local cache
+            assert r.get(key) == b"bar"
+            assert (
+                cache.get(
+                    CacheKey(command="GET", redis_keys=(key,), redis_args=("GET", key))
+                ).cache_value
+                == b"bar"
+            )
+            # get key from local cache, without sending GET to the server
+            calls = cmdstat_get_calls(r2)
+            assert r.get(key) == b"bar"
+            assert cmdstat_get_calls(r2) == calls
+            # change key in redis (cause invalidation)
+            r2.set(key, "barbar")
+            assert wait_for_invalidated_value(r, key, [b"barbar"]) == b"barbar"
+        finally:
+            r2.delete(key)
+            r.close()
+            r2.close()
+
+
+@pytest.mark.fixed_client
 class TestUnitDefaultCache:
     def test_get_eviction_policy(self):
         cache = DefaultCache(CacheConfig(max_size=5))
@@ -2602,6 +2716,7 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 0
 
 
+@pytest.mark.fixed_client
 class TestCacheReverseIndex:
     """
     The reverse index from Redis key to the entries holding it.
@@ -2801,6 +2916,7 @@ class TestCacheReverseIndex:
         assert actual == expected
 
 
+@pytest.mark.fixed_client
 class TestUnitLRUPolicy:
     def test_type(self):
         policy = LRUPolicy()
@@ -2945,6 +3061,7 @@ class TestUnitLRUPolicy:
             policy.evict_next()
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheConfiguration:
     MAX_SIZE = 100
     EVICTION_POLICY = EvictionPolicy.LRU
@@ -3165,6 +3282,7 @@ class TestUnitCacheConfiguration:
         assert config.is_trackable_read("GET") is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxy:
     """Unit tests for CacheProxy class with mocked event dispatcher."""
 
@@ -3394,6 +3512,7 @@ class TestUnitCacheProxy:
         assert proxy.is_cachable(cache_key) is False
 
 
+@pytest.mark.fixed_client
 class TestUnitCacheProxyConnectionInvalidations:
     """A framing violation while draining invalidations now disconnects the raw
     connection (see #4291). That disconnect skips CacheProxyConnection.disconnect(),

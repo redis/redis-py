@@ -217,6 +217,14 @@ Core Commands
      - Flat function data becomes nested dictionaries.
      - ``[[b"library_name", b"lib", ...]]``
      - ``[{b"library_name": b"lib", b"functions": [...]}]``
+   * - ``FUNCTION STATS``
+     - Flat stats become nested dictionaries.
+     - ``[b"running_script", None, b"engines", [b"LUA", [...]]]``
+     - ``{b"running_script": None, b"engines": {b"LUA": {...}}}``
+   * - ``INCREX`` with ``BYFLOAT``
+     - The new value and the increment are floats.
+     - ``[b"1.75", b"0.25"]``
+     - ``[1.75, 0.25]``
    * - ``MEMORY STATS``
      - Structural keys are decoded and numeric values use native types.
      - ``{b"peak.allocated": b"1024"}``
@@ -384,6 +392,10 @@ Core Commands
      - ``age-seconds`` is float, ``client-info`` is parsed, and structural strings are decoded.
      - ``{"age-seconds": "0.5"}``
      - ``{"age-seconds": 0.5, "client-info": {...}}``
+   * - ``BGREWRITEAOF``, ``BGSAVE``
+     - The status reply becomes ``True``.
+     - ``b"Background saving started"``
+     - ``True``
    * - ``CLIENT TRACKINGINFO``
      - Structural keys and string lists are decoded.
      - ``{b"flags": [b"on"]}``
@@ -396,6 +408,10 @@ Core Commands
      - Dict keys are strings at the exposed structural levels.
      - ``[{b"direction": b"to"}]``
      - ``[{"direction": b"to"}]``
+   * - ``DEBUG OBJECT``
+     - The status string is parsed into a dict.
+     - ``b"Value at:0x... refcount:1 encoding:embstr ..."``
+     - ``{"type": "Value", "refcount": 1, "encoding": "embstr", ...}``
    * - ``GEOHASH``
      - Hash strings are decoded.
      - ``[b"sqc8b49rny0"]``

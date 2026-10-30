@@ -131,6 +131,8 @@ class VectorSetCommands(CommandsProtocol):
 
         ``attributes`` is a dictionary or json string that contains the attributes to set for the vector.
                 If not provided, no attributes are set.
+                An empty dictionary replaces existing attributes with an empty object;
+                an empty string removes them. None leaves existing attributes unchanged.
 
         ``numlinks`` sets the number of links to create for the vector.
                 If not provided, the default number of links is used.
@@ -163,7 +165,7 @@ class VectorSetCommands(CommandsProtocol):
         if ef:
             pieces.extend(["EF", ef])
 
-        if attributes:
+        if attributes is not None:
             if isinstance(attributes, dict):
                 # transform attributes to json string
                 attributes_json = json.dumps(attributes)
@@ -389,10 +391,14 @@ class VectorSetCommands(CommandsProtocol):
             options[NEVER_DECODE] = True
             if (
                 hasattr(self.client, "connection_pool")
-                and self.client.connection_pool.connection_kwargs["decode_responses"]
+                and self.client.connection_pool.connection_kwargs.get(
+                    "decode_responses", False
+                )
             ) or (
                 hasattr(self.client, "nodes_manager")
-                and self.client.nodes_manager.connection_kwargs["decode_responses"]
+                and self.client.nodes_manager.connection_kwargs.get(
+                    "decode_responses", False
+                )
             ):
                 # allow decoding in the postprocessing callback
                 # if the user set decode_responses=True

@@ -1,10 +1,14 @@
 import asyncio
+import gc
+import math
 import os
+import platform
 import socket
 import ssl
 import types
+import weakref
 from unittest import mock
-from errno import ECONNREFUSED
+from errno import ECONNREFUSED, ETIMEDOUT
 from unittest.mock import patch
 
 import pytest
@@ -27,7 +31,12 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.exceptions import (
+    ConnectionError,
+    InvalidResponse,
+    ResponseError,
+    TimeoutError,
+)
 from redis.observability.attributes import ConnectionState, get_pool_name
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
@@ -88,6 +97,7 @@ def make_async_hiredis_parser(
     return parser
 
 
+@pytest.mark.fixed_client
 def test_connection_default_parser_matches_default_protocol():
     conn = Connection()
     expected_parser_class = (
@@ -97,6 +107,7 @@ def test_connection_default_parser_matches_default_protocol():
     assert conn.protocol == 3
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 def test_connection_uses_hiredis_command_packer(monkeypatch):
     calls = []
@@ -113,6 +124,7 @@ def test_connection_uses_hiredis_command_packer(monkeypatch):
     assert calls == [(b"SET", b"key", b"value")]
 
 
+@pytest.mark.fixed_client
 def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
     monkeypatch.setattr("redis.asyncio.connection.HIREDIS_AVAILABLE", False)
     connection = Connection()
@@ -121,6 +133,7 @@ def test_connection_uses_python_command_packer_without_hiredis(monkeypatch):
     assert connection.pack_command("PING") == [b"*1\r\n$4\r\nPING\r\n"]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("protocol", [2, 3])
 def test_async_pack_command_respects_connection_encoding(protocol):
     connection = Connection(encoding="latin-1", protocol=protocol)
@@ -130,6 +143,7 @@ def test_async_pack_command_respects_connection_encoding(protocol):
     ]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("buffer", "expected"),
     [
@@ -145,6 +159,7 @@ async def test_async_hiredis_can_read_uses_buffer_without_reading(buffer, expect
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_raises_on_eof():
     # a server-closed connection must raise like the sync SocketBuffer does,
     # not report readable data (#4252)
@@ -156,6 +171,7 @@ async def test_async_hiredis_can_read_raises_on_eof():
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
 async def test_async_hiredis_can_read_raises_on_reset(buffer):
     # a reset (RST) leaves no EOF but an exception on the stream, which
@@ -168,6 +184,7 @@ async def test_async_hiredis_can_read_raises_on_reset(buffer):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_prefers_buffered_data_over_eof():
     # a reply or push notification the reader already buffered must stay
     # readable even if the server has since closed the connection,
@@ -180,6 +197,7 @@ async def test_async_hiredis_can_read_prefers_buffered_data_over_eof():
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_detects_reader_response():
     stream = DummyAsyncStream()
     parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
@@ -188,6 +206,7 @@ async def test_async_hiredis_can_read_detects_reader_response():
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_detects_real_stream_reader_buffer():
     payload = b"+OK\r\n"
     stream = asyncio.StreamReader()
@@ -198,6 +217,7 @@ async def test_async_hiredis_can_read_detects_real_stream_reader_buffer():
     assert await stream.read(len(payload)) == payload
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_preserves_reader_response():
     stream = DummyAsyncStream()
     parser = make_async_hiredis_parser(stream, response=b"OK", has_data=True)
@@ -207,6 +227,7 @@ async def test_async_hiredis_can_read_preserves_reader_response():
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_does_not_decide_disable_decoding():
     stream = DummyAsyncStream()
     raw = b"\xe2\x98\x83"
@@ -221,6 +242,7 @@ async def test_async_hiredis_can_read_does_not_decide_disable_decoding():
     assert await parser.read_response(disable_decoding=True) == raw
 
 
+@pytest.mark.fixed_client
 async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     stream = DummyAsyncStream()
     raw = b"\xe2\x98\x83"
@@ -235,6 +257,7 @@ async def test_async_hiredis_can_read_leaves_decoding_to_read_response():
     assert await parser.read_response() == raw.decode()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     stream = DummyAsyncStream(buffer=b"+OK\r\n")
@@ -246,6 +269,7 @@ async def test_async_resp_can_read_detects_stream_buffer(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_raises_on_eof(parser_class):
     # a server-closed connection must raise like the sync SocketBuffer does,
@@ -260,6 +284,7 @@ async def test_async_resp_can_read_raises_on_eof(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("buffer", [b"", b"+OK\r\n"])
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_raises_on_reset(parser_class, buffer):
@@ -275,6 +300,7 @@ async def test_async_resp_can_read_raises_on_reset(parser_class, buffer):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     # data the parser already buffered must stay readable even if the server
@@ -290,6 +316,7 @@ async def test_async_resp_can_read_prefers_buffered_data_over_eof(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("parser_class", [_AsyncRESP2Parser, _AsyncRESP3Parser])
 async def test_async_resp_read_response_raises_after_disconnect(parser_class):
     # A late reply read after disconnect could be assigned to the next
@@ -304,6 +331,7 @@ async def test_async_resp_read_response_raises_after_disconnect(parser_class):
     assert stream.read_called is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
@@ -328,6 +356,7 @@ async def test_async_parser_read_guards_report_a_never_connected_parser(parser_c
         await parser.can_read()
 
 
+@pytest.mark.fixed_client
 async def test_connection_read_guards_report_a_never_connected_connection():
     # End-to-end counterpart: the AttributeError also sailed past
     # Connection.can_read()'s ``except OSError``, so neither the ConnectionError
@@ -340,6 +369,7 @@ async def test_connection_read_guards_report_a_never_connected_connection():
         await conn.can_read()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("protocol", "parser_class", "expected_parser_class"),
     [
@@ -360,6 +390,7 @@ def test_connection_parser_matches_protocol(
     assert isinstance(conn._parser, expected_parser_class)
 
 
+@pytest.mark.fixed_client
 def test_get_resolved_ip_uses_async_writer_peer_before_dns():
     conn = Connection(host="redis.example.test")
     writer = mock.Mock()
@@ -375,6 +406,7 @@ def test_get_resolved_ip_uses_async_writer_peer_before_dns():
     getaddrinfo.assert_not_called()
 
 
+@pytest.mark.fixed_client
 async def test_send_packed_command_rejects_closed_transport():
     conn = Connection(health_check_interval=0)
     writer = mock.Mock()
@@ -393,6 +425,7 @@ async def test_send_packed_command_rejects_closed_transport():
     assert not conn.is_connected
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("socket_timeout", [None, 1])
 async def test_send_packed_command_writes_to_open_transport(socket_timeout):
     conn = Connection(socket_timeout=socket_timeout, health_check_interval=0)
@@ -410,6 +443,7 @@ async def test_send_packed_command_writes_to_open_transport(socket_timeout):
     await conn.disconnect(nowait=True)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("error_type", "message"),
     [
@@ -441,6 +475,7 @@ async def test_send_packed_command_translates_closed_transport_error(
     assert not conn.is_connected
 
 
+@pytest.mark.fixed_client
 async def test_send_packed_command_preserves_type_error_on_open_transport():
     conn = Connection(health_check_interval=0)
     writer = mock.Mock()
@@ -613,6 +648,20 @@ async def test_socket_param_regression(r):
     _ = await conn.disconnect() is True
 
 
+async def test_unix_domain_socket_connect_runs_handshake_once():
+    """connect() runs the handshake, so _connect() must not run it as well"""
+    conn = UnixDomainSocketConnection(path="/tmp/redis.sock")
+    with (
+        patch(
+            "asyncio.open_unix_connection",
+            mock.AsyncMock(return_value=(mock.Mock(), mock.Mock())),
+        ),
+        patch.object(conn, "on_connect_check_health", mock.AsyncMock()) as handshake,
+    ):
+        await conn.connect()
+    handshake.assert_awaited_once()
+
+
 async def test_can_run_concurrent_commands(r):
     if getattr(r, "connection", None) is not None:
         # Concurrent commands are only supported on pooled or cluster connections
@@ -622,6 +671,7 @@ async def test_can_run_concurrent_commands(r):
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))
 
 
+@pytest.mark.fixed_client
 async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
     conn = Connection(
@@ -714,7 +764,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     await conn.disconnect()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
@@ -806,6 +856,7 @@ def test_create_single_connection_client_from_url():
     assert client.single_connection_client is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 async def test_pool_auto_close(request, from_url):
     """Verify that basic Redis instances have auto_close_connection_pool set to True"""
@@ -823,7 +874,6 @@ async def test_pool_auto_close(request, from_url):
     await r1.aclose()
 
 
-@pytest.mark.onlynoncluster
 @pytest.mark.fixed_client
 @skip_if_server_version_lt("5.0.0")
 async def test_pool_replaces_connection_killed_while_idle(request):
@@ -858,6 +908,7 @@ async def test_pool_replaces_connection_killed_while_idle(request):
         await killer.connection_pool.disconnect()
 
 
+@pytest.mark.fixed_client
 async def test_close_is_aclose(request):
     """Verify close() calls aclose()"""
     calls = 0
@@ -877,6 +928,7 @@ async def test_close_is_aclose(request):
         await r1.close()
 
 
+@pytest.mark.fixed_client
 async def test_pool_from_url_deprecation(request):
     url: str = request.config.getoption("--redis-url")
 
@@ -884,6 +936,7 @@ async def test_pool_from_url_deprecation(request):
         return Redis.from_url(url, auto_close_connection_pool=False)
 
 
+@pytest.mark.fixed_client
 async def test_pool_auto_close_disable(request):
     """Verify that auto_close_connection_pool can be disabled (deprecated)"""
 
@@ -901,6 +954,7 @@ async def test_pool_auto_close_disable(request):
     await r1.aclose()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 async def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -933,6 +987,7 @@ async def test_redis_connection_pool(request, from_url):
     await pool.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 async def test_redis_from_pool(request, from_url):
     """Verify that basic Redis instances created using `from_pool()`
@@ -978,6 +1033,7 @@ def test_create_secure_client_from_url_with_minimum_ssl_version():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("auto_close", (True, False))
 async def test_redis_pool_auto_close_arg(request, auto_close):
     """test that redis instance where pool is provided have
@@ -1054,6 +1110,7 @@ async def test_connection_garbage_collection(request):
     await pool.aclose()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "conn, error, expected_message",
     [
@@ -1172,11 +1229,13 @@ async def test_disconnect_no_current_task_calls_close(request):
     assert not conn.is_connected
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_resolves_exception_names():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
     assert kw["retry_on_error"] == [ConnectionError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_comma_separated():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
@@ -1184,6 +1243,7 @@ def test_parse_url_retry_on_error_comma_separated():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_bracket_list():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
@@ -1191,6 +1251,7 @@ def test_parse_url_retry_on_error_bracket_list():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_blank_entry():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=,")
@@ -1199,12 +1260,14 @@ def test_parse_url_retry_on_error_blank_entry():
     )
 
 
+@pytest.mark.fixed_client
 def test_parse_url_invalid_db_keeps_stable_message():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?db=not-an-int")
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("url", "expected_port"),
     (
@@ -1221,6 +1284,7 @@ def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
     assert pool.connection_kwargs.get("port") == expected_port
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
@@ -1229,6 +1293,7 @@ def test_parse_url_retry_on_error_unknown_name():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 async def test_parse_url_retry_on_error_usable_in_retry():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
@@ -1254,6 +1319,7 @@ async def test_parse_url_retry_on_error_usable_in_retry():
     assert calls == 2
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
 def test_async_connection_rejects_bool_port(port):
     """bool subclasses int; port=True must not become privileged port 1."""
@@ -1261,18 +1327,21 @@ def test_async_connection_rejects_bool_port(port):
         Connection(port=port)
 
 
+@pytest.mark.fixed_client
 def test_async_connection_accepts_numeric_port_string():
     """Callers still pass a decimal string such as \"6379\"."""
     conn = Connection(port="6379")
     assert conn.port == 6379
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [-1, 65536, 99999])
 def test_async_connection_rejects_out_of_range_port(port):
     with pytest.raises(ValueError, match="port must be in 0..65535"):
         Connection(port=port)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("disconnect_on_error", [True, False])
 async def test_invalid_response_always_disconnects(disconnect_on_error):
     """A framing violation invalidates the connection regardless of
@@ -1309,6 +1378,7 @@ def _attach_stream(conn, data):
     conn._parser.on_connect(conn)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [_AsyncRESP2Parser, _AsyncHiredisParser],
@@ -1350,6 +1420,7 @@ async def test_binary_pubsub_payload_invalidates_connection(parser_class):
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [
@@ -1484,6 +1555,7 @@ def _async_net(calls):
     return idle, used
 
 
+@pytest.mark.fixed_client
 class TestAsyncBlockingConnectionPoolMetricCount:
     """db.client.connection.count accuracy for async BlockingConnectionPool.
 
@@ -1529,9 +1601,10 @@ class TestAsyncBlockingConnectionPoolMetricCount:
         assert used_net == 1
         await pool.release(conn2)
 
+    @patch("redis.observability.recorder.record_connection_count")
     @patch("redis.asyncio.connection.record_connection_count")
-    async def test_full_lifecycle_nets_to_zero(self, mock_rec):
-        """acquire -> release cycles must not drift the counter."""
+    async def test_full_lifecycle_nets_to_zero(self, mock_rec, mock_sync_rec):
+        """acquire -> release cycles -> destroy must not drift the counter."""
         pool = self._pool()
         pn = get_pool_name(pool)
         mock_rec.reset_mock()
@@ -1540,9 +1613,119 @@ class TestAsyncBlockingConnectionPoolMetricCount:
             conn = await pool.get_connection()
             await pool.release(conn)
 
-        idle_net, used_net = _async_net(_async_pool_metric_calls(mock_rec, pn))
-        # reset()/__del__ record IDLE -len(available) for the idle connections
-        # still pooled; account for that so the whole lifecycle nets to zero.
-        idle_net -= len(pool._available_connections)
+        # Destroy the pool's connections through the pool's own teardown path.
+        # reset() is not a coroutine, so it records through the sync recorder.
+        pool.reset()
+
+        calls = _async_pool_metric_calls(mock_rec, pn)
+        calls += _async_pool_metric_calls(mock_sync_rec, pn)
+        idle_net, used_net = _async_net(calls)
         assert idle_net == 0, f"Lifecycle IDLE should net 0, got {idle_net}"
         assert used_net == 0, f"Lifecycle USED should net 0, got {used_net}"
+
+
+@pytest.mark.parametrize(
+    "timeout",
+    [None, 1.0, math.inf],
+    ids=["socket_timeout", "user_timeout", "blocking_read"],
+)
+async def test_read_response_os_level_timeout_is_a_connection_error(timeout):
+    # Since Python 3.11 asyncio.TimeoutError is the builtin TimeoutError, so an
+    # ETIMEDOUT the OS raises on a dead socket (e.g. after a network change)
+    # lands in the same except clause as our own read timeout. It used to be
+    # reported as a TimeoutError - or, with an explicit timeout, swallowed into
+    # a None return, which made PubSub.listen() re-read the dead socket in a
+    # busy loop. The connection is broken: disconnect and raise ConnectionError.
+    conn = Connection(socket_timeout=1)
+    conn._read_response_from_parser = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response(timeout=timeout)
+    conn.disconnect.assert_awaited_once()
+
+
+async def test_read_response_os_level_timeout_without_disconnect_on_error():
+    # The read PubSub.listen() actually does: a blocking read that leaves the
+    # disconnect to its retry wrapper, which only reconnects if read_response
+    # raises. Returning None here is what kept listen() spinning.
+    conn = Connection(socket_timeout=1)
+    conn._read_response_from_parser = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.read_response(
+            timeout=math.inf, disconnect_on_error=False, push_request=True
+        )
+    conn.disconnect.assert_not_awaited()
+
+
+async def test_read_response_user_timeout_still_returns_none():
+    conn = Connection()
+
+    async def never_answers(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    conn._read_response_from_parser = never_answers
+    conn.disconnect = mock.AsyncMock()
+
+    assert await conn.read_response(timeout=0.01) is None
+    conn.disconnect.assert_not_awaited()
+
+
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason="Immediate reclamation is a refcounting property",
+)
+async def test_read_response_error_reply_breaks_reference_cycle():
+    """
+    read_response raises the ResponseError the parser returned. The exception's
+    traceback references the read_response frame, so a ``response`` local still
+    bound to it would form a cycle only the cycle collector can reclaim, keeping
+    every frame on the traceback alive until then. The sync Connection clears
+    the local when it raises; with the collector off, refcounting alone must
+    reclaim the exception here too.
+    """
+    conn = Connection()
+
+    # Build the error in a factory so the test itself never holds a strong
+    # reference; the weakref is the only handle on it.
+    error_refs = []
+
+    async def error_reply(*args, **kwargs):
+        error = ResponseError("NOSCRIPT No matching script. Please use EVAL.")
+        error_refs.append(weakref.ref(error))
+        return error
+
+    conn._read_response_from_parser = error_reply
+
+    gc.collect()
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        with pytest.raises(ResponseError):
+            await conn.read_response()
+
+        (ref,) = error_refs
+        assert ref() is None
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+
+
+async def test_send_packed_command_os_level_timeout_is_a_connection_error():
+    conn = Connection(socket_timeout=1)
+    conn._reader = conn._writer = mock.Mock()  # look connected
+    conn._send_packed_command = mock.AsyncMock(
+        side_effect=OSError(ETIMEDOUT, "Operation timed out")
+    )
+    conn.disconnect = mock.AsyncMock()
+
+    with pytest.raises(ConnectionError):
+        await conn.send_packed_command(b"PING", check_health=False)
+    conn.disconnect.assert_awaited_once()
+    conn._reader = conn._writer = None  # disconnect was mocked out

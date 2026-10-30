@@ -5,7 +5,9 @@ import threading
 import time
 import warnings
 from asyncio import CancelledError
+from collections import ChainMap, UserDict
 from string import ascii_letters
+from types import MappingProxyType
 from unittest import mock
 from unittest.mock import patch
 
@@ -29,6 +31,7 @@ from redis.commands.core import (
     ArrayPredicateType,
     DataPersistOptions,
     HotkeysMetricsTypes,
+    SetDataPersistOptions,
 )
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
@@ -74,6 +77,7 @@ def get_stream_message(client, stream, message_id):
     return response[0]
 
 
+@pytest.mark.fixed_client
 def test_server_deprecated_commands_do_not_emit_python_warnings():
     client = redis.Redis()
     with patch.object(client, "execute_command", return_value=True) as execute_command:
@@ -86,6 +90,7 @@ def test_server_deprecated_commands_do_not_emit_python_warnings():
     execute_command.assert_any_call("HMSET", "a", "field", "value")
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "call,expected",
     [
@@ -841,11 +846,12 @@ class TestRedisCommands:
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
 
+    @pytest.mark.fixed_client
     @skip_if_server_version_lt("7.2.0")
     # Exercises a default localhost client, which cannot target a remote managed
     # Redis Enterprise endpoint.
     @skip_if_redis_enterprise()
-    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+    def test_client_setinfo_with_driver_info(self):
         from redis import DriverInfo
         from redis.utils import get_lib_version
 
@@ -1002,10 +1008,10 @@ class TestRedisCommands:
         r2 = _get_client(redis.Redis, request, flushdb=False)
         name = "target-foobar"
         r2.client_setname(name)
-        time.sleep(4)
+        time.sleep(1.5)
         initial_clients = [c["name"] for c in r.client_list()]
         assert name in initial_clients
-        r.client_kill_filter(maxage=2)
+        r.client_kill_filter(maxage=1)
         final_clients = [c["name"] for c in r.client_list()]
         assert name not in final_clients
 
@@ -1183,6 +1189,35 @@ class TestRedisCommands:
         assert isinstance(info, dict)
         assert "arch_bits" in info.keys()
         assert "redis_version" in info.keys()
+
+    @pytest.mark.onlynoncluster
+    def test_info_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response: response)
+        assert "redis_version:" in decoded_r.info("server")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
+    def test_info_with_non_utf8_errorstat(self, request, r, decoded_r):
+        r.config_resetstat()
+        with pytest.raises(redis.ResponseError):
+            r.eval(b"return redis.error_reply('\xff\xfeBAD oops')", 0)
+        try:
+            info = decoded_r.info("errorstats")
+            assert info["errorstat_\ufffd\ufffdBAD"] == {"count": 1}
+            assert "redis_version" in decoded_r.info()
+
+            with _get_client(
+                redis.Redis,
+                request,
+                flushdb=False,
+                decode_responses=True,
+                encoding_errors="backslashreplace",
+            ) as client:
+                info = client.info("errorstats")
+                assert info["errorstat_\\xff\\xfeBAD"] == {"count": 1}
+        finally:
+            r.config_resetstat()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -1420,6 +1455,13 @@ class TestRedisCommands:
             )
 
     @pytest.mark.onlynoncluster
+    def test_hotkeys_start_empty_slots_omits_slots(self, r):
+        """Test HOTKEYS START does not send SLOTS for an empty slots list"""
+        with mock.patch.object(r, "execute_command", return_value=b"OK") as cmd:
+            r.hotkeys_start(metrics=[HotkeysMetricsTypes.CPU], slots=[])
+        cmd.assert_called_once_with("HOTKEYS", "START", "METRICS", 1, "CPU")
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
     @skip_if_redis_enterprise()
     def test_hotkeys_start_with_all_parameters(self, r):
@@ -1486,15 +1528,21 @@ class TestRedisCommands:
         result = r.hotkeys_reset()
         assert result == b"OK"
 
-        # Try to get results after reset - should fail or return empty
+        # No session exists after reset
+        assert r.hotkeys_get() is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    @skip_if_redis_enterprise()
+    def test_hotkeys_get_no_session(self, r):
+        """Test HOTKEYS GET when there is no collection session"""
         try:
-            result_after = r.hotkeys_get()
-            # If it doesn't fail, verify the data is cleared
-            # The response might indicate no session exists
-            assert result_after != result_before
+            r.hotkeys_stop()
         except Exception:
-            # Expected - no session exists after reset
             pass
+        r.hotkeys_reset()
+
+        assert r.hotkeys_get() is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.5.240")
@@ -1578,11 +1626,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = r.pipeline(transaction=False)
         for i in range(20):
-            r.set("anyprefix:{3}:key", f"value{i}")
-            r.get(f"anyprefix:{3}:key")
-            r.set("anyprefix:{1}:key", f"value{i}")
-            r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         r.hotkeys_stop()
@@ -1630,11 +1681,14 @@ class TestRedisCommands:
         )
 
         # Perform operations to generate data
+        # one round trip; plain strings, so "{3}" stays a hashtag in the GETs
+        pipe = decoded_r.pipeline(transaction=False)
         for i in range(20):
-            decoded_r.set("anyprefix:{3}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{3}:key")
-            decoded_r.set("anyprefix:{1}:key", f"value{i}")
-            decoded_r.get(f"anyprefix:{1}:key")
+            pipe.set("anyprefix:{3}:key", f"value{i}")
+            pipe.get("anyprefix:{3}:key")
+            pipe.set("anyprefix:{1}:key", f"value{i}")
+            pipe.get("anyprefix:{1}:key")
+        pipe.execute()
 
         # Stop the session
         decoded_r.hotkeys_stop()
@@ -2288,6 +2342,7 @@ class TestRedisCommands:
         assert len(res_local) == 16
         assert res_server == res_local
 
+    @pytest.mark.fixed_client
     @pytest.mark.skipif(not HAS_XXHASH, reason="xxhash is not installed")
     def test_local_digest_encodes_with_the_client_encoding(self):
         """
@@ -2449,6 +2504,23 @@ class TestRedisCommands:
         result = r.increx(key, byfloat=0.25, lbound=0, ubound=2)
         assert [float(value) for value in result] == pytest.approx([1.75, 0.25])
         assert float(r[key]) == pytest.approx(1.75)
+
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("8.7.0")
+    @pytest.mark.parametrize("protocol", [2, 3])
+    def test_increx_unified_responses(self, request, protocol):
+        r = _get_client(redis.Redis, request, protocol=protocol, legacy_responses=False)
+        key = "increx:unified"
+        assert r.set(key, "1.5")
+        assert r.increx(key, byfloat=0.25) == [1.75, 0.25]
+        # A rejected increment returns the current value and a zero increment.
+        result = r.increx(key, byfloat=0.75, ubound=2)
+        assert result == [1.75, 0.0]
+        assert all(type(value) is float for value in result)
+        assert r.set(key, 20)
+        result = r.increx(key, byint=4)
+        assert result == [24, 4]
+        assert all(type(value) is int for value in result)
 
     @skip_if_server_version_lt("8.7.0")
     def test_increx_saturating_bounds(self, r):
@@ -2666,10 +2738,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert r.ttl("1:{test:1}") < 10
+        assert 0 < r.pttl("1:{test:1}") < 10000
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -2828,10 +2900,10 @@ class TestRedisCommands:
             assert pytest.approx(ttl) == 10
 
         assert r.mget(*all_test_keys) == [b"1", b"2"]
-        time.sleep(1.1)
-        # validate keepttl
+        time.sleep(0.01)
+        # validate keepttl: the TTL keeps counting down instead of being cleared
         assert r.msetex(mapping={"1": 11}, keepttl=True) == 1
-        assert r.ttl("1") < 10
+        assert 0 < r.pttl("1") < 10000
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
@@ -3457,7 +3529,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
         )
-        assert r.blpop(["b", "a"], timeout=1) is None
+        assert r.blpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3477,7 +3549,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
         )
-        assert r.brpop(["b", "a"], timeout=1) is None
+        assert r.brpop(["b", "a"], timeout=0.1) is None
         r.rpush("c", "1")
         assert_resp_response(r, r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
@@ -3487,7 +3559,7 @@ class TestRedisCommands:
         r.rpush("b", "3", "4")
         assert r.brpoplpush("a", "b") == b"2"
         assert r.brpoplpush("a", "b") == b"1"
-        assert r.brpoplpush("a", "b", timeout=1) is None
+        assert r.brpoplpush("a", "b", timeout=0.1) is None
         assert r.lrange("a", 0, -1) == []
         assert r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
@@ -3506,7 +3578,7 @@ class TestRedisCommands:
             r.blmpop(1, "2", "b", "a", count=2)
         r.rpush("b", "6", "7", "8", "9")
         assert r.blmpop(0, "2", "b", "a", direction="LEFT") == [b"b", [b"6"]]
-        assert r.blmpop(1, "2", "foo", "bar", direction="RIGHT") is None
+        assert r.blmpop(0.1, "2", "foo", "bar", direction="RIGHT") is None
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -4461,6 +4533,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = r.hscan("a", no_values=False)
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = r.hscan("a_notset")
         assert dic == {}
 
@@ -4482,6 +4556,8 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = dict(r.hscan_iter("a", match="a"))
         assert dic == {b"a": b"1"}
+        dic = dict(r.hscan_iter("a", no_values=False))
+        assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = dict(r.hscan_iter("a_notset"))
         assert dic == {}
 
@@ -4510,6 +4586,7 @@ class TestRedisCommands:
         else:
             assert set(pairs) == {(b"a", 1)}
 
+    @pytest.mark.fixed_client
     def test_zscan_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = (b"0", [b"member1", b"1.7732526297292595e+18"])
@@ -4689,6 +4766,479 @@ class TestRedisCommands:
         assert r.sunionstore("c", "a", "b") == 3
         assert set(r.smembers("c")) == {b"1", b"2", b"3"}
 
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_basic(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        assert r.sexpire("test:set", 1, "member1") == [1]
+        # test_spexpire_basic waits for a real expiry; here the stored TTL is enough
+        assert r.sttl("test:set", "member1", "member2") == [1, -1]
+        assert 0 < (r.spttl("test:set", "member1"))[0] <= 1000
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_with_timedelta(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        assert r.sexpire("test:set", datetime.timedelta(seconds=10), "member1") == [1]
+        # test_sexpire_basic waits for a real expiry; here the stored TTL is enough
+        assert 0 < r.spttl("test:set", "member1")[0] <= 10000
+        assert r.sttl("test:set", "member2") == [-1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_conditions(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        assert r.sexpire("test:set", 20, "member1", xx=True) == [0]
+        assert r.sexpire("test:set", 20, "member1", nx=True) == [1]
+        assert r.sexpire("test:set", 10, "member1", xx=True) == [1]
+        assert r.sexpire("test:set", 20, "member1", nx=True) == [0]
+        # the xx call lowered the TTL and the last nx call left it alone
+        assert 0 < r.spttl("test:set", "member1")[0] <= 10000
+        r.sexpire("test:set", 20, "member1")
+        assert r.sexpire("test:set", 10, "member1", gt=True) == [0]
+        assert r.sexpire("test:set", 10, "member1", lt=True) == [1]
+        assert 0 < r.spttl("test:set", "member1")[0] <= 10000
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_no_expiration_counts_as_infinite(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        # a member without an expiration never passes GT and always passes LT
+        assert r.sexpire("test:set", 100, "member1", gt=True) == [0]
+        assert r.sttl("test:set", "member1") == [-1]
+        assert r.sexpire("test:set", 100, "member2", lt=True) == [1]
+        assert 0 < r.sttl("test:set", "member2")[0] <= 100
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_nonexistent_key_or_member(self, r):
+        r.delete("test:set")
+        assert r.sexpire("test:set", 1, "member1", "member2") == [-2, -2]
+        assert r.exists("test:set") == 0
+        r.sadd("test:set", "member1")
+        assert r.sexpire("test:set", 1, "nonexistent_member") == [-2]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_multiple_members(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2", "member3")
+        r.sexpire("test:set", 100, "member1")
+        # the condition is evaluated per member, in the order of the request
+        assert r.sexpire(
+            "test:set", 50, "member1", "member2", "nonexistent", nx=True
+        ) == [
+            0,
+            1,
+            -2,
+        ]
+        ttls = r.sttl("test:set", "member1", "member2", "member3")
+        assert 50 < ttls[0] <= 100
+        assert 0 < ttls[1] <= 50
+        assert ttls[2] == -1
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_multiple_condition_flags_error(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        with pytest.raises(ValueError) as e:
+            r.sexpire("test:set", 1, "member1", nx=True, xx=True)
+        assert "Only one of" in str(e)
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpire_past_time_deletes_members_and_key(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2", "member3")
+        assert r.sexpire("test:set", 0, "member1") == [2]
+        assert r.smembers("test:set") == {b"member2", b"member3"}
+        # when the last members go, the key goes with them
+        assert r.spexpireat("test:set", 1, "member2", "member3") == [2, 2]
+        assert r.exists("test:set") == 0
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpire_basic(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        assert r.spexpire("test:set", 100, "member1") == [1]
+        # poll rather than sleep for the full TTL
+        deadline = time.monotonic() + 3.0
+        while r.sismember("test:set", "member1"):
+            assert time.monotonic() < deadline, "member1 did not expire"
+            time.sleep(0.01)
+        assert r.smembers("test:set") == {b"member2"}
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpire_with_timedelta(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        assert r.spexpire(
+            "test:set", datetime.timedelta(milliseconds=5000), "member1"
+        ) == [1]
+        assert 0 < r.spttl("test:set", "member1")[0] <= 5000
+        assert r.spttl("test:set", "member2") == [-1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpire_conditions(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        assert r.spexpire("test:set", 20000, "member1", xx=True) == [0]
+        assert r.spexpire("test:set", 20000, "member1", nx=True) == [1]
+        assert r.spexpire("test:set", 10000, "member1", gt=True) == [0]
+        assert r.spexpire("test:set", 10000, "member1", lt=True) == [1]
+        assert 0 < r.spttl("test:set", "member1")[0] <= 10000
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpire_multiple_condition_flags_error(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        with pytest.raises(ValueError) as e:
+            r.spexpire("test:set", 1000, "member1", gt=True, lt=True)
+        assert "Only one of" in str(e)
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpireat_basic(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+        )
+        assert r.sexpireat("test:set", exp_time, "member1") == [1]
+        assert r.sexpiretime("test:set", "member1", "member2") == [exp_time, -1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpireat_with_datetime(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        exp_time = (datetime.datetime.now() + datetime.timedelta(seconds=10)).replace(
+            microsecond=0
+        )
+        assert r.sexpireat("test:set", exp_time, "member1") == [1]
+        assert r.sexpiretime("test:set", "member1", "member2") == [
+            int(exp_time.timestamp()),
+            -1,
+        ]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpireat_conditions(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        future_exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+        )
+        past_exp_time = int(
+            (datetime.datetime.now() - datetime.timedelta(seconds=10)).timestamp()
+        )
+        assert r.sexpireat("test:set", future_exp_time, "member1", xx=True) == [0]
+        assert r.sexpireat("test:set", future_exp_time, "member1", nx=True) == [1]
+        assert r.sexpireat("test:set", past_exp_time, "member1", gt=True) == [0]
+        assert r.sexpireat("test:set", past_exp_time, "member1", lt=True) == [2]
+        assert r.exists("test:set") == 0
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpireat_basic(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+            * 1000
+        )
+        assert r.spexpireat("test:set", exp_time, "member1") == [1]
+        # the stored expire time is exact
+        assert r.spexpiretime("test:set", "member1", "member2") == [exp_time, -1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpireat_with_datetime(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        exp_time = datetime.datetime.now() + datetime.timedelta(seconds=10)
+        assert r.spexpireat("test:set", exp_time, "member1") == [1]
+        assert r.spexpiretime("test:set", "member1", "member2") == [
+            int(exp_time.timestamp() * 1000),
+            -1,
+        ]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpireat_multiple_condition_flags_error(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+        )
+        with pytest.raises(ValueError) as e:
+            r.sexpireat("test:set", exp_time, "member1", xx=True, gt=True)
+        assert "Only one of" in str(e)
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpireat_conditions(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        future_exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+            * 1000
+        )
+        past_exp_time = int(
+            (datetime.datetime.now() - datetime.timedelta(seconds=10)).timestamp()
+            * 1000
+        )
+        assert r.spexpireat("test:set", future_exp_time, "member1", xx=True) == [0]
+        assert r.spexpireat("test:set", future_exp_time, "member1", nx=True) == [1]
+        assert r.spexpireat("test:set", past_exp_time, "member1", gt=True) == [0]
+        assert r.spexpireat("test:set", past_exp_time, "member1", lt=True) == [2]
+        assert r.exists("test:set") == 0
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spexpireat_multiple_condition_flags_error(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        exp_time = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=10)).timestamp()
+            * 1000
+        )
+        with pytest.raises(ValueError) as e:
+            r.spexpireat("test:set", exp_time, "member1", nx=True, lt=True)
+        assert "Only one of" in str(e)
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spersist_multiple_members(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        r.sexpire("test:set", 5000, "member1")
+        assert r.spersist("test:set", "member1", "member2", "member3") == [1, -1, -2]
+        assert r.sttl("test:set", "member1") == [-1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_spersist_nonexistent_key(self, r):
+        r.delete("test:set")
+        assert r.spersist("test:set", "member1", "member2") == [-2, -2]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sttl_and_spttl_multiple_members(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        r.spexpire("test:set", 1800, "member1")
+        ttl = r.sttl("test:set", "member1", "member2", "member3")
+        # STTL rounds up, so a live member never reports 0; the exact rounding is
+        # pinned by test_sexpiretime_and_spexpiretime_multiple_members
+        assert ttl[0] in (1, 2)
+        assert ttl[1:] == [-1, -2]
+        pttl = r.spttl("test:set", "member1", "member2", "member3")
+        assert 0 < pttl[0] <= 1800
+        assert pttl[1:] == [-1, -2]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sttl_and_spttl_nonexistent_key(self, r):
+        r.delete("test:set")
+        assert r.sttl("test:set", "member1", "member2") == [-2, -2]
+        assert r.spttl("test:set", "member1", "member2") == [-2, -2]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpiretime_and_spexpiretime_multiple_members(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        exp_time_ms = int(
+            (datetime.datetime.now() + datetime.timedelta(minutes=30)).timestamp()
+            * 1000
+        )
+        r.spexpireat("test:set", exp_time_ms, "member1")
+        assert r.spexpiretime("test:set", "member1", "member2", "member3") == [
+            exp_time_ms,
+            -1,
+            -2,
+        ]
+        # SEXPIRETIME rounds up to the next second
+        assert r.sexpiretime("test:set", "member1", "member2", "member3") == [
+            (exp_time_ms + 999) // 1000,
+            -1,
+            -2,
+        ]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_sexpiretime_and_spexpiretime_nonexistent_key(self, r):
+        r.delete("test:set")
+        assert r.sexpiretime("test:set", "member1", "member2") == [-2, -2]
+        assert r.spexpiretime("test:set", "member1", "member2") == [-2, -2]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_no_expiration(self, r):
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", "member2") == 1
+        assert r.smembers("test:set") == {b"member1", b"member2"}
+        assert r.sttl("test:set", "member1", "member2") == [-1, -1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_nothing_changed(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        # 0 when no member was added, updated or deleted
+        assert r.saddex("test:set", "member1") == 0
+        assert r.saddex("test:set", "member1", keepttl=True) == 0
+        assert r.smembers("test:set") == {b"member1"}
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_without_expiration_discards_existing_one(self, r):
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", ex=100) == 1
+        assert r.saddex("test:set", "member1", "member2") == 1
+        assert r.sttl("test:set", "member1", "member2") == [-1, -1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_expiration_ex_and_keepttl(self, r):
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", "member2", ex=10) == 1
+        ttls = r.sttl("test:set", "member1", "member2")
+        for ttl in ttls:
+            assert 0 < ttl <= 10
+        # keepttl keeps the existing expiration; a new member gets none
+        assert r.saddex("test:set", "member1", "member3", keepttl=True) == 1
+        assert 0 < r.spttl("test:set", "member1")[0] <= 10000
+        assert r.sttl("test:set", "member3") == [-1]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_expiration_px(self, r):
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", "member2", px=60000) == 1
+        pttls = r.spttl("test:set", "member1", "member2")
+        for pttl in pttls:
+            assert 0 < pttl <= 60000
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_expiration_digit_strings(self, r):
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", ex="60") == 1
+        assert 0 < r.sttl("test:set", "member1")[0] <= 60
+        assert r.saddex("test:set", "member2", px="500") == 1
+        assert 0 < r.spttl("test:set", "member2")[0] <= 500
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_expiration_exat_and_pxat(self, r):
+        r.delete("test:set")
+        exat = datetime.datetime.now() + datetime.timedelta(seconds=30)
+        assert r.saddex("test:set", "member1", exat=exat) == 1
+        assert r.sexpiretime("test:set", "member1") == [int(exat.timestamp())]
+        pxat = int(
+            (datetime.datetime.now() + datetime.timedelta(seconds=30)).timestamp()
+            * 1000
+        )
+        assert r.saddex("test:set", "member2", pxat=pxat) == 1
+        assert r.spexpiretime("test:set", "member2") == [pxat]
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_mnx(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1")
+        # MNX fails as a whole when any member exists
+        assert (
+            r.saddex(
+                "test:set",
+                "member1",
+                "member2",
+                ex=10,
+                data_persist_option=SetDataPersistOptions.MNX,
+            )
+            == 0
+        )
+        assert r.smembers("test:set") == {b"member1"}
+        assert r.sttl("test:set", "member1") == [-1]
+        assert (
+            r.saddex(
+                "test:set",
+                "member2",
+                "member3",
+                ex=10,
+                data_persist_option=SetDataPersistOptions.MNX,
+            )
+            == 1
+        )
+        assert r.smembers("test:set") == {b"member1", b"member2", b"member3"}
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_mxx(self, r):
+        r.delete("test:set")
+        # MXX on a key that does not exist creates nothing
+        assert (
+            r.saddex(
+                "test:set", "member1", data_persist_option=SetDataPersistOptions.MXX
+            )
+            == 0
+        )
+        assert r.exists("test:set") == 0
+        r.sadd("test:set", "member1", "member2")
+        assert (
+            r.saddex(
+                "test:set",
+                "member1",
+                "member3",
+                ex=10,
+                data_persist_option=SetDataPersistOptions.MXX,
+            )
+            == 0
+        )
+        assert r.smembers("test:set") == {b"member1", b"member2"}
+        assert (
+            r.saddex(
+                "test:set",
+                "member1",
+                "member2",
+                ex=10,
+                data_persist_option=SetDataPersistOptions.MXX,
+            )
+            == 1
+        )
+        ttls = r.sttl("test:set", "member1", "member2")
+        for ttl in ttls:
+            assert 0 < ttl <= 10
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_past_expiration_removes_members(self, r):
+        r.delete("test:set")
+        r.sadd("test:set", "member1", "member2")
+        # 1 because member1 was deleted, even though nothing was added
+        assert r.saddex("test:set", "member1", "member3", pxat=1) == 1
+        assert r.smembers("test:set") == {b"member2"}
+        # 0 when there is nothing to delete; the key is not created
+        r.delete("test:set")
+        assert r.saddex("test:set", "member1", exat=1) == 0
+        assert r.exists("test:set") == 0
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_saddex_invalid_inputs(self, r):
+        with pytest.raises(exceptions.DataError):
+            r.saddex("test:set", "member1", ex=10.0)
+
+        with pytest.raises(exceptions.DataError):
+            r.saddex("test:set", "member1", ex=10, px=1000)
+
+        with pytest.raises(exceptions.DataError):
+            r.saddex("test:set", "member1", ex=10, keepttl=True)
+
+        # the server rejects an empty member list
+        with pytest.raises(exceptions.ResponseError):
+            r.saddex("test:set")
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_set_member_expiration_wrong_type(self, r):
+        r.delete("test:set")
+        r.set("test:set", "value")
+        with pytest.raises(exceptions.ResponseError, match="WRONGTYPE"):
+            r.sexpire("test:set", 10, "member1")
+        with pytest.raises(exceptions.ResponseError, match="WRONGTYPE"):
+            r.sttl("test:set", "member1")
+        with pytest.raises(exceptions.ResponseError, match="WRONGTYPE"):
+            r.saddex("test:set", "member1")
+
+    @skip_if_server_version_lt("8.11.240")
+    def test_set_member_expiration_pipeline(self, r):
+        r.delete("test:set")
+        with r.pipeline() as pipe:
+            pipe.saddex("test:set", "member1", "member2", ex=100)
+            pipe.sexpire("test:set", 50, "member1", "member3", lt=True)
+            pipe.spersist("test:set", "member2")
+            pipe.sttl("test:set", "member1", "member2", "member3")
+            saddex, sexpire, spersist, sttl = pipe.execute()
+        assert saddex == 1
+        assert sexpire == [1, -2]
+        assert spersist == [1]
+        assert 0 < sttl[0] <= 50
+        assert sttl[1:] == [-1, -2]
+
     @skip_if_server_version_lt("1.0.0")
     @skip_if_redis_enterprise()
     def test_debug_segfault(self, r):
@@ -4834,6 +5384,32 @@ class TestRedisCommands:
         r.zadd("a", {"a": 0, "b": 0, "c": 0, "d": 0, "e": 0, "f": 0, "g": 0})
         assert r.zlexcount("a", "-", "+") == 7
         assert r.zlexcount("a", "[b", "[f") == 5
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize(
+        "keys_factory", [dict, UserDict, MappingProxyType, ChainMap]
+    )
+    @pytest.mark.parametrize(
+        "command, expected",
+        [
+            ("zunion", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinter", [(b"shared", -1.0)]),
+            ("zunionstore", [(b"right", -7.0), (b"shared", -1.0), (b"left", 6.0)]),
+            ("zinterstore", [(b"shared", -1.0)]),
+        ],
+    )
+    def test_zaggregate_mapping_weights(self, r, keys_factory, command, expected):
+        # Mapping wrappers must retain weights and the resulting rank order.
+        r.zadd("a", {"shared": 2, "left": 3})
+        r.zadd("b", {"shared": 5, "right": 7})
+        keys = keys_factory({"a": 2, "b": -1})
+        if command.endswith("store"):
+            assert getattr(r, command)("destination", keys) == len(expected)
+            result = r.zrange("destination", 0, -1, withscores=True)
+        else:
+            result = getattr(r, command)(keys, withscores=True)
+        assert_resp_response(r, result, expected, [list(row) for row in expected])
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
@@ -5055,7 +5631,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmax(["b", "a"], timeout=1), (b"a", b"a1", 1), [b"a", b"a1", 1]
         )
-        assert r.bzpopmax(["b", "a"], timeout=1) is None
+        assert r.bzpopmax(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5078,7 +5654,7 @@ class TestRedisCommands:
         assert_resp_response(
             r, r.bzpopmin(["b", "a"], timeout=1), (b"a", b"a2", 2), [b"a", b"a2", 2]
         )
-        assert r.bzpopmin(["b", "a"], timeout=1) is None
+        assert r.bzpopmin(["b", "a"], timeout=0.1) is None
         r.zadd("c", {"c1": 100})
         assert_resp_response(
             r, r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
@@ -5123,7 +5699,7 @@ class TestRedisCommands:
             [b"b", [[b"b1", b"10"]]],
             [b"b", [[b"b1", 10.0]]],
         )
-        assert r.bzmpop(1, "2", ["foo", "bar"], max=True) is None
+        assert r.bzmpop(0.1, "2", ["foo", "bar"], max=True) is None
 
     def test_zrange(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -5154,6 +5730,7 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrange_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         # Simulates RESP2 response with large score in scientific notation
@@ -5217,6 +5794,81 @@ class TestRedisCommands:
         # rev
         assert r.zrange("a", 0, 1, desc=True) == [b"a5", b"a4"]
 
+    def test_zrange_desc_sends_zrevrange_by_default(self):
+        """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True)
+        execute.assert_called_once_with(
+            "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
+    def test_zrange_desc_default_withscores_sends_zrevrange(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, withscores=True, score_cast_func=int)
+        execute.assert_called_once_with(
+            "ZREVRANGE",
+            "a",
+            0,
+            -1,
+            b"WITHSCORES",
+            withscores=True,
+            score_cast_func=int,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_sends_zrange_rev(self):
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, desc=True, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            withscores=False,
+            score_cast_func=float,
+            keys=["a"],
+        )
+
+    def test_zrange_desc_use_rev_withscores_and_score_cast(self):
+        def cast_score(value):
+            return value
+
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange(
+                "a",
+                0,
+                -1,
+                desc=True,
+                withscores=True,
+                score_cast_func=cast_score,
+                use_rev=True,
+            )
+        execute.assert_called_once_with(
+            "ZRANGE",
+            "a",
+            0,
+            -1,
+            "REV",
+            "WITHSCORES",
+            withscores=True,
+            score_cast_func=cast_score,
+            keys=["a"],
+        )
+
+    def test_zrange_use_rev_without_desc_sends_plain_zrange(self):
+        """use_rev only affects the rank-based reverse path."""
+        r = redis.Redis()
+        with mock.patch.object(r, "execute_command", return_value=[]) as execute:
+            r.zrange("a", 0, -1, use_rev=True)
+        execute.assert_called_once_with(
+            "ZRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
+        )
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
     def test_zrangestore(self, r):
@@ -5240,6 +5892,15 @@ class TestRedisCommands:
         # by lex
         assert r.zrangestore("b", "a", "[a2", "(a3", bylex=True, offset=0, num=1)
         assert r.zrange("b", 0, -1) == [b"a2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    @pytest.mark.parametrize("dest", ["", b"", memoryview(b"")])
+    def test_zrangestore_empty_destination(self, r, dest):
+        r.zadd("source", {"a": 1, "b": 2, "c": 3})
+        assert r.zrangestore(dest, "source", 0, 1) == 2
+        assert r.zrange(dest, 0, -1) == [b"a", b"b"]
+        assert r.zrange("source", 0, -1) == [b"a", b"b", b"c"]
 
     @skip_if_server_version_lt("2.8.9")
     def test_zrangebylex(self, r):
@@ -5285,6 +5946,7 @@ class TestRedisCommands:
             [[b"a2", "2.0"], [b"a3", "3.0"], [b"a4", "4.0"]],
         )
 
+    @pytest.mark.fixed_client
     def test_zrangebyscore_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [b"a1", b"1.7732526297292595e+18", b"a2", b"2.5"]
@@ -5312,6 +5974,39 @@ class TestRedisCommands:
             r.zrank("a", "a3", withscore=True, score_cast_func=safe_str),
             [2, "3"],
             [2, "3.0"],
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.2.0")
+    def test_zset_scores_decode_responses(self, decoded_r: redis.Redis):
+        # Scores handed back as text must be str, as on a RESP2 connection.
+        r = decoded_r
+        identity = lambda x: x  # noqa: E731
+        r.zadd("a", {"a1": 1, "a2": 2.5})
+        r.zadd("b", {"a1": 1})
+        assert_resp_response(
+            r,
+            r.zdiff(["a", "b"], withscores=True),
+            ["a2", "2.5"],
+            [["a2", 2.5]],
+        )
+        assert_resp_response(
+            r,
+            r.zrange("a", 0, -1, withscores=True, score_cast_func=identity),
+            [("a1", "1"), ("a2", "2.5")],
+            [["a1", 1.0], ["a2", 2.5]],
+        )
+        assert_resp_response(
+            r,
+            r.zrank("a", "a2", withscore=True, score_cast_func=identity),
+            [1, "2.5"],
+            [1, 2.5],
+        )
+        assert_resp_response(
+            r,
+            r.zmpop(1, ["b"], min=True),
+            ["b", [["a1", "1"]]],
+            ["b", [["a1", 1.0]]],
         )
 
     def test_zrem(self, r):
@@ -5430,6 +6125,7 @@ class TestRedisCommands:
             [2, "3.0"],
         )
 
+    @pytest.mark.fixed_client
     def test_zrevrank_score_cast_scientific_notation(self):
         """score_cast_func=int handles scientific notation scores (issue #4000)."""
         response = [2, b"1.7732526297292595e+18"]
@@ -6313,6 +7009,9 @@ class TestRedisCommands:
         # specifying member and longitude and latitude
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="Paris", longitude=2, latitude=1)
+        # origin (0, 0) is a valid coordinate and must still conflict with member
+        with pytest.raises(exceptions.DataError):
+            r.geosearch("barcelona", member="Paris", longitude=0, latitude=0, radius=10)
         # specifying one of longitude and latitude
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", longitude=2)
@@ -6346,6 +7045,46 @@ class TestRedisCommands:
         # use any without count
         with pytest.raises(exceptions.DataError):
             assert r.geosearch("barcelona", member="place3", radius=100, any=1)
+
+    @pytest.mark.fixed_client
+    def test_geosearch_forwards_zero_numeric_arguments(self):
+        # GEOSEARCH zero arguments must be forwarded for server validation.
+        # Truthiness guards dropped those values, so the
+        # command on the wire omitted BYRADIUS/BYBOX/COUNT/FROMMEMBER or sent
+        # both FROMMEMBER and FROMLONLAT. Runs without a server.
+        client = redis.Redis()
+
+        def wire_args(**kwargs):
+            with mock.patch.object(client, "execute_command", return_value=[]) as m:
+                client.geosearch("places", **kwargs)
+                return list(m.call_args[0])
+
+        origin_radius = wire_args(longitude=0, latitude=0, radius=0, unit="m")
+        assert origin_radius[2:5] == [b"FROMLONLAT", 0, 0]
+        assert origin_radius[-3:] == [b"BYRADIUS", 0, "m"]
+
+        member_zero = wire_args(member=0, radius=10, unit="km")
+        assert member_zero[2:4] == [b"FROMMEMBER", 0]
+        assert member_zero[-3:] == [b"BYRADIUS", 10, "km"]
+
+        box_zero_width = wire_args(longitude=1, latitude=2, width=0, height=1, unit="m")
+        assert box_zero_width[-4:] == [b"BYBOX", 0, 1, "m"]
+
+        count_zero = wire_args(longitude=1, latitude=2, radius=10, count=0, unit="m")
+        assert count_zero[-2:] == [b"COUNT", 0]
+        assert b"COUNT" not in wire_args(longitude=1, latitude=2, radius=10, unit="m")
+
+        store_radius_zero = []
+        with mock.patch.object(client, "execute_command", return_value=0) as m:
+            client.geosearchstore("dest", "places", longitude=0, latitude=0, radius=0)
+            store_radius_zero = list(m.call_args[0])
+        assert store_radius_zero[:3] == ["GEOSEARCHSTORE", "dest", "places"]
+        assert store_radius_zero[-3:] == [b"BYRADIUS", 0, "m"]
+
+        with pytest.raises(exceptions.DataError):
+            client.geosearch(
+                "places", member="Paris", longitude=0, latitude=0, radius=10
+            )
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
@@ -8435,6 +9174,22 @@ class TestRedisCommands:
             if key.startswith("db."):
                 assert not isinstance(value, list)
 
+    @pytest.mark.fixed_client
+    @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
+    @pytest.mark.parametrize("protocol", [2, 3])
+    def test_memory_stats_unified_responses(self, request, protocol):
+        r = _get_client(redis.Redis, request, protocol=protocol, legacy_responses=False)
+        r.set("foo", "bar")
+        stats = r.memory_stats()
+        # Redis replies with doubles for these, which RESP2 sends as bulk strings.
+        for key in ("dataset.percentage", "peak.percentage", "fragmentation"):
+            assert type(stats[key]) is float
+        assert type(stats["peak.allocated"]) is int
+        for key, value in stats.items():
+            if key.startswith("db.") and isinstance(value, dict):
+                assert all(type(v) is int for v in value.values())
+
     @skip_if_server_version_lt("4.0.0")
     def test_memory_usage(self, r):
         r.set("foo", "bar")
@@ -8526,7 +9281,6 @@ class TestRedisCommands:
         assert "set" in cmds
         assert "get" in cmds
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
@@ -8722,7 +9476,29 @@ class TestBinarySave:
         for key, value in mapping.items():
             assert r.lrange(key, 0, -1) == value
 
-    def test_22_info(self, r):
+    @skip_if_redis_enterprise()
+    def test_large_responses(self, r):
+        "The PythonParser has some special cases for return values > 1MB"
+        # load up 5MB of data into a key
+        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
+        r["a"] = data
+        assert r["a"] == data.encode()
+
+    def test_floating_point_encoding(self, r):
+        """
+        High precision floating point values sent to the server should keep
+        precision.
+        """
+        timestamp = 1349673917.939762
+        r.zadd("a", {"a1": timestamp})
+        assert r.zscore("a", "a1") == timestamp
+
+
+@pytest.mark.fixed_client
+class TestInfoParsing:
+    """INFO reply parsing on canned replies; no server needed."""
+
+    def test_22_info(self):
         """
         Older Redis versions contained 'allocation_stats' in INFO that
         was the cause of a number of bugs when parsing.
@@ -8757,20 +9533,3 @@ class TestBinarySave:
         assert "allocation_stats" in parsed
         assert "6" in parsed["allocation_stats"]
         assert ">=256" in parsed["allocation_stats"]
-
-    @skip_if_redis_enterprise()
-    def test_large_responses(self, r):
-        "The PythonParser has some special cases for return values > 1MB"
-        # load up 5MB of data into a key
-        data = "".join([ascii_letters] * (5000000 // len(ascii_letters)))
-        r["a"] = data
-        assert r["a"] == data.encode()
-
-    def test_floating_point_encoding(self, r):
-        """
-        High precision floating point values sent to the server should keep
-        precision.
-        """
-        timestamp = 1349673917.939762
-        r.zadd("a", {"a1": timestamp})
-        assert r.zscore("a", "a1") == timestamp

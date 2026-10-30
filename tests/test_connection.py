@@ -6,12 +6,15 @@ import select
 import selectors
 import socket
 import ssl
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 import types
 import warnings
 import weakref
-from errno import EBADF, ECONNREFUSED, EWOULDBLOCK
+from errno import EBADF, ECONNREFUSED, ETIMEDOUT, EWOULDBLOCK
 from importlib import metadata
 from typing import Any
 from unittest import mock
@@ -41,6 +44,7 @@ from redis.cache import (
 from redis.connection import (
     CacheProxyConnection,
     Connection,
+    ConnectionInterface,
     HiredisRespSerializer,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -109,6 +113,29 @@ def make_hiredis_parser(
     return parser
 
 
+def _wait_for_peer_close(sock, timeout=5.0):
+    """Poll until the peer's FIN shows up in the socket's poll flags.
+
+    Readability alone is not enough: data sent before the close makes the socket
+    readable before the FIN arrives. macOS reports POLLHUP, Linux POLLRDHUP.
+    Without POLLRDHUP (PyPy) a Linux FIN shows only as POLLIN, which buffered data
+    hides, so there the wait ends once the socket is readable plus a short grace.
+    """
+    rdhup = getattr(select, "POLLRDHUP", None)
+    closed_flags = select.POLLHUP | (rdhup or 0)
+    poller = select.poll()
+    poller.register(sock, select.POLLIN | closed_flags)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        events = [ev for _, ev in poller.poll(50)]
+        if any(ev & closed_flags for ev in events):
+            return
+        if events and rdhup is None:
+            time.sleep(0.1)
+            return
+    raise AssertionError("the peer close did not reach the socket in time")
+
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 def test_invalid_response(r):
@@ -119,6 +146,7 @@ def test_invalid_response(r):
             parser.read_response()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_detects_reader_data():
     parser = make_hiredis_parser(response=b"OK", has_data=True)
 
@@ -126,6 +154,7 @@ def test_hiredis_can_read_detects_reader_data():
     assert parser.read_response() == b"OK"
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_returns_true_for_readable_open_socket():
     # socket readable, reader empty, and not closed -> pending data/push, so
     # can_read() reports readable without consuming anything.
@@ -141,6 +170,7 @@ def test_hiredis_can_read_returns_true_for_readable_open_socket():
     closed.assert_called_once_with(parser._sock)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_raises_on_peer_closed_socket():
     # regression for #4128: a peer-closed socket reads as ready but the reader
     # has no buffered data. can_read() must raise ConnectionError so the pool
@@ -155,6 +185,7 @@ def test_hiredis_can_read_raises_on_peer_closed_socket():
             parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
@@ -181,7 +212,7 @@ def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
     try:
         server.sendall(b">3\r\n$7\r\nmessage\r\n$2\r\nch\r\n$5\r\nhello\r\n")
         server.close()  # graceful FIN with the push message still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert parser.can_read(timeout=0) is True
         assert parser.read_response(push_request=True) == [b"message", b"ch", b"hello"]
@@ -193,6 +224,7 @@ def test_hiredis_can_read_consumes_pending_push_before_reporting_closed():
         listener.close()
 
 
+@pytest.mark.fixed_client
 def test_socket_is_closed_reports_not_closed_with_pending_ssl_data():
     # SSL sockets buffer decrypted bytes above the OS socket layer; those must
     # be processed before the connection can be treated as closed, like
@@ -269,8 +301,33 @@ def test_hiredis_socket_can_read_handles_high_file_descriptor():
             os.close(high_read_fd)
 
 
+_FD_EXHAUSTION_SCRIPT = textwrap.dedent(
+    """
+    import os
+    import resource
+    import socket
+
+    from redis._parsers.hiredis import _socket_can_read
+
+    readable, writable = socket.socketpair()
+    empty_sock, peer = socket.socketpair()
+    writable.sendall(b"x")
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(soft, 256), hard))
+    try:
+        while True:
+            os.dup(0)
+    except OSError:
+        pass  # fd table is now full
+
+    assert _socket_can_read(readable, timeout=0) is True
+    assert _socket_can_read(empty_sock, timeout=0) is False
+    """
+)
+
+
 @pytest.mark.fixed_client
-@pytest.mark.forked
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -280,36 +337,30 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
     # allocate file descriptors themselves. A per-check epoll/kqueue selector
     # raises OSError (EMFILE) here; the poll() implementation passes.
     #
-    # RLIMIT_NOFILE is process-wide, so @pytest.mark.forked runs this in its own
-    # process to avoid starving other threads/tests of file descriptors.
-    resource = pytest.importorskip("resource")
+    # RLIMIT_NOFILE is process-wide, so the check runs in a child interpreter
+    # to avoid starving other threads/tests of file descriptors.
+    pytest.importorskip("resource")
 
-    readable, writable = socket.socketpair()
-    empty_sock, peer = socket.socketpair()
-    writable.sendall(b"x")
+    # Point the child at the redis package under test, not whatever else
+    # happens to be importable from its working directory.
+    env = dict(os.environ)
+    redis_root = os.path.dirname(os.path.dirname(redis.__file__))
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [redis_root, env.get("PYTHONPATH")])
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", _FD_EXHAUSTION_SCRIPT],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
 
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    held_fds = []
-    try:
-        resource.setrlimit(resource.RLIMIT_NOFILE, (min(soft, 256), hard))
-        try:
-            while True:
-                held_fds.append(os.dup(0))
-        except OSError:
-            pass  # fd table is now full
-
-        assert _socket_can_read(readable, timeout=0) is True
-        assert _socket_can_read(empty_sock, timeout=0) is False
-    finally:
-        for fd in held_fds:
-            os.close(fd)
-        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
-        readable.close()
-        writable.close()
-        empty_sock.close()
-        peer.close()
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -331,6 +382,7 @@ def test_socket_is_closed_detects_peer_close():
         closed.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -347,13 +399,14 @@ def test_socket_is_closed_detects_tcp_peer_half_close():
     try:
         assert _socket_is_closed(client) is False
         server.close()  # graceful FIN
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
         assert _socket_is_closed(client) is True
     finally:
         client.close()
         listener.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -371,7 +424,7 @@ def test_socket_is_closed_defers_close_until_pending_data_is_read():
     try:
         server.sendall(b"pending invalidation")
         server.close()  # graceful FIN with data still buffered
-        time.sleep(0.1)
+        _wait_for_peer_close(client)
 
         assert _socket_is_closed(client) is False
         # the MSG_PEEK confirmation must not consume the pending data
@@ -382,6 +435,7 @@ def test_socket_is_closed_defers_close_until_pending_data_is_read():
         listener.close()
 
 
+@pytest.mark.fixed_client
 def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
     # without select.poll (e.g. Windows) closed and has-data states are
     # indistinguishable here, so we conservatively report not-closed.
@@ -394,6 +448,7 @@ def test_socket_is_closed_without_poll_reports_not_closed(monkeypatch):
         closed.close()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_does_not_decide_disable_decoding():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(
@@ -406,6 +461,7 @@ def test_hiredis_can_read_does_not_decide_disable_decoding():
     assert parser.read_response(disable_decoding=True) == raw
 
 
+@pytest.mark.fixed_client
 def test_hiredis_can_read_leaves_decoding_to_read_response():
     raw = b"\xe2\x98\x83"
     parser = make_hiredis_parser(
@@ -418,6 +474,7 @@ def test_hiredis_can_read_leaves_decoding_to_read_response():
     assert parser.read_response() == raw.decode()
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_returns_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     handled_response = object()
@@ -430,6 +487,7 @@ def test_hiredis_read_response_returns_initial_push_notification():
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_skips_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     parser = make_hiredis_parser()
@@ -441,6 +499,7 @@ def test_hiredis_read_response_skips_initial_push_notification():
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_preserves_timeout_after_initial_push_notification():
     push_response = DummyPushNotification([b"message", b"channel", b"data"])
     parser = make_hiredis_parser()
@@ -457,6 +516,7 @@ def test_hiredis_read_response_preserves_timeout_after_initial_push_notification
     parser.pubsub_push_handler_func.assert_called_once_with(push_response)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
     parser = make_hiredis_parser()
     parser._sock.recv_into.side_effect = BlockingIOError(
@@ -467,6 +527,7 @@ def test_hiredis_read_response_timeout_zero_maps_would_block_to_timeout():
         parser.read_response(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
 def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
     cleared_attr,
@@ -483,6 +544,7 @@ def test_hiredis_read_from_socket_raises_connection_error_when_disconnected(
         parser.read_from_socket()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("cleared_attr", ["_reader", "_sock"])
 def test_hiredis_can_read_raises_connection_error_when_disconnected(cleared_attr):
     # a disconnect from another thread (e.g. the multi-database health check
@@ -498,6 +560,7 @@ def test_hiredis_can_read_raises_connection_error_when_disconnected(cleared_attr
         parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )
@@ -514,6 +577,7 @@ def test_hiredis_can_read_raises_connection_error_when_socket_already_closed():
         parser.can_read(timeout=0)
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     # regression for #4003: if _reader is cleared by a concurrent disconnect
     # after read_from_socket() returns, the in-flight read must still complete
@@ -530,6 +594,7 @@ def test_hiredis_read_response_uses_local_reader_if_disconnected_mid_read():
     assert parser.read_response() == b"OK"
 
 
+@pytest.mark.fixed_client
 def test_hiredis_read_reports_concurrent_close_when_timeout_restore_fails():
     # a concurrent disconnect() closes the socket as well as clearing the parser
     # state, so restoring the per-call timeout in the finally raises EBADF. an
@@ -548,6 +613,7 @@ def test_hiredis_read_reports_concurrent_close_when_timeout_restore_fails():
         parser.read_from_socket(timeout=1)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
     sock = Mock()
     sock.recv.side_effect = BlockingIOError(
@@ -559,6 +625,7 @@ def test_socket_buffer_timeout_zero_maps_would_block_to_timeout():
         socket_buffer.readline(timeout=0)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_read_after_close_raises_connection_error():
     """
     A read on a closed buffer reports a gone connection.
@@ -585,6 +652,7 @@ def test_socket_buffer_read_after_close_raises_connection_error():
         socket_buffer.unread_bytes()
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_read_reports_concurrent_close_as_connection_error():
     """
     A close that lands while the read is blocked in recv reports a gone connection.
@@ -605,6 +673,7 @@ def test_socket_buffer_read_reports_concurrent_close_as_connection_error():
         socket_buffer.readline()
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_reports_concurrent_close_when_timeout_restore_fails():
     """
     A per-call timeout that can no longer be restored does not hide the close.
@@ -629,6 +698,7 @@ def test_socket_buffer_reports_concurrent_close_when_timeout_restore_fails():
         socket_buffer.readline(timeout=1)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_cleanup_after_close_does_not_raise():
     """
     ``purge`` and ``rewind`` stay best effort on a closed buffer.
@@ -644,6 +714,7 @@ def test_socket_buffer_cleanup_after_close_does_not_raise():
     socket_buffer.rewind(0)
 
 
+@pytest.mark.fixed_client
 def test_socket_buffer_purge_survives_a_close_landing_mid_purge():
     """
     ``purge`` stays best effort when the close lands inside it.
@@ -1006,6 +1077,7 @@ def test_pack_command(Class):
     assert actual == expected, f"actual = {actual}, expected = {expected}"
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("protocol", [2, 3])
 def test_pack_command_respects_connection_encoding(protocol):
     connection = Connection(encoding="latin-1", protocol=protocol)
@@ -1015,6 +1087,7 @@ def test_pack_command_respects_connection_encoding(protocol):
     ]
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 def test_hiredis_command_packer_no_arg_constructor():
     connection = Connection(command_packer=HiredisRespSerializer())
@@ -1034,6 +1107,7 @@ def test_create_single_connection_client_from_url():
     assert client.connection is not None
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_pool_auto_close(request, from_url):
     """Verify that basic Redis instances have auto_close_connection_pool set to True"""
@@ -1051,6 +1125,7 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -1084,6 +1159,7 @@ def test_redis_connection_pool(request, from_url):
     pool.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_from_pool(request, from_url):
     """Verify that basic Redis instances created using `from_pool()`
@@ -1130,6 +1206,7 @@ def test_create_secure_client_from_url_with_minimum_ssl_version():
     )
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "conn, error, expected_message",
     [
@@ -1161,6 +1238,27 @@ def test_format_error_message(conn, error, expected_message):
     """Test that the _error_message function formats errors correctly"""
     error_message = conn._error_message(error)
     assert error_message == expected_message
+
+
+@pytest.mark.fixed_client
+def test_ssl_handshake_uses_socket_connect_timeout():
+    conn = SSLConnection(
+        socket_timeout=0.05, socket_connect_timeout=4, ssl_cert_reqs="none"
+    )
+    handshake_timeouts = []
+    ssl_sock = MagicMock()
+
+    def wrap_socket(context, sock, **kwargs):
+        handshake_timeouts.append(sock.gettimeout())
+        return ssl_sock
+
+    with socket.socket() as sock:
+        sock.settimeout(conn.socket_timeout)
+        with patch.object(ssl.SSLContext, "wrap_socket", wrap_socket):
+            assert conn._wrap_socket_with_ssl(sock) is ssl_sock
+
+    assert handshake_timeouts == [4]
+    ssl_sock.settimeout.assert_called_once_with(0.05)
 
 
 @pytest.mark.fixed_client
@@ -1784,6 +1882,80 @@ class TestUnitCacheProxyConnection:
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
+    def test_drain_of_another_connection_holds_no_cache_lock(
+        self, mock_cache, mock_connection
+    ):
+        """
+        The drain takes the pool lock, and an invalidation it reads runs the owner's
+        callback under the owner's cache lock. Holding this connection's cache lock across
+        it orders a cache lock before the pool lock, so two connections draining each other,
+        or a ``pool.disconnect()`` reaching this one, deadlock.
+        """
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_entry = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.return_value = cache_entry
+        mock_connection.can_read.return_value = False
+
+        pool_lock = threading.RLock()
+        proxy_connection = CacheProxyConnection(mock_connection, mock_cache, pool_lock)
+        acquired = []
+
+        def read_invalidation(**kwargs):
+            cache_lock_available = False
+            pool_lock_available = False
+
+            def probe_locks():
+                nonlocal cache_lock_available, pool_lock_available
+                # The sending thread must still hold the pool lock during this probe.
+                pool_lock_available = pool_lock.acquire(blocking=False)
+                if pool_lock_available:
+                    pool_lock.release()
+                cache_lock_available = proxy_connection._cache_lock.acquire(
+                    blocking=False
+                )
+                if cache_lock_available:
+                    proxy_connection._cache_lock.release()
+
+            other = threading.Thread(target=probe_locks)
+            other.start()
+            other.join(timeout=5)
+            assert not other.is_alive()
+            assert not pool_lock_available
+            acquired.append(cache_lock_available)
+            return None
+
+        another_conn.read_response.side_effect = read_invalidation
+
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        another_conn.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
+        assert acquired == [True]
+        mock_connection.send_command.assert_not_called()
+        assert proxy_connection.read_response() == b"bar"
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
     def test_sends_command_when_cache_entry_invalidated_during_drain(
         self, mock_cache, mock_connection
     ):
@@ -2033,6 +2205,100 @@ class TestUnitCacheProxyConnection:
             disconnect_on_error=False,
             push_request=True,
         )
+
+    def test_mutable_list_response_on_cache_miss_does_not_corrupt_cache(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Mutating a mutable response (e.g. from MGET or LRANGE) returned on a cache miss
+        must not mutate the cached entry, and subsequent hits must return original data.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = [b"val1", b"val2"]
+
+        # 1. Cache miss
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        miss_res = proxy.read_response()
+        assert miss_res == [b"val1", b"val2"]
+
+        # Mutate the miss response in-place
+        miss_res.append(b"corrupted")
+        miss_res[0] = b"mutated"
+
+        # 2. Cache hit
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        hit_res = proxy.read_response()
+        assert hit_res == [b"val1", b"val2"]
+        assert hit_res is not miss_res
+
+        # Mutating the hit response must also not affect subsequent hits
+        hit_res.append(b"hit_mutation")
+        proxy.send_command("MGET", "k1", "k2", keys=("k1", "k2"))
+        hit_res_2 = proxy.read_response()
+        assert hit_res_2 == [b"val1", b"val2"]
+
+    def test_mutable_dict_response_on_cache_miss_does_not_corrupt_cache(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Mutating a dict response (e.g. from JSON.GET) on a miss must not corrupt the cache.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = {"a": 1, "nested": [1, 2]}
+
+        # 1. Miss
+        proxy.send_command("JSON.GET", "doc", keys=("doc",))
+        miss_res = proxy.read_response()
+        assert miss_res == {"a": 1, "nested": [1, 2]}
+
+        # In-place mutations
+        miss_res["a"] = 999
+        miss_res["nested"].append(3)
+
+        # 2. Hit
+        proxy.send_command("JSON.GET", "doc", keys=("doc",))
+        hit_res = proxy.read_response()
+        assert hit_res == {"a": 1, "nested": [1, 2]}
+
+    def test_immutable_response_identity_preserved(
+        self, proxy_factory, mock_connection
+    ):
+        """
+        Immutable responses (e.g. bytes, str, int, None) avoid unnecessary deepcopying.
+        """
+        proxy, _ = proxy_factory(TrackingMode.PLAIN)
+        raw_val = b"hello_world"
+        mock_connection.read_response.return_value = raw_val
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        miss_res = proxy.read_response()
+        assert miss_res is raw_val
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        hit_res = proxy.read_response()
+        assert hit_res is raw_val
+
+    def test_interrupted_clone_drops_placeholder_and_reraises(
+        self, proxy_factory, mock_connection, monkeypatch
+    ):
+        """
+        When cloning is interrupted by BaseException (e.g. KeyboardInterrupt),
+        read_response must drop the placeholder and re-raise the exception.
+        """
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        mock_connection.read_response.return_value = [b"large", b"list"]
+
+        def mock_clone(_val):
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("redis.connection._clone_cache_value", mock_clone)
+
+        proxy.send_command("GET", "k1", keys=("k1",))
+        with pytest.raises(KeyboardInterrupt):
+            proxy.read_response()
+
+        assert proxy._current_command_cache_key is None
+        assert len(cache.collection) == 0
 
 
 @pytest.fixture()
@@ -2797,6 +3063,140 @@ class TestCacheEntryLifecycle:
 
     # ---------------------------------------------------------------- the hit decision
 
+    @pytest.mark.parametrize("remove_entry", [False, True], ids=["queued", "removed"])
+    def test_an_entry_promoted_during_a_miss_is_not_a_hit(
+        self, proxy_factory, mock_connection, remove_entry
+    ):
+        """An initially IN_PROGRESS entry cannot become a hit without its own drain."""
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        owner_connection = Mock(
+            spec=ConnectionInterface,
+            retry="mock",
+            host="mock",
+            port=6379,
+            db=0,
+            credential_provider=UsernamePasswordCredentialProvider(),
+            _event_dispatcher=EventDispatcher(),
+        )
+        owner_connection.can_read.return_value = False
+        owner = CacheProxyConnection(owner_connection, cache, proxy._pool_lock)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+
+        replies = iter([b"old", None])
+
+        def read_owner_reply(**kwargs):
+            reply = next(replies)
+            if reply is None:
+                owner._on_invalidation_callback(["invalidate", [b"foo"]])
+            return reply
+
+        owner_connection.read_response.side_effect = read_owner_reply
+        owner.send_command("GET", "foo", keys=["foo"])
+        candidate = cache.get(cache_key)
+        assert candidate.status is CacheEntryStatus.IN_PROGRESS
+        # The reply is followed by an invalidation queued on the owner's socket.
+        owner_connection.can_read.side_effect = [True, False]
+        mock_connection.read_response.return_value = b"new"
+
+        waiting = threading.Event()
+        resume = threading.Event()
+        errors = []
+        real_cache_set = cache.set
+
+        def send_command():
+            try:
+                proxy.send_command("GET", "foo", keys=["foo"])
+            except BaseException as error:
+                errors.append(error)
+
+        def set_cache_entry(entry):
+            # The miss path installs its placeholder right after classifying the
+            # entry as IN_PROGRESS. Stop between the two, while the original
+            # placeholder is still the one in the cache.
+            if (
+                entry.cache_key == cache_key
+                and entry.status is CacheEntryStatus.IN_PROGRESS
+                and entry.connection_ref is mock_connection
+            ):
+                waiting.set()
+                assert resume.wait(timeout=5)
+            return real_cache_set(entry)
+
+        with patch.object(cache, "set", side_effect=set_cache_entry):
+            sender = threading.Thread(target=send_command)
+            sender.start()
+            try:
+                assert waiting.wait(timeout=5)
+                # Promote the original entry before our miss replaces it.
+                assert owner.read_response() == b"old"
+                assert cache.get(cache_key) is candidate
+                assert candidate.status is CacheEntryStatus.VALID
+                if remove_entry:
+                    owner._process_pending_invalidations()
+                    assert cache.get(cache_key) is None
+            finally:
+                resume.set()
+                sender.join(timeout=5)
+
+            assert not sender.is_alive()
+            assert errors == []
+
+        # Promotion, with or without subsequent removal, cannot turn this
+        # already-decided miss into a hit.
+        assert proxy.read_response() == b"new"
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        assert owner_connection.read_response.call_count == (2 if remove_entry else 1)
+
+    def test_an_entry_replaced_during_the_drain_is_not_a_hit(
+        self, proxy_factory, mock_connection
+    ):
+        """Draining one entry's owner does not make a replacement safe to serve."""
+        proxy, cache = proxy_factory(TrackingMode.PLAIN)
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        owner = Mock()
+        owner.can_read.side_effect = [True, False]
+        candidate = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"old",
+            status=CacheEntryStatus.VALID,
+            connection_ref=owner,
+        )
+        replacement_owner = Mock()
+        replacement_owner.can_read.side_effect = [True, False]
+        replacement = CacheEntry(
+            cache_key=cache_key,
+            cache_value=b"replacement",
+            status=CacheEntryStatus.VALID,
+            connection_ref=replacement_owner,
+        )
+        cache.set(candidate)
+        mock_connection.read_response.return_value = b"new"
+
+        def replace_during_drain(**kwargs):
+            cache.delete_by_redis_keys([b"foo"])
+            cache.set(replacement)
+            return None
+
+        owner.read_response.side_effect = replace_during_drain
+
+        # A drained-only check would serve the replacement, although its owner's
+        # invalidations were never read. Equal hashes do not prove identity either.
+        with patch.object(CacheEntry, "__hash__", return_value=0):
+            assert candidate == replacement
+            assert candidate is not replacement
+            proxy.send_command("GET", "foo", keys=["foo"])
+
+        assert proxy.read_response() == b"new"
+        mock_connection.send_command.assert_called_once_with("GET", "foo", keys=["foo"])
+        owner.read_response.assert_called_once_with(
+            push_request=True, timeout=0, disconnect_on_error=False
+        )
+        replacement_owner.read_response.assert_not_called()
+
     def test_another_connection_filling_our_placeholder_does_not_skip_our_reply(
         self, proxy_factory, mock_connection
     ):
@@ -3329,6 +3729,7 @@ def test_invalidation_pushes_interleave_with_a_caching_pair(r, parser_class):
     assert cache.size == 0
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolGetConnectionCount:
     """Tests for ConnectionPool.get_connection_count() method."""
 
@@ -3480,6 +3881,7 @@ class TestConnectionPoolGetConnectionCount:
         pool.disconnect()
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolGetConnectionCount:
     """Tests for BlockingConnectionPool.get_connection_count() method."""
 
@@ -3539,11 +3941,13 @@ class TestBlockingConnectionPoolGetConnectionCount:
         pool.disconnect()
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_resolves_exception_names():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
     assert kw["retry_on_error"] == [ConnectionError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_comma_separated():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=ConnectionError,TimeoutError"
@@ -3551,6 +3955,7 @@ def test_parse_url_retry_on_error_comma_separated():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_bracket_list():
     kw = parse_url(
         "redis://localhost:6379/?retry_on_error=[ConnectionError,TimeoutError]"
@@ -3558,6 +3963,7 @@ def test_parse_url_retry_on_error_bracket_list():
     assert kw["retry_on_error"] == [ConnectionError, TimeoutError]
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_blank_entry():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=,")
@@ -3566,12 +3972,14 @@ def test_parse_url_retry_on_error_blank_entry():
     )
 
 
+@pytest.mark.fixed_client
 def test_parse_url_invalid_db_keeps_stable_message():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?db=not-an-int")
     assert str(exc_info.value) == "Invalid value for 'db' in connection URL."
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     ("url", "expected_port"),
     (
@@ -3588,6 +3996,7 @@ def test_connection_pool_from_url_preserves_explicit_port(url, expected_port):
     assert pool.connection_kwargs.get("port") == expected_port
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_unknown_name():
     with pytest.raises(ValueError) as exc_info:
         parse_url("redis://localhost:6379/?retry_on_error=NotARealError")
@@ -3596,6 +4005,7 @@ def test_parse_url_retry_on_error_unknown_name():
     )
 
 
+@pytest.mark.fixed_client
 def test_parse_url_retry_on_error_usable_in_retry():
     kw = parse_url("redis://localhost:6379/?retry_on_error=ConnectionError")
     conn = Connection(**kw)
@@ -3617,6 +4027,7 @@ def test_parse_url_retry_on_error_usable_in_retry():
     assert calls == 2
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [True, False, 1.5, "nope", None])
 def test_connection_rejects_bool_port(port):
     """bool subclasses int; port=True must not become privileged port 1."""
@@ -3624,18 +4035,21 @@ def test_connection_rejects_bool_port(port):
         redis.Connection(port=port)
 
 
+@pytest.mark.fixed_client
 def test_connection_accepts_numeric_port_string():
     """Callers still pass a decimal string such as \"6379\"."""
     c = redis.Connection(port="6379")
     assert c.port == 6379
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize("port", [-1, 65536, 99999])
 def test_connection_rejects_out_of_range_port(port):
     with pytest.raises(ValueError, match="port must be in 0..65535"):
         redis.Connection(port=port)
 
 
+@pytest.mark.fixed_client
 def test_connection_allows_ephemeral_port_zero():
     c = redis.Connection(port=0)
     assert c.port == 0
@@ -3702,6 +4116,7 @@ def _reconnect_with(conn, monkeypatch, data):
 BINARY_PUBSUB_MESSAGE = b"*3\r\n$7\r\nmessage\r\n$4\r\nchan\r\n$3\r\n\xff\xfe\xfd\r\n"
 
 
+@pytest.mark.fixed_client
 class TestInvalidResponseInvalidatesConnection:
     """A framing violation must drop the connection even when the caller
     passed disconnect_on_error=False, otherwise the rewound bytes stay queued
@@ -3753,6 +4168,7 @@ class TestInvalidResponseInvalidatesConnection:
         assert conn.is_connected is False
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [_RESP2Parser, _HiredisParser],
@@ -3822,6 +4238,7 @@ HIREDIS_LIMITS_NESTING_DEPTH = HIREDIS_AVAILABLE and Version(
 ) >= Version("3.4.1")
 
 
+@pytest.mark.fixed_client
 class TestDeeplyNestedReplyInvalidatesConnection:
     """Deeply nested aggregate replies fail mid-parse: the pure-Python parsers
     exhaust the stack (RecursionError) and hiredis >= 3.4.1 hits its own nesting
@@ -3833,10 +4250,16 @@ class TestDeeplyNestedReplyInvalidatesConnection:
 
     PUBSUB_KWARGS = dict(disconnect_on_error=False, push_request=True)
 
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="PyPy bounds recursion by stack bytes; unwinding the overflow can "
+        "abort the interpreter (#4144 replaces the RecursionError)",
+    )
     def test_python_parser_recursion_error_disconnects(self):
-        # PyPy bounds recursion by stack bytes, not frames, and its JIT-compiled
-        # parser frames are small enough to fit 3000 levels; 100_000 cannot fit.
-        conn = _connection_with_stream(_deeply_nested_reply(100_000), _RESP2Parser)
+        # 3000 levels exceed CPython's recursion limit. PyPy, which would need far
+        # more, is skipped: unwinding the RecursionError from a native stack
+        # overflow through its JIT frames intermittently aborts the interpreter.
+        conn = _connection_with_stream(_deeply_nested_reply(3000), _RESP2Parser)
 
         # A GC pass at the recursion limit would run finalizers of garbage left
         # by earlier tests with no stack left to report their errors, so collect
@@ -3872,6 +4295,7 @@ class TestDeeplyNestedReplyInvalidatesConnection:
         assert conn.is_connected is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "parser_class",
     [
@@ -3944,6 +4368,7 @@ class TestMalformedNumericFrameInvalidatesConnection:
         assert conn.is_connected is True
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not HIREDIS_AVAILABLE, reason="hiredis is not installed")
 class TestPushHandlerValueErrorKeepsConnection:
     """A ValueError raised by the *push handler* is not a framing error: hiredis
@@ -4019,6 +4444,33 @@ def _net(calls):
     return idle, used
 
 
+@pytest.mark.fixed_client
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@patch("redis.connection.record_connection_count")
+def test_same_process_pool_reset_balances_connection_counts(mock_rec, pool_class):
+    pool = pool_class(connection_class=_DummyConnection, max_connections=2)
+    pool_name = get_pool_name(pool)
+    idle = pool.get_connection()
+    pool.get_connection()
+    pool.release(idle)
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (1, 1)
+
+    pool.reset()
+    assert get_pool_name(pool) == pool_name
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+    pool.reset()
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+    connection = pool.get_connection()
+    pool.release(connection)
+    pool_ref = weakref.ref(pool)
+    del pool
+    gc.collect()
+    assert pool_ref() is None
+    assert _net(_pool_metric_calls(mock_rec, pool_name)) == (0, 0)
+
+
+@pytest.mark.fixed_client
 class TestConnectionPoolMetricCount:
     """Tests for db.client.connection.count UpDownCounter accuracy.
 
@@ -4071,14 +4523,8 @@ class TestConnectionPoolMetricCount:
         conn = pool.get_connection()
         pool.release(conn)
 
-        # Simulate destruction (what __del__ / reset does)
-        idle_count = len(pool._available_connections)
-        if idle_count:
-            mock_rec(
-                pool_name=pn,
-                connection_state=ConnectionState.IDLE,
-                counter=-idle_count,
-            )
+        # Destroy the pool's connections through the pool's own teardown path.
+        pool.reset()
 
         calls = _pool_metric_calls(mock_rec, pn)
         idle_net, used_net = _net(calls)
@@ -4088,8 +4534,8 @@ class TestConnectionPoolMetricCount:
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
         """release() of a connection the pool no longer owns (e.g. inherited by
-        a forked child) must not record connection.count. Fork-time accounting
-        is owned by reset()/__del__; recording here would double-count."""
+        a forked child) must not record connection.count. Accounting for inherited
+        connections belongs to the parent process."""
         pool = ConnectionPool(connection_class=_DummyConnection, max_connections=10)
 
         conn = pool.get_connection()
@@ -4120,6 +4566,7 @@ class TestConnectionPoolMetricCount:
         assert idle_net == 0, f"IDLE must not increase for dropped conn, got {idle_net}"
 
 
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolMetricCount:
     """Same metric-count tests for BlockingConnectionPool."""
 
@@ -4146,8 +4593,8 @@ class TestBlockingConnectionPoolMetricCount:
 
     @patch("redis.connection.record_connection_count")
     def test_release_unowned_does_not_record(self, mock_rec):
-        """Unowned (inherited-across-fork) release must not record; fork-time
-        accounting is owned by reset()/__del__."""
+        """Unowned (inherited-across-fork) release must not record; accounting
+        for inherited connections belongs to the parent process."""
         pool = self._pool()
         mock_rec.reset_mock()
 
@@ -4186,3 +4633,40 @@ class TestBlockingConnectionPoolMetricCount:
         idle_net, used_net = _net(calls)
         assert used_net == 0, f"reset() must not decrement USED again, got {used_net}"
         assert idle_net == 0, f"reset() must not touch IDLE, got {idle_net}"
+
+
+@pytest.mark.parametrize("raise_on_timeout", [True, False], ids=["read", "poll"])
+def test_hiredis_read_from_socket_os_level_timeout_is_a_connection_error(
+    raise_on_timeout,
+):
+    # socket.timeout is the builtin TimeoutError since Python 3.10, so an
+    # ETIMEDOUT the OS raises on a dead socket (e.g. after a network change)
+    # lands in the parser's socket.timeout handler. It used to be reported as a
+    # read timeout - or, when polling with raise_on_timeout=False, as "no data",
+    # which hid the broken connection. The connection is dead: ConnectionError.
+    parser = make_hiredis_parser()
+    parser._sock.recv_into.side_effect = OSError(ETIMEDOUT, "Operation timed out")
+
+    with pytest.raises(ConnectionError):
+        parser.read_from_socket(timeout=1, raise_on_timeout=raise_on_timeout)
+
+
+@pytest.mark.parametrize("raise_on_timeout", [True, False], ids=["read", "poll"])
+def test_socket_buffer_os_level_timeout_is_a_connection_error(raise_on_timeout):
+    sock = Mock()
+    sock.recv.side_effect = OSError(ETIMEDOUT, "Operation timed out")
+    buf = SocketBuffer(sock, 65536, 1)
+
+    with pytest.raises(ConnectionError):
+        buf._read_from_socket(timeout=1, raise_on_timeout=raise_on_timeout)
+
+
+def test_send_packed_command_os_level_timeout_is_a_connection_error():
+    conn = Connection(socket_timeout=1)
+    conn._sock = Mock()
+    conn._sock.sendall.side_effect = OSError(ETIMEDOUT, "Operation timed out")
+    conn.disconnect = Mock()
+
+    with pytest.raises(ConnectionError):
+        conn.send_packed_command(b"PING", check_health=False)
+    conn.disconnect.assert_called_once()

@@ -24,7 +24,7 @@ pytest tests/test_asyncio/test_commands.py -k "test_set and not cluster"
 pytest --redis-url=redis://localhost:16379/0 -m onlycluster tests/test_cluster.py
 ```
 
-The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`.
+The pytest plugin in `tests/conftest.py` adds these options (also exposed via invoke wrappers): `--redis-url`, `--redis-ssl-url`, `--redis-mod-url`, `--protocol` (`""` = library default, currently RESP3), `--legacy-responses` (`true|false|default`), `--redis-cluster-nodes`, `--uvloop`. It also adds `--tracemalloc` (off by default, not exposed via invoke), which traces allocations so `ResourceWarning`s show where the object was allocated; it makes cluster client setup several times slower.
 
 ### pytest markers
 
@@ -102,9 +102,9 @@ RESP3 is now the default on the wire. Two knobs interact:
 
 ## Python and dependency notes
 
-- `requires-python = ">=3.10"`; `pyproject.toml` lists the supported versions.
+- `requires-python = ">=3.11"`; `pyproject.toml` lists the supported versions.
 - Optional extras: `hiredis`, `xxhash`, `ocsp`, `jwt`, `circuit_breaker`, `otel`.
-- Ruff is the only formatter/linter (`target-version = "py310"`, `line-length = 88`). `tests/*` has relaxed naming rules; module command packages (`bf`, `timeseries`, `json`, `search`) opt out of pep8 naming.
+- Ruff is the only formatter/linter (`target-version = "py311"`, `line-length = 88`). `tests/*` has relaxed naming rules; module command packages (`bf`, `timeseries`, `json`, `search`) opt out of pep8 naming.
 - `whitelist.py` is the vulture allowlist — extend it instead of silencing vulture inline.
 
 ---

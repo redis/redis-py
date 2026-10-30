@@ -1,4 +1,5 @@
 import datetime
+import math
 
 from redis.utils import str_if_bytes
 
@@ -32,7 +33,15 @@ def parse_debug_object(response):
     return response
 
 
-def parse_info(response):
+def decode_info(response, encoder):
+    """Decode a raw INFO reply, replacing any bytes the encoder can't decode"""
+    try:
+        return encoder.decode(response)
+    except UnicodeDecodeError:
+        return response.decode(encoder.encoding, errors="replace")
+
+
+def parse_info(response, **options):
     """Parse the result of Redis's INFO command into a Python dict"""
     info = {}
     response = str_if_bytes(response)
@@ -97,13 +106,21 @@ def parse_memory_stats(response, **kwargs):
 def parse_memory_stats_unified(response, **kwargs):
     """Parse MEMORY STATS for unified RESP2 output.
 
-    Unified responses decode structural keys while preserving string-like
-    values as delivered, matching the approved RESP2/RESP3 unification shape.
+    Unified responses decode structural keys and use native numeric values.
+    The RESP2 reply holds the ratios and percentages, such as
+    ``fragmentation``, as bulk strings, while RESP3 sends doubles. Convert
+    them to ``float`` so both wires give the same values; the integer
+    replies, and any string that isn't a number, are left as they are.
     """
     stats = pairs_to_dict(response, decode_keys=True)
     for key, value in stats.items():
         if key.startswith("db.") and isinstance(value, list):
             stats[key] = pairs_to_dict(value, decode_keys=True)
+        elif isinstance(value, (bytes, str)):
+            try:
+                stats[key] = float(value)
+            except ValueError:
+                pass
     return stats
 
 
@@ -437,27 +454,100 @@ def _score_to_resp2_bytes(value):
         return value.encode()
     if isinstance(value, bool):
         return b"1" if value else b"0"
-    return format(float(value), ".17g").encode()
+    return _redis_double_to_string(float(value)).encode()
+
+
+def _score_to_resp2_reply(value, decode):
+    """Like ``_score_to_resp2_bytes`` but returns ``str`` when the client
+    decodes responses, as the RESP2 parser does with ``decode_responses=True``.
+    """
+    if not decode:
+        return _score_to_resp2_bytes(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode()
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return _redis_double_to_string(float(value))
+
+
+def _redis_double_to_string(value):
+    """Format a double the way Redis does in replies (``d2string``).
+
+    Redis writes integral values in the 64-bit range as plain integers and
+    everything else with the shortest round-trip digits (``fpconv_dtoa``),
+    e.g. ``0.1`` and not ``0.10000000000000001``.
+    """
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
+    if value == 0:
+        return "-0" if math.copysign(1.0, value) < 0 else "0"
+    if -(2**62) <= value <= 2**62 and value.is_integer():
+        return str(int(value))
+    # repr() gives the shortest digits that round-trip; lay them out with
+    # the same rules as fpconv's emit_digits().
+    text = repr(value)
+    sign = ""
+    if text[0] == "-":
+        sign, text = "-", text[1:]
+    mantissa, _, exponent = text.partition("e")
+    int_part, _, frac = mantissa.partition(".")
+    if not exponent:
+        # repr() is plain decimal; Redis prints it the same way unless it
+        # has 7+ fractional digits and a decimal exponent of 4 or more.
+        if int_part != "0":
+            exp = len(int_part) - 1
+        else:
+            exp = len(frac) - len(frac.lstrip("0")) + 1
+        if len(frac) < 7 or exp < 4:
+            return sign + text
+    digits = (int_part + frac).lstrip("0")
+    k = int(exponent or 0) - len(frac)
+    stripped = digits.rstrip("0")
+    k += len(digits) - len(stripped)
+    digits = stripped
+    ndigits = len(digits)
+    exp = abs(k + ndigits - 1)
+    if k >= 0 and exp < ndigits + 7:
+        out = digits + "0" * k
+    elif k < 0 and (k > -7 or exp < 4):
+        offset = ndigits + k
+        if offset <= 0:
+            out = "0." + "0" * -offset + digits
+        else:
+            out = digits[:offset] + "." + digits[offset:]
+    else:
+        out = digits[0] + ("." + digits[1:] if ndigits > 1 else "")
+        out += f"e{'-' if k + ndigits - 1 < 0 else '+'}{exp}"
+    return sign + out
 
 
 def zset_score_pairs_resp3_to_resp2_legacy(response, **options):
     """Convert RESP3 nested ``[[member, score], ...]`` to today's RESP2
     ``list[(member, score)]`` shape: tuples instead of lists, scores
-    re-encoded to bytes before being passed to ``score_cast_func`` so the
-    cast receives the same input as on a RESP2 connection.
+    re-encoded to bytes (``str`` when the client decodes responses) before
+    being passed to ``score_cast_func`` so the cast receives the same input
+    as on a RESP2 connection.
     """
     if not response or not options.get("withscores"):
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        return [(member, float(score)) for member, score in response]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
+    # Members are str exactly when the client decodes responses.
+    decode = isinstance(response[0][0], str)
     return [
-        (member, score_cast_func(_score_to_resp2_bytes(score)))
+        (member, score_cast_func(_score_to_resp2_reply(score, decode)))
         for member, score in response
     ]
 
 
 def zset_score_pairs_resp3_to_resp2_legacy_flat(response, **options):
     """Convert RESP3 nested ``[[member, score], ...]`` to the flat raw RESP2
-    wire shape ``[member, score_bytes, ...]`` used by ZDIFF in v8.0.0b1.
+    wire shape ``[member, score_bytes, ...]`` used by ZDIFF in v8.0.0b1
+    (scores are ``str`` when the client decodes responses).
 
     ZDIFF historically did not propagate ``withscores`` to the response
     callback, so the legacy RESP2 callback was a no-op and the raw flat
@@ -467,10 +557,11 @@ def zset_score_pairs_resp3_to_resp2_legacy_flat(response, **options):
     """
     if not response or not options.get("withscores"):
         return response
+    decode = isinstance(response[0][0], str)
     flat = []
     for member, score in response:
         flat.append(member)
-        flat.append(_score_to_resp2_bytes(score))
+        flat.append(_score_to_resp2_reply(score, decode))
     return flat
 
 
@@ -478,14 +569,20 @@ def zset_score_for_rank_resp3_to_resp2_legacy(response, **options):
     """RESP3-wire ZRANK/ZREVRANK WITHSCORE → legacy RESP2 ``[rank, score]``.
 
     The shape ``[rank, score]`` is identical between RESP2 and RESP3; only
-    the score is re-encoded to bytes before being passed to
-    ``score_cast_func`` so the cast observes the same input type it would
-    on a RESP2 connection.
+    the score is re-encoded to bytes (``str`` when ``decode_responses`` is
+    passed as true) before being passed to ``score_cast_func`` so the cast
+    observes the same input type it would on a RESP2 connection.
     """
     if not response or not options.get("withscore"):
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
-    return [response[0], score_cast_func(_score_to_resp2_bytes(response[1]))]
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        return [response[0], float(response[1])]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
+    # The reply has no member to tell whether the client decodes responses,
+    # so ZRANK/ZREVRANK pass ``decode_responses`` in the options.
+    decode = options.get("decode_responses", False)
+    return [response[0], score_cast_func(_score_to_resp2_reply(response[1], decode))]
 
 
 def zset_score_pairs_unified(response, **options):
@@ -548,19 +645,27 @@ def zpop_score_pairs_resp3_to_resp2_legacy(response, **options):
     """RESP3-wire ZPOPMAX/ZPOPMIN → legacy RESP2 ``list[(member, score), ...]``.
 
     Both RESP3 shapes (flat without ``count``; nested with ``count``) are
-    converted to a list of tuples. Scores are re-encoded to bytes before
-    being passed to ``score_cast_func`` so the cast observes the same
-    input type it would on a RESP2 connection.
+    converted to a list of tuples. Scores are re-encoded to bytes (``str``
+    when the client decodes responses) before being passed to
+    ``score_cast_func`` so the cast observes the same input type it would
+    on a RESP2 connection.
     """
     if not response:
         return response
-    score_cast_func = _wrap_score_cast_func(options.get("score_cast_func", float))
+    score_cast_func = options.get("score_cast_func", float)
+    if score_cast_func is float:
+        if isinstance(response[0], list):
+            return [(member, float(score)) for member, score in response]
+        return [(response[0], float(response[1]))]
+    score_cast_func = _wrap_score_cast_func(score_cast_func)
     if isinstance(response[0], list):
+        decode = isinstance(response[0][0], str)
         return [
-            (member, score_cast_func(_score_to_resp2_bytes(score)))
+            (member, score_cast_func(_score_to_resp2_reply(score, decode)))
             for member, score in response
         ]
-    return [(response[0], score_cast_func(_score_to_resp2_bytes(response[1])))]
+    decode = isinstance(response[0], str)
+    return [(response[0], score_cast_func(_score_to_resp2_reply(response[1], decode)))]
 
 
 def bzpop_score_unified(response, **options):
@@ -587,13 +692,18 @@ def zmpop_resp3_to_resp2_legacy(response, **options):
     """RESP3-wire ZMPOP/BZMPOP → legacy RESP2 ``[name, [[member, b"score"], ...]]``.
 
     Re-encodes RESP3 native float scores back to the bytes form Redis
-    returns on the RESP2 wire so callers observe today's RESP2 raw shape.
+    returns on the RESP2 wire (``str`` when the client decodes responses)
+    so callers observe today's RESP2 raw shape.
     """
     if not response:
         return response
+    decode = isinstance(response[0], str)
     return [
         response[0],
-        [[member, _score_to_resp2_bytes(score)] for member, score in response[1]],
+        [
+            [member, _score_to_resp2_reply(score, decode)]
+            for member, score in response[1]
+        ],
     ]
 
 
@@ -1025,6 +1135,17 @@ def parse_zscan_unified(response, **options):
 def parse_zmscore(response, **options):
     # zmscore: list of scores (double precision floating point number) or nil
     return [float(score) if score is not None else None for score in response]
+
+
+def parse_increx_unified(response, **options):
+    """RESP2-wire INCREX -> unified ``[value, increment]``.
+
+    With ``BYFLOAT`` the RESP2 reply holds both numbers as bulk strings,
+    while RESP3 sends doubles. Convert the strings to ``float`` so both
+    wires give the same values; the integer replies of the default and
+    ``BYINT`` forms are left as they are.
+    """
+    return [float(x) if isinstance(x, (bytes, str)) else x for x in response]
 
 
 def parse_slowlog_get(response, **options):
@@ -1569,6 +1690,63 @@ def parse_function_list_resp3_to_resp2_legacy(response, **options):
                 flat.append(value)
         result.append(flat)
     return result
+
+
+def parse_function_stats_unified(response, **options):
+    """FUNCTION STATS → unified nested ``dict`` with bytes keys.
+
+    Accepts either RESP2 wire (a flat ``[k, v, k, v, …]`` list whose
+    ``running_script`` value is a flat list or ``None`` and whose
+    ``engines`` value pairs each engine name with a flat list of its
+    stats) or RESP3 wire (nested maps). Both are normalised to nested
+    dicts.
+    """
+    if response is None or isinstance(response, dict):
+        return response
+    stats = {}
+    it = iter(response)
+    for key, value in zip(it, it):
+        if isinstance(value, list):
+            name = str_if_bytes(key)
+            if name == "running_script":
+                value = pairs_to_dict(value)
+            elif name == "engines":
+                engines = iter(value)
+                value = {
+                    engine: pairs_to_dict(engine_stats)
+                    for engine, engine_stats in zip(engines, engines)
+                }
+        stats[key] = value
+    return stats
+
+
+def parse_function_stats_resp3_to_resp2_legacy(response, **options):
+    """RESP3-wire FUNCTION STATS → today's RESP2 flat ``list`` shape.
+
+    The reply, the running script and the stats of each engine each arrive
+    as a ``dict``; flatten them back to interleaved ``[k, v, k, v, …]``
+    lists so the Python shape matches what RESP2 wire produces natively.
+    """
+    if not isinstance(response, dict):
+        return response
+    flat = []
+    for key, value in response.items():
+        if isinstance(value, dict):
+            if str_if_bytes(key) == "engines":
+                engines = []
+                for engine, engine_stats in value.items():
+                    if isinstance(engine_stats, dict):
+                        engine_stats = [
+                            item for kv in engine_stats.items() for item in kv
+                        ]
+                    engines.append(engine)
+                    engines.append(engine_stats)
+                value = engines
+            else:
+                value = [item for kv in value.items() for item in kv]
+        flat.append(key)
+        flat.append(value)
+    return flat
 
 
 def parse_cluster_links_unified(response, **options):

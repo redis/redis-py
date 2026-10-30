@@ -10,6 +10,8 @@ metrics are exported to OTel.
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
+from redis._parsers.response_callbacks import get_response_callbacks
+
 from redis.asyncio.observability import recorder
 from redis.observability.attributes import (
     ConnectionState,
@@ -629,6 +631,40 @@ class TestRecordStreamingLag:
         call_args = instruments.stream_lag.record.call_args
         assert call_args[0][0] == 0.150
 
+    @pytest.mark.parametrize("protocol", [None, 2, 3])
+    @pytest.mark.parametrize("legacy_responses", [False, True])
+    @pytest.mark.parametrize("command", ["XREAD", "XREADGROUP"])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    async def test_streaming_lag_response_modes(
+        self,
+        setup_async_recorder,
+        protocol,
+        legacy_responses,
+        command,
+        decode_responses,
+    ):
+        def encode(value):
+            return value if decode_responses else value.encode()
+
+        entries = [
+            [encode("1000-0"), [encode("field"), encode("first")]],
+            [encode("2000-0"), [encode("field"), encode("second")]],
+        ]
+        stream = encode("events")
+        raw = [[stream, entries]] if protocol == 2 else {stream: entries}
+        response = get_response_callbacks(protocol, legacy_responses)[command](raw)
+        group = "workers" if command == "XREADGROUP" else None
+        await recorder.record_streaming_lag_from_response(
+            response, consumer_group=group
+        )
+        instrument = setup_async_recorder.stream_lag
+        assert instrument.record.call_count == 2
+        for call in instrument.record.call_args_list:
+            assert call.kwargs["attributes"][REDIS_CLIENT_STREAM_NAME] == "events"
+            assert call.args[0] >= 0
+            if group is not None:
+                assert call.kwargs["attributes"][REDIS_CLIENT_CONSUMER_GROUP] == group
+
 
 @pytest.mark.fixed_client
 @pytest.mark.asyncio
@@ -983,6 +1019,20 @@ class TestRecordConnectionCount:
         """Create a config with CONNECTION_BASIC enabled."""
         return OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
 
+    @staticmethod
+    def _calls_for(mock_counter, pool_name):
+        """The add() calls for ``pool_name`` only.
+
+        Other code in the process (a pool from an earlier test being collected,
+        for instance) can record connection counts on the patched collector while
+        a test runs, so a test counts only the calls for the pool it uses.
+        """
+        return [
+            c
+            for c in mock_counter.add.call_args_list
+            if c[1]["attributes"].get(DB_CLIENT_CONNECTION_POOL_NAME) == pool_name
+        ]
+
     @pytest.fixture
     def setup_connection_count_recorder(
         self,
@@ -1017,9 +1067,8 @@ class TestRecordConnectionCount:
             counter=1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == 1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1037,9 +1086,8 @@ class TestRecordConnectionCount:
             counter=-1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1057,9 +1105,8 @@ class TestRecordConnectionCount:
             counter=-5,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -5
         assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
@@ -1106,9 +1153,8 @@ class TestRecordConnectionCount:
         )
 
         # Total calls: 6
-        assert mock_up_down_counter.add.call_count == 6
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "pool1")
+        assert len(calls) == 6
 
         # Step 1: IDLE +1 (creation)
         assert calls[0][0][0] == 1
