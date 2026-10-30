@@ -567,6 +567,7 @@ class AbstractRedisCluster:
                 "COMMAND COUNT",
                 "COMMAND LIST",
                 "COMMAND GETKEYS",
+                "COMMAND GETKEYSANDFLAGS",
                 "CONFIG GET",
                 "DEBUG",
                 "RANDOMKEY",
