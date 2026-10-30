@@ -2058,6 +2058,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
+    # Bound peer reads when a checked-out owner stops processing invalidations.
+    # Only the owner's commands renew this window; peer hits do not extend it.
+    _BUSY_CACHE_GRACE_SECONDS = 0.1
 
     def __init__(
         self,
@@ -2075,6 +2078,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
+        # Checkout and peer invalidation drains share this connection's lock.
+        # Release clears _in_use after the last socket access, before enqueueing.
+        self._in_use_lock = threading.Lock()
+        self._in_use = True
+        self._busy_cache_deadline = 0.0
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
@@ -2171,6 +2179,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.on_connect()
 
     def disconnect(self, *args, **kwargs):
+        self._busy_cache_deadline = 0.0
         with self._cache_lock:
             self._cache.flush()
         # Both flags describe an exchange on the socket that is about to die with it. A stale
@@ -2203,6 +2212,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._pending_caching_reply = False
         self._skip_next_caching = False
         self._pending_cache_hit = _NO_PENDING_HIT
+        self._busy_cache_deadline = 0.0
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -2222,6 +2232,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # slot, and the attempt is tracked by default under optout anyway.
             self._skip_next_caching = False
             self._current_command_cache_key = None
+            self._busy_cache_deadline = 0.0
             self._conn.send_command(*args, **kwargs)
             return
 
@@ -2265,6 +2276,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         if not store:
             self._current_command_cache_key = None
+            # PubSub, blocking commands and unknown commands may hold this
+            # connection indefinitely without processing invalidations.
+            self._busy_cache_deadline = 0.0
 
             # One path for keyless and ineligible commands alike, so an eligible read whose
             # command method never plumbed ``keys=`` still gets its optout ``NO``. That is the
@@ -2304,25 +2318,36 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         cache_key=self._current_command_cache_key,
                         cache_value=self.DUMMY_CACHE_VALUE,
                         status=CacheEntryStatus.IN_PROGRESS,
-                        connection_ref=self._conn,
+                        connection_ref=self,
                     )
                 )
 
         if candidate is not None:
             # Drain the connection that cached the entry so invalidations do not
             # accumulate on idle connections. This must run outside our cache lock: the
-            # drain takes the pool lock, and invalidations call the owner's callback
-            # under its cache lock. Holding ours would order a cache lock before the
-            # pool lock and another after it, deadlocking connections draining each
-            # other or a pool.disconnect() holding the pool lock while waiting for ours.
-            with self._pool_lock:
-                self._drain_invalidations(candidate.connection_ref)
+            # drain takes the owner's checkout lock, and invalidations call the
+            # owner's callback under its cache lock. Holding ours could deadlock
+            # two connections draining each other.
+            owner = candidate.connection_ref
+            can_serve = False
+            if isinstance(owner, CacheProxyConnection):
+                with owner._in_use_lock:
+                    if owner is self or not owner._in_use:
+                        self._drain_invalidations(owner._conn)
+                        can_serve = True
+                    elif time.monotonic() < owner._busy_cache_deadline:
+                        # Never touch a checked-out owner's socket. Recent cache
+                        # reads can share its value until its grace period expires.
+                        # Hits do not move ownership or extend that deadline.
+                        can_serve = True
+            # Custom entries without pool ownership information cannot be drained
+            # safely and must use a fresh read on our connection.
 
             with self._cache_lock:
                 # Re-check: the drained entry may have been invalidated or replaced.
                 entry = self._cache.get(self._current_command_cache_key)
 
-                # A hit requires this very entry object to have been drained. A
+                # A hit requires this very entry object to have been checked. A
                 # replacement filled during the drain may belong to another connection
                 # with pending invalidations and is not trusted, even if it is VALID by
                 # the time we check here.
@@ -2337,7 +2362,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 #   and never read the reply we did send;
                 # - an invalidation removes it, so a re-derived check would find nothing
                 #   and read a reply for a command we never sent.
-                if entry is candidate:
+                if can_serve and entry is candidate:
                     cached_value = entry.cache_value
                     self._current_command_cache_key = None
                     is_hit = True
@@ -2348,13 +2373,17 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                             cache_key=self._current_command_cache_key,
                             cache_value=self.DUMMY_CACHE_VALUE,
                             status=CacheEntryStatus.IN_PROGRESS,
-                            connection_ref=self._conn,
+                            connection_ref=self,
                         )
                     )
 
         if is_hit:
             self._pending_cache_hit = _clone_cache_value(cached_value)
             return
+
+        # A wire reply may be followed by invalidations we have not read yet.
+        # Keep peers on the fresh-read path until this exchange completes.
+        self._busy_cache_deadline = 0.0
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached. Under optin the server remembers nothing
@@ -2467,6 +2496,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
             cache_entry = self._cache.get(self._current_command_cache_key)
 
+            # Peers use independent cache locks. Start the sharing window before
+            # making the reply visible as VALID to avoid unnecessary misses.
+            self._busy_cache_deadline = (
+                time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
+            )
+
             # Promote only the placeholder this connection staked. It may have been
             # invalidated in the meantime, or replaced by another connection's placeholder
             # for the same key - promoting that one would bind our reply to its
@@ -2474,7 +2509,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 cache_entry is not None
                 and cache_entry.status == CacheEntryStatus.IN_PROGRESS
-                and cache_entry.connection_ref is self._conn
+                and cache_entry.connection_ref is self
             ):
                 cache_entry.cache_value = cloned_response
                 cache_entry.status = CacheEntryStatus.VALID
@@ -2510,7 +2545,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 entry is not None
                 and entry.status == CacheEntryStatus.IN_PROGRESS
-                and entry.connection_ref is self._conn
+                and entry.connection_ref is self
             ):
                 self._cache.delete_by_cache_keys([key])
 
@@ -2783,7 +2818,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     if (
                         entry is not None
                         and entry.status == CacheEntryStatus.IN_PROGRESS
-                        and entry.connection_ref is self._conn
+                        and entry.connection_ref is self
                     ):
                         own_placeholder = entry
                 self._cache.flush()
@@ -2830,6 +2865,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         self._drain_invalidations(self._conn)
+        self._busy_cache_deadline = time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
@@ -4199,6 +4235,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 is_created = True
             self._in_use_connections.add(connection)
 
+        if isinstance(connection, CacheProxyConnection):
+            # Wait only for this connection's drain, without holding the pool lock.
+            with connection._in_use_lock:
+                connection._in_use = True
+
         # Record state transition for observability
         pool_name = get_pool_name(self)
         if is_created:
@@ -4313,6 +4354,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             f"{connection}, {connection.extract_connection_details()}"
                         )
                     connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    connection._in_use = False
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
@@ -4714,6 +4757,11 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
+        if isinstance(connection, CacheProxyConnection):
+            # Join this connection's drain before connect/can_read uses the socket.
+            with connection._in_use_lock:
+                connection._in_use = True
+
         # Record state transition for observability
         pool_name = get_pool_name(self)
         if is_created:
@@ -4798,6 +4846,8 @@ class BlockingConnectionPool(ConnectionPool):
                     )
                 connection.disconnect()
             # Put the connection back into the pool.
+            if isinstance(connection, CacheProxyConnection):
+                connection._in_use = False
             pool_name = get_pool_name(self)
             try:
                 self.pool.put_nowait(connection)
