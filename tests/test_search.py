@@ -2424,9 +2424,7 @@ class TestAggregations(SearchTestsBase):
             client.hset(f"doc:{i}", mapping={"title": "redis"})
         self.waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-        res = client.ft().aggregate(
-            aggregations.AggregateRequest("redis").limit(0, 0)
-        )
+        res = client.ft().aggregate(aggregations.AggregateRequest("redis").limit(0, 0))
 
         if expects_resp3_shape(client):
             assert res["results"] == []
@@ -2436,10 +2434,16 @@ class TestAggregations(SearchTestsBase):
             expected_total = 3 if int(get_protocol_version(client)) == 3 else 0
             assert res.total == expected_total
 
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.4")
+    def test_aggregation_invalid_zero_limit(self, client):
+        client.ft().create_index((TextField("title"),))
+        client.hset("doc:0", mapping={"title": "redis"})
+        self.waitForIndex(client, "idx")
+
         with pytest.raises(ResponseError):
-            client.ft().aggregate(
-                aggregations.AggregateRequest("redis").limit(5, 0)
-            )
+            client.ft().aggregate(aggregations.AggregateRequest("redis").limit(5, 0))
 
     @pytest.fixture
     def collect_index(self, client):

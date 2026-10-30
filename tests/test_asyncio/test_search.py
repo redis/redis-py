@@ -1772,6 +1772,14 @@ class TestAggregations(AsyncSearchTestsBase):
             expected_total = 3 if int(get_protocol_version(decoded_r)) == 3 else 0
             assert res.total == expected_total
 
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.4")
+    async def test_aggregation_invalid_zero_limit(self, decoded_r: redis.Redis):
+        await decoded_r.ft().create_index((TextField("title"),))
+        await decoded_r.hset("doc:0", mapping={"title": "redis"})
+        await self.waitForIndex(decoded_r, "idx")
+
         with pytest.raises(ResponseError):
             await decoded_r.ft().aggregate(
                 aggregations.AggregateRequest("redis").limit(5, 0)
