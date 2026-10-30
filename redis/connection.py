@@ -3328,6 +3328,14 @@ class MaintNotificationsAbstractConnectionPool:
         if handler is not None:
             handler.cancel_scheduled_tasks()
 
+    def _on_reset_after_fork(self) -> None:
+        """Hook invoked by ``reset()``; acts only in a forked child process."""
+        handler = getattr(self, "_maint_notifications_pool_handler", None)
+        # reset() also runs from __init__, where there is no pid yet
+        pid = getattr(self, "pid", None)
+        if handler is not None and pid is not None and pid != os.getpid():
+            handler.reset_after_fork()
+
     @property
     @abstractmethod
     def connection_kwargs(self) -> Dict[str, Any]:
@@ -4046,6 +4054,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if is_fork:
             # Inherited connections were counted by the parent, not this process.
             self._pool_id = secrets.token_hex(4)
+            # A parent thread may have held the lock at fork time, and the
+            # handler reset below takes it to revert an active MOVING.
+            self._lock = threading.RLock()
 
         # Record metrics for connections being removed before clearing
         # (only if attributes exist - they won't during __init__)
@@ -4075,6 +4086,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+
+        self._on_reset_after_fork()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -4363,6 +4376,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
+        # A forked child must not touch the handler state inherited from the
+        # parent: reset it first (the lock may be held by a parent thread).
+        self._checkpid()
         try:
             self._on_close()
         finally:
@@ -4506,6 +4522,14 @@ class BlockingConnectionPool(ConnectionPool):
         if is_fork:
             # Inherited connections were counted by the parent, not this process.
             self._pool_id = secrets.token_hex(4)
+            # A parent thread may have held the lock at fork time, and the
+            # handler reset below takes it to revert an active MOVING.
+            self._lock = threading.RLock()
+            # The thread applying a MOVING in the parent does not exist here
+            # to clear these, and a stale flag makes a checkout nest on the
+            # lock and leak it.
+            self._in_maintenance = False
+            self._locked = False
 
         # Create and fill up a thread safe queue with ``None`` values.
         try:
@@ -4558,6 +4582,8 @@ class BlockingConnectionPool(ConnectionPool):
                 except Exception:
                     pass
                 self._locked = False
+
+        self._on_reset_after_fork()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
