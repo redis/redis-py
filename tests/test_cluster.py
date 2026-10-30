@@ -5409,6 +5409,39 @@ class TestNodesManager:
             patcher.stop()
 
     @pytest.mark.fixed_client
+    def test_localhost_remapped_startup_node_keeps_its_client(self):
+        """
+        With a remap to localhost, the refresh hint of a MOVED redirect is
+        localhost:port, while the startup node is named after the resolved
+        address. It is the same node, so it keeps its client.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        partial = [[0, 8191, ["127.0.0.1", 7000]]]
+        patcher, nm = self._refresh_with_cluster_slots(
+            [partial, partial], address_remap=address_remap
+        )
+        try:
+            startup_node = nm.startup_nodes[get_node_name(_resolve_localhost(), 8000)]
+            old_client = startup_node.redis_connection
+            # The patcher's mock of Redis.execute_command
+            Redis.execute_command.reset_mock()
+            # The hint _execute_command passes on for a MOVED to 7000
+            nm.initialize(
+                additional_startup_nodes_info=[nm.remap_host_port("127.0.0.1", 7000)]
+            )
+
+            assert [c.args[0] for c in Redis.execute_command.call_args_list] == [
+                old_client
+            ]
+            assert startup_node.redis_connection is old_client
+        finally:
+            patcher.stop()
+
+    @pytest.mark.fixed_client
     def test_refresh_without_full_coverage_builds_no_node_clients(self):
         """
         A refresh that fails the full-coverage check raises before it builds

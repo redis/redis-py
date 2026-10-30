@@ -3409,11 +3409,16 @@ class NodesManager:
                 random.shuffle(startup_nodes)
 
             # An address that is already a startup node is queried through that
-            # node's client, so a second client never replaces a live node's one
+            # node's client, so a second client never replaces a live node's one.
+            # Startup nodes are named after the resolved localhost, like
+            # ClusterNode names them.
             additional_startup_nodes = [
                 ClusterNode(host, port)
                 for host, port in additional_startup_nodes_info
-                if get_node_name(host, port) not in startup_node_names
+                if get_node_name(
+                    _resolve_localhost() if host == "localhost" else host, port
+                )
+                not in startup_node_names
             ]
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):

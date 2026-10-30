@@ -2931,11 +2931,15 @@ class NodesManager:
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
             # An address that is already a startup node is queried through that
-            # node, so no temporary node is built for it
+            # node, so no temporary node is built for it. Startup nodes are
+            # named after the resolved localhost, like ClusterNode names them.
             additional_startup_nodes = [
                 ClusterNode(host, port, **self.connection_kwargs)
                 for host, port in additional_startup_nodes_info
-                if get_node_name(host, port) not in self.startup_nodes
+                if get_node_name(
+                    _resolve_localhost() if host == "localhost" else host, port
+                )
+                not in self.startup_nodes
             ]
             temporary_nodes.extend(additional_startup_nodes)
             if last_failed_node_name is not None:

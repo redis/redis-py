@@ -2152,6 +2152,46 @@ class TestTopologyRefreshKeepsConnections:
         assert disconnect.await_args_list == []
 
     @pytest.mark.fixed_client
+    async def test_refresh_queries_a_localhost_remapped_startup_node_once(
+        self,
+    ) -> None:
+        """
+        With a remap to localhost, the refresh hint of a MOVED redirect is
+        localhost:port, while the startup node is named after the resolved
+        address. It is the same node, so no temporary ClusterNode is built to
+        query it a second time.
+        """
+
+        def address_remap(address):
+            host, port = address
+            return "localhost", port + 1000
+
+        startup_node = ClusterNode("localhost", 8000)
+        nodes_manager = NodesManager(
+            startup_nodes=[startup_node],
+            require_full_coverage=False,
+            connection_kwargs={},
+            address_remap=address_remap,
+        )
+        # Half of the slots, so every startup node is queried
+        slots = [[0, 8191, [default_host, 7000, "node_0"]]]
+        with (
+            mock.patch.object(
+                ClusterNode, "execute_command", autospec=True, return_value=slots
+            ) as execute_command,
+            mock.patch.object(ClusterNode, "disconnect", autospec=True) as disconnect,
+        ):
+            # The hint _execute_command passes on for a MOVED to 7000
+            await nodes_manager.initialize(
+                additional_startup_nodes_info=[
+                    nodes_manager.remap_host_port(default_host, 7000)
+                ]
+            )
+
+        assert [c.args[0] for c in execute_command.await_args_list] == [startup_node]
+        assert disconnect.await_args_list == []
+
+    @pytest.mark.fixed_client
     async def test_refresh_closes_temporary_startup_nodes(self) -> None:
         """
         An additional startup node is queried through a ClusterNode built only
