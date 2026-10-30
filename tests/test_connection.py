@@ -4728,6 +4728,19 @@ def test_ssl_context_is_rebuilt_after_certificate_rotation(tmp_path):
 
 
 @pytest.mark.fixed_client
+def test_ssl_context_is_rebuilt_after_ca_directory_change(tmp_path):
+    settings = {"ssl_cert_reqs": "none", "ssl_ca_path": str(tmp_path)}
+
+    with patch.object(ssl.SSLContext, "load_verify_locations"):
+        context = _wrapped_ssl_context(SSLConnection(**settings))
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is context
+
+        (tmp_path / "ca.0").write_text("rotated")
+        os.utime(tmp_path, ns=(0, 0))
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is not context
+
+
+@pytest.mark.fixed_client
 def test_ssl_context_is_released_with_its_last_connection():
     context = _wrapped_ssl_context(
         SSLConnection(ssl_cert_reqs="none", ssl_ciphers="ECDHE+AESGCM")

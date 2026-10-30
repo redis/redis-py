@@ -1783,6 +1783,19 @@ def test_ssl_context_is_rebuilt_after_certificate_rotation(tmp_path):
 
 
 @pytest.mark.fixed_client
+def test_ssl_context_is_rebuilt_after_ca_directory_change(tmp_path):
+    settings = {"ssl_cert_reqs": "none", "ssl_ca_path": str(tmp_path)}
+
+    with patch.object(ssl.SSLContext, "load_verify_locations"):
+        context = SSLConnection(**settings).ssl_context.get()
+        assert SSLConnection(**settings).ssl_context.get() is context
+
+        (tmp_path / "ca.0").write_text("rotated")
+        os.utime(tmp_path, ns=(0, 0))
+        assert SSLConnection(**settings).ssl_context.get() is not context
+
+
+@pytest.mark.fixed_client
 def test_ssl_context_is_released_with_its_last_connection():
     conn = SSLConnection(ssl_cert_reqs="none", ssl_ciphers="ECDHE+AESGCM")
     context_ref = weakref.ref(conn.ssl_context.get())

@@ -78,11 +78,13 @@ def get_shared_ssl_context(
     Args:
         build: Builds the context when no live one matches.
         settings: Hashable values that determine the context.
-        files: The certificate files the context is loaded from. They are identified
-            by modification time and size, so that a rotated file is picked up by
-            the next context built for it. The default CA bundle is always included.
+        files: The certificate files and directories the context is loaded from.
+            They are identified by modification time and size, so that a rotated
+            file is picked up by the next context built for it. The default CA
+            locations are always included.
     """
-    paths = (*files, ssl.get_default_verify_paths().cafile)
+    defaults = ssl.get_default_verify_paths()
+    paths = (*files, defaults.cafile, defaults.capath)
     key = (settings, tuple((path, _file_signature(path)) for path in paths if path))
     try:
         context = _SHARED_SSL_CONTEXTS.get(key)

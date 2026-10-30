@@ -1975,11 +1975,10 @@ class RedisSSLContext:
                     tuple(self.exclude_verify_flags or ()),
                     self.password,
                     self.ca_data,
-                    self.ca_path,
                     self.min_version,
                     self.ciphers,
                 ),
-                (self.certfile, self.keyfile, self.ca_certs),
+                (self.certfile, self.keyfile, self.ca_certs, self.ca_path),
             )
         return self.context
 

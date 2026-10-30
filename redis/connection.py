@@ -3004,11 +3004,10 @@ class SSLConnection(Connection):
                 tuple(self.ssl_exclude_verify_flags or ()),
                 self.certificate_password,
                 self.ca_data,
-                self.ca_path,
                 self.ssl_min_version,
                 self.ssl_ciphers,
             ),
-            (self.certfile, self.keyfile, self.ca_certs),
+            (self.certfile, self.keyfile, self.ca_certs, self.ca_path),
         )
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
