@@ -74,7 +74,7 @@ class TestPipeline:
 
     @pytest.mark.onlynoncluster
     async def test_info_in_transaction_with_custom_callback(self, decoded_r):
-        decoded_r.set_response_callback("INFO", lambda response: response)
+        decoded_r.set_response_callback("INFO", lambda response, **options: response)
         async with decoded_r.pipeline() as pipe:
             pipe.info("server")
             (info,) = await pipe.execute()

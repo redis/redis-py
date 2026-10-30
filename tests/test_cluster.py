@@ -1737,7 +1737,7 @@ class TestClusterRedisCommands:
         assert info["db0"]["keys"] == 3
 
     def test_info_with_custom_callback(self, decoded_r):
-        decoded_r.set_response_callback("INFO", lambda response: response)
+        decoded_r.set_response_callback("INFO", lambda response, **options: response)
         info = decoded_r.info("server", target_nodes=decoded_r.get_random_node())
         assert "redis_version" in info
 

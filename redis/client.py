@@ -968,11 +968,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
-            elif command_name == "INFO":
-                response = decode_info(
-                    connection.read_response(disable_decoding=True),
-                    self.get_encoder(),
-                )
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = connection.read_response()
         except ResponseError:

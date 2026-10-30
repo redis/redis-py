@@ -2351,11 +2351,8 @@ class ClusterNode:
             if NEVER_DECODE in kwargs:
                 response = await connection.read_response(disable_decoding=True)
                 kwargs.pop(NEVER_DECODE)
-            elif command == "INFO":
-                response = decode_info(
-                    await connection.read_response(disable_decoding=True),
-                    self.get_encoder(),
-                )
+                if command == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = await connection.read_response()
         except ResponseError:
