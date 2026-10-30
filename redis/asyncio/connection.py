@@ -105,6 +105,7 @@ from redis.utils import (
     HIREDIS_AVAILABLE,
     SENTINEL,
     check_protocol_version,
+    get_shared_ssl_context,
     str_if_bytes,
 )
 
@@ -1936,32 +1937,49 @@ class RedisSSLContext:
         self.password = password
         self.context: Optional[SSLContext] = None
 
+    def _build(self) -> SSLContext:
+        context = ssl.create_default_context()
+        context.check_hostname = self.check_hostname
+        context.verify_mode = self.cert_reqs
+        if self.include_verify_flags:
+            for flag in self.include_verify_flags:
+                context.verify_flags |= flag
+        if self.exclude_verify_flags:
+            for flag in self.exclude_verify_flags:
+                context.verify_flags &= ~flag
+        if self.certfile or self.keyfile:
+            context.load_cert_chain(
+                certfile=self.certfile,
+                keyfile=self.keyfile,
+                password=self.password,
+            )
+        if self.ca_certs or self.ca_data or self.ca_path:
+            context.load_verify_locations(
+                cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+            )
+        if self.min_version is not None:
+            context.minimum_version = self.min_version
+        if self.ciphers is not None:
+            context.set_ciphers(self.ciphers)
+        return context
+
     def get(self) -> SSLContext:
         if not self.context:
-            context = ssl.create_default_context()
-            context.check_hostname = self.check_hostname
-            context.verify_mode = self.cert_reqs
-            if self.include_verify_flags:
-                for flag in self.include_verify_flags:
-                    context.verify_flags |= flag
-            if self.exclude_verify_flags:
-                for flag in self.exclude_verify_flags:
-                    context.verify_flags &= ~flag
-            if self.certfile or self.keyfile:
-                context.load_cert_chain(
-                    certfile=self.certfile,
-                    keyfile=self.keyfile,
-                    password=self.password,
-                )
-            if self.ca_certs or self.ca_data or self.ca_path:
-                context.load_verify_locations(
-                    cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
-                )
-            if self.min_version is not None:
-                context.minimum_version = self.min_version
-            if self.ciphers is not None:
-                context.set_ciphers(self.ciphers)
-            self.context = context
+            self.context = get_shared_ssl_context(
+                self._build,
+                (
+                    type(self),
+                    self.cert_reqs,
+                    self.check_hostname,
+                    tuple(self.include_verify_flags or ()),
+                    tuple(self.exclude_verify_flags or ()),
+                    self.password,
+                    self.ca_data,
+                    self.min_version,
+                    self.ciphers,
+                ),
+                (self.certfile, self.keyfile, self.ca_certs, self.ca_path),
+            )
         return self.context
 
 

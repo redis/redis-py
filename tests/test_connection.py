@@ -4670,3 +4670,100 @@ def test_send_packed_command_os_level_timeout_is_a_connection_error():
     with pytest.raises(ConnectionError):
         conn.send_packed_command(b"PING", check_health=False)
     conn.disconnect.assert_called_once()
+
+
+def _wrapped_ssl_context(conn):
+    contexts = []
+
+    def wrap_socket(context, sock, **kwargs):
+        contexts.append(context)
+        return MagicMock()
+
+    with socket.socket() as sock:
+        with patch.object(ssl.SSLContext, "wrap_socket", wrap_socket):
+            conn._wrap_socket_with_ssl(sock)
+    return contexts[0]
+
+
+@pytest.mark.fixed_client
+def test_ssl_connections_with_same_settings_share_a_context():
+    contexts = [
+        _wrapped_ssl_context(SSLConnection(ssl_cert_reqs="none")) for _ in range(5)
+    ]
+
+    assert all(context is contexts[0] for context in contexts)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"ssl_cert_reqs": "optional", "ssl_check_hostname": False},
+        {"ssl_cert_reqs": "none", "ssl_ciphers": "ECDHE+AESGCM"},
+        {"ssl_cert_reqs": "none", "ssl_min_version": ssl.TLSVersion.TLSv1_3},
+        {
+            "ssl_cert_reqs": "none",
+            "ssl_include_verify_flags": [ssl.VerifyFlags.VERIFY_X509_STRICT],
+        },
+    ],
+)
+def test_ssl_connections_with_different_settings_do_not_share_a_context(settings):
+    context = _wrapped_ssl_context(SSLConnection(ssl_cert_reqs="none"))
+
+    assert _wrapped_ssl_context(SSLConnection(**settings)) is not context
+
+
+@pytest.mark.fixed_client
+def test_ssl_context_is_rebuilt_after_certificate_rotation(tmp_path):
+    certfile = tmp_path / "client.crt"
+    certfile.write_text("old")
+    settings = {"ssl_cert_reqs": "none", "ssl_certfile": str(certfile)}
+
+    with patch.object(ssl.SSLContext, "load_cert_chain"):
+        context = _wrapped_ssl_context(SSLConnection(**settings))
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is context
+
+        certfile.write_text("rotated")
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is not context
+
+
+@pytest.mark.fixed_client
+def test_ssl_context_is_rebuilt_after_ca_directory_change(tmp_path):
+    settings = {"ssl_cert_reqs": "none", "ssl_ca_path": str(tmp_path)}
+
+    with patch.object(ssl.SSLContext, "load_verify_locations"):
+        context = _wrapped_ssl_context(SSLConnection(**settings))
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is context
+
+        (tmp_path / "ca.0").write_text("rotated")
+        os.utime(tmp_path, ns=(0, 0))
+        assert _wrapped_ssl_context(SSLConnection(**settings)) is not context
+
+
+@pytest.mark.fixed_client
+def test_ssl_context_is_released_with_its_last_connection():
+    context = _wrapped_ssl_context(
+        SSLConnection(ssl_cert_reqs="none", ssl_ciphers="ECDHE+AESGCM")
+    )
+    context_ref = weakref.ref(context)
+
+    del context
+    gc.collect()
+
+    assert context_ref() is None
+
+
+@pytest.mark.fixed_client
+def test_ssl_context_with_unhashable_ca_data_is_not_shared():
+    conn = SSLConnection(ssl_cert_reqs="none", ssl_ca_data=bytearray(b"ca"))
+
+    with patch.object(ssl.SSLContext, "load_verify_locations"):
+        assert _wrapped_ssl_context(conn) is not _wrapped_ssl_context(conn)
+
+
+@pytest.mark.fixed_client
+def test_ssl_context_with_missing_certificate_file_raises(tmp_path):
+    conn = SSLConnection(ssl_cert_reqs="none", ssl_certfile=str(tmp_path / "missing"))
+
+    with pytest.raises(FileNotFoundError):
+        _wrapped_ssl_context(conn)
