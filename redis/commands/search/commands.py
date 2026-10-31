@@ -1,6 +1,6 @@
 import itertools
 import time
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Awaitable, Dict, List, Optional, Set, Union
 
 from redis._parsers.helpers import pairs_to_dict
 from redis.asyncio.client import Pipeline as AsyncioPipeline
@@ -1867,6 +1867,74 @@ class SearchCommands:
 
 
 class AsyncSearchCommands(SearchCommands):
+    def profile(
+        self,
+        query: Union[Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
+    ) -> Union[
+        Awaitable[
+            Union[
+                tuple[Union[Result, AggregateResult], ProfileInformation],
+                ProfileInformation,
+            ]
+        ],
+        AsyncioPipeline,
+    ]:
+        """
+        Performs a search or aggregate command and collects performance
+        information. Search results honor the query's field encodings. For binary
+        fields, use ``decode_responses=False`` and ``Query.return_field`` with
+        ``decode_field=False``.
+
+        Await direct calls; pipeline calls queue immediately.
+
+        ### Parameters
+
+        **query**: This can be either an `AggregateRequest` or `Query`.
+        **limited**: If set to True, removes details of reader iterator.
+        **query_params**: Define one or more value parameters.
+        Each parameter has a name and a value.
+
+        """
+        if isinstance(self.client, _PIPELINE_TYPES):
+            # Keep the existing synchronous pipeline enqueue API, including
+            # both ft().pipeline() and pipeline().ft().
+            return super().profile(query, limited=limited, query_params=query_params)
+        return self._profile(query, limited=limited, query_params=query_params)
+
+    async def _profile(
+        self,
+        query: Union[Query, AggregateRequest],
+        limited: bool = False,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
+    ) -> Union[
+        tuple[Union[Result, AggregateResult], ProfileInformation],
+        ProfileInformation,
+    ]:
+        """Execute and parse a direct asynchronous profile command."""
+        st = time.monotonic()
+        cmd = [PROFILE_CMD, self.index_name, ""]
+        if limited:
+            cmd.append("LIMITED")
+        cmd.append("QUERY")
+
+        if isinstance(query, AggregateRequest):
+            cmd[2] = "AGGREGATE"
+            cmd += query.build_args()
+        elif isinstance(query, Query):
+            cmd[2] = "SEARCH"
+            cmd += query.get_args()
+            cmd += self.get_params_args(query_params)
+        else:
+            raise ValueError("Must provide AggregateRequest object or Query object.")
+
+        res = await self.execute_command(*cmd)
+
+        return self._parse_results(
+            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
+        )
+
     async def info(self):
         """
         Get info and stats about the current index, including the number of
