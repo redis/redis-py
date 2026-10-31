@@ -376,7 +376,7 @@ class Sentinel(SentinelCommands):
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
-            except (ConnectionError, TimeoutError) as e:
+            except (ConnectionError, ResponseError, TimeoutError) as e:
                 collected_errors.append(f"{sentinel} - {e!r}")
                 continue
             state = masters.get(service_name)
