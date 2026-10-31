@@ -271,6 +271,38 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_equal_int_and_float_keys_do_not_share_an_entry(self, r):
+        # 42 == 42.0, but they are sent as the different Redis keys "42" and
+        # "42.0", so a read of one must not be served the entry of the other.
+        cache = r.get_cache()
+        r.set(42, "int")
+        r.set(42.0, "float")
+        size = cache.size
+        assert r.get(42) in [b"int", "int"]
+        assert r.get(42.0) in [b"float", "float"]
+        assert cache.size == size + 2
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
         ],
         ids=["single", "pool"],
         indirect=True,
