@@ -3171,6 +3171,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "timeout": float,
     "protocol": int,
     "legacy_responses": to_bool,
+    "decode_responses": to_bool,
 }
 
 
