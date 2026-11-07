@@ -10,6 +10,7 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from typing import (
@@ -82,7 +83,9 @@ from .maint_notifications import (
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
     OSSMaintNotificationsHandler,
+    _defer_maintenance_events,
     _dispatch_maintenance_event,
+    _get_maintenance_state_lock,
 )
 from .observability.attributes import (
     DB_CLIENT_CONNECTION_POOL_NAME,
@@ -436,6 +439,8 @@ class MaintNotificationsAbstractConnection:
         )
         self._processed_start_maint_notifications = set()
         self._skipped_end_maint_notifications = set()
+        self._socket_timeout_updates_deferred = False
+        self._deferred_socket_timeout = SENTINEL
 
     @abstractmethod
     def _get_parser(self) -> BaseParser:
@@ -450,11 +455,16 @@ class MaintNotificationsAbstractConnection:
         return parser
 
     def _complete_maintenance_on_disconnect(self) -> None:
+        with _defer_maintenance_events(), _get_maintenance_state_lock(self):
+            event = self._reset_maintenance_on_disconnect()
+            if event is not None:
+                _dispatch_maintenance_event(event.config, event)
+
+    def _reset_maintenance_on_disconnect(self) -> MaintenanceCompletedEvent | None:
         """
-        Restore the settings a maintenance relaxed on this connection when it is
-        closed, and report the relaxation as completed - the same way the
-        completion notification would have been reported. The MOVING state is
-        left alone: it is owned by the pool-level TTL cleanup.
+        Restore the settings a maintenance relaxed on this connection and
+        return its completion event for dispatch. The MOVING state is left
+        alone: it is owned by the pool-level TTL cleanup.
         """
         if self.maintenance_state != MaintenanceState.MAINTENANCE:
             return
@@ -465,17 +475,14 @@ class MaintNotificationsAbstractConnection:
         self.reset_received_notifications()
         if self.maint_notifications_config is not None:
             pool_handler = self._maint_notifications_pool_handler
-            _dispatch_maintenance_event(
-                self.maint_notifications_config,
-                MaintenanceCompletedEvent(
-                    connection_pool=(
-                        pool_handler.pool if pool_handler is not None else None
-                    ),
-                    connection=self,
-                    state=MaintenanceState.MAINTENANCE,
-                    notification=None,
-                    config=self.maint_notifications_config,
+            return MaintenanceCompletedEvent(
+                connection_pool=(
+                    pool_handler.pool if pool_handler is not None else None
                 ),
+                connection=self,
+                state=MaintenanceState.MAINTENANCE,
+                notification=None,
+                config=self.maint_notifications_config,
             )
 
     def handle_pending_push_notifications(self) -> None:
@@ -512,13 +519,19 @@ class MaintNotificationsAbstractConnection:
 
             return deferred_handler
 
+        previous_oss_defer = parser._deferred_oss_cluster_handler
+
+        def defer_oss(handler, notification):
+            if previous_oss_defer is not None:
+                deferred.append(
+                    (lambda n: previous_oss_defer(handler, n), notification)
+                )
+            else:
+                deferred.append((handler, notification))
+
         handlers = (
             (parser.node_moving_push_handler_func, parser.set_node_moving_push_handler),
             (parser.maintenance_push_handler_func, parser.set_maintenance_push_handler),
-            (
-                parser.oss_cluster_maint_push_handler_func,
-                parser.set_oss_cluster_maint_push_handler,
-            ),
             # Client-side cache invalidations are pushes too; the ones on a
             # connection that has to be reconnected are covered by the cache
             # flush its disconnect performs
@@ -530,6 +543,7 @@ class MaintNotificationsAbstractConnection:
         for handler, set_handler in handlers:
             if handler is not None:
                 set_handler(defer(handler))
+        parser._deferred_oss_cluster_handler = defer_oss
 
         alive = False
         deadline = time.monotonic() + PENDING_PUSH_NOTIFICATIONS_READ_TIMEOUT
@@ -558,6 +572,7 @@ class MaintNotificationsAbstractConnection:
         except ResponseError as e:
             raise ConnectionError("Connection has data") from e
         finally:
+            parser._deferred_oss_cluster_handler = previous_oss_defer
             for handler, set_handler in handlers:
                 set_handler(handler)
             if not alive and deferred and logger.isEnabledFor(logging.DEBUG):
@@ -990,15 +1005,19 @@ class MaintNotificationsAbstractConnection:
         return None
 
     def update_current_socket_timeout(self, relaxed_timeout: Optional[float] = None):
-        conn_socket = self._get_socket()
-        if conn_socket:
+        with _get_maintenance_state_lock(self):
+            conn_socket = self._get_socket()
+            if conn_socket is None:
+                return
             timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
             # if the current timeout is 0 it means we are in the middle of a can_read call
             # in this case we don't want to change the timeout because the operation
             # is non-blocking and should return immediately
             # Changing the state from non-blocking to blocking in the middle of a read operation
             # will lead to a deadlock
-            if conn_socket.gettimeout() != 0:
+            if self._socket_timeout_updates_deferred:
+                self._deferred_socket_timeout = timeout
+            elif conn_socket.gettimeout() != 0:
                 conn_socket.settimeout(timeout)
             # Deliberately outside the guard above. The parser caches this value
             # to restore after a per-call timeout override, so while a can_read
@@ -2073,6 +2092,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
+    # Bound peer reads when a checked-out owner stops processing invalidations.
+    # Only the owner's commands renew this window; peer hits do not extend it.
+    _BUSY_CACHE_GRACE_SECONDS = 0.1
 
     def __init__(
         self,
@@ -2084,12 +2106,19 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn = conn
         self.retry = self._conn.retry
         self.host = self._conn.host
-        # A UnixDomainSocketConnection has no port
-        self.port = getattr(self._conn, "port", None)
         self.db = self._conn.db
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
+        # Checkout and peer invalidation drains share this connection's lock.
+        # Release keeps _in_use set through the last socket access.
+        self._in_use_lock = threading.Lock()
+        self._idle_maintenance_done = threading.Condition(self._in_use_lock)
+        self._idle_maintenance = False
+        self._idle_drain_thread = None
+        self._in_use = True
+        self._disconnect_on_checkout = False
+        self._busy_cache_deadline = 0.0
         self._cache = cache
         self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
@@ -2160,6 +2189,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         return self._conn.get_protocol()
 
     def connect(self):
+        # A free-only pool disconnect can lose the idle claim to checkout.
+        # Retire that socket before returning it to the next caller.
+        if self._disconnect_on_checkout:
+            self.disconnect()
         self._conn.connect()
 
         server_name = self._conn.handshake_metadata.get(b"server", None)
@@ -2186,6 +2219,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.on_connect()
 
     def disconnect(self, *args, **kwargs):
+        self._busy_cache_deadline = 0.0
         with self._cache_lock:
             self._cache.flush()
         # Both flags describe an exchange on the socket that is about to die with it. A stale
@@ -2200,6 +2234,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
             self._complete_maintenance_on_disconnect()
         self._conn.disconnect(*args, **kwargs)
+        self._disconnect_on_checkout = False
 
     def check_health(self):
         self._conn.check_health()
@@ -2218,6 +2253,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._pending_caching_reply = False
         self._skip_next_caching = False
         self._pending_cache_hit = _NO_PENDING_HIT
+        self._busy_cache_deadline = 0.0
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
@@ -2237,6 +2273,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # slot, and the attempt is tracked by default under optout anyway.
             self._skip_next_caching = False
             self._current_command_cache_key = None
+            self._busy_cache_deadline = 0.0
             self._conn.send_command(*args, **kwargs)
             return
 
@@ -2280,6 +2317,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         if not store:
             self._current_command_cache_key = None
+            # PubSub, blocking commands and unknown commands may hold this
+            # connection indefinitely without processing invalidations.
+            self._busy_cache_deadline = 0.0
 
             # One path for keyless and ineligible commands alike, so an eligible read whose
             # command method never plumbed ``keys=`` still gets its optout ``NO``. That is the
@@ -2329,25 +2369,34 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         cache_key=self._current_command_cache_key,
                         cache_value=self.DUMMY_CACHE_VALUE,
                         status=CacheEntryStatus.IN_PROGRESS,
-                        connection_ref=self._conn,
+                        connection_ref=self,
                     )
                 )
 
         if candidate is not None:
             # Drain the connection that cached the entry so invalidations do not
             # accumulate on idle connections. This must run outside our cache lock: the
-            # drain takes the pool lock, and invalidations call the owner's callback
-            # under its cache lock. Holding ours would order a cache lock before the
-            # pool lock and another after it, deadlocking connections draining each
-            # other or a pool.disconnect() holding the pool lock while waiting for ours.
-            with self._pool_lock:
-                self._drain_invalidations(candidate.connection_ref)
+            # drain takes the owner's checkout lock, and invalidations call the
+            # owner's callback under its cache lock. Holding ours could deadlock
+            # two connections draining each other.
+            owner = candidate.connection_ref
+            can_serve = False
+            if owner is self:
+                # This checked-out connection was drained at the start of
+                # send_command; peers cannot use its socket while we own it.
+                can_serve = True
+            # A cache shared across pools can retain owners from before a fork.
+            # Their locks may have been held by threads that do not exist here.
+            elif isinstance(owner, CacheProxyConnection) and owner.pid == self.pid:
+                can_serve = self._can_serve_cached_response(owner)
+            # Custom entries without pool ownership information cannot be drained
+            # safely and must use a fresh read on our connection.
 
             with self._cache_lock:
                 # Re-check: the drained entry may have been invalidated or replaced.
                 entry = self._cache.get(self._current_command_cache_key)
 
-                # A hit requires this very entry object to have been drained. A
+                # A hit requires this very entry object to have been checked. A
                 # replacement filled during the drain may belong to another connection
                 # with pending invalidations and is not trusted, even if it is VALID by
                 # the time we check here.
@@ -2362,7 +2411,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 #   and never read the reply we did send;
                 # - an invalidation removes it, so a re-derived check would find nothing
                 #   and read a reply for a command we never sent.
-                if entry is candidate:
+                if can_serve and entry is candidate:
                     cached_value = entry.cache_value
                     self._current_command_cache_key = None
                     is_hit = True
@@ -2373,13 +2422,17 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                             cache_key=self._current_command_cache_key,
                             cache_value=self.DUMMY_CACHE_VALUE,
                             status=CacheEntryStatus.IN_PROGRESS,
-                            connection_ref=self._conn,
+                            connection_ref=self,
                         )
                     )
 
         if is_hit:
             self._pending_cache_hit = _clone_cache_value(cached_value)
             return
+
+        # A wire reply may be followed by invalidations we have not read yet.
+        # Keep peers on the fresh-read path until this exchange completes.
+        self._busy_cache_deadline = 0.0
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached. Under optin the server remembers nothing
@@ -2492,6 +2545,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
             cache_entry = self._cache.get(self._current_command_cache_key)
 
+            # Peers use independent cache locks. Start the sharing window before
+            # making the reply visible as VALID to avoid unnecessary misses.
+            self._busy_cache_deadline = (
+                time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
+            )
+
             # Promote only the placeholder this connection staked. It may have been
             # invalidated in the meantime, or replaced by another connection's placeholder
             # for the same key - promoting that one would bind our reply to its
@@ -2499,7 +2558,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 cache_entry is not None
                 and cache_entry.status == CacheEntryStatus.IN_PROGRESS
-                and cache_entry.connection_ref is self._conn
+                and cache_entry.connection_ref is self
             ):
                 cache_entry.cache_value = cloned_response
                 cache_entry.status = CacheEntryStatus.VALID
@@ -2535,7 +2594,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if (
                 entry is not None
                 and entry.status == CacheEntryStatus.IN_PROGRESS
-                and entry.connection_ref is self._conn
+                and entry.connection_ref is self
             ):
                 self._cache.delete_by_cache_keys([key])
 
@@ -2661,6 +2720,59 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def set_re_auth_token(self, token: TokenInterface):
         self._conn.set_re_auth_token(token)
 
+    def _try_acquire_idle(self):
+        # A drain can dispatch MOVING and acquire the pool lock. Never wait for
+        # it while holding that lock, or keep its lock across socket I/O.
+        if not self._in_use_lock.acquire(blocking=False):
+            return False
+        try:
+            if self._in_use:
+                return False
+            self._busy_cache_deadline = 0.0
+            self._in_use = True
+            self._idle_maintenance = True
+            return True
+        finally:
+            self._in_use_lock.release()
+
+    def _release_idle(self):
+        with self._in_use_lock:
+            self._in_use = False
+            self._idle_maintenance = False
+            self._idle_maintenance_done.notify_all()
+
+    def _acquire(self):
+        with self._in_use_lock:
+            # BlockingConnectionPool can dequeue a connection while a pool
+            # maintenance operation owns it. Wait without holding the pool lock.
+            while self._idle_maintenance:
+                self._idle_maintenance_done.wait()
+            # Invalidations may have arrived since the previous checkout.
+            # Only a fresh drain may open a busy owner's cache-hit window.
+            self._busy_cache_deadline = 0.0
+            self._in_use = True
+
+    def _disconnect_from_pool(self, inuse_connections):
+        # Cyclic GC can finalize a pool-owning client from a parser allocation.
+        # Its close runs on this drain's thread: joining our own lock deadlocks,
+        # and closing the socket here would invalidate the active parser.
+        if self._idle_drain_thread == threading.get_ident():
+            self.mark_for_reconnect()
+            return
+        # Called outside the pool lock: a drain can dispatch MOVING and need it.
+        # Reserve completion's position before checkout can start a new window,
+        # but invoke listeners only after closing the socket and releasing ownership.
+        with _defer_maintenance_events(), self._in_use_lock:
+            # Idle AUTH is active socket I/O even while listed as available.
+            # Sentinel discovery can reenter free-only disconnect from that
+            # AUTH's reconnect, so exclude active owners before waiting.
+            if not inuse_connections and self._in_use:
+                return
+            while self._idle_maintenance:
+                self._idle_maintenance_done.wait()
+            if inuse_connections or not self._in_use:
+                self.disconnect()
+
     def re_auth(self):
         self._conn.re_auth()
 
@@ -2680,6 +2792,16 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     @host.setter
     def host(self, value: str):
         self._conn.host = value
+
+    @property
+    def port(self) -> int | None:
+        # Sentinel can change the endpoint when the wrapped connection connects.
+        # A UnixDomainSocketConnection has no port.
+        return getattr(self._conn, "port", None)
+
+    @port.setter
+    def port(self, value: int | None):
+        self._conn.port = value
 
     @property
     def socket_timeout(self) -> Optional[Union[float, int]]:
@@ -2808,7 +2930,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     if (
                         entry is not None
                         and entry.status == CacheEntryStatus.IN_PROGRESS
-                        and entry.connection_ref is self._conn
+                        and entry.connection_ref is self
                     ):
                         own_placeholder = entry
                 self._cache.flush()
@@ -2833,6 +2955,80 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._connected_once = True
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
+    def _can_serve_cached_response(self, owner):
+        # A topology refresh can check out the same idle owner for CLUSTER
+        # SLOTS. Run it only after the drain releases the socket, like event
+        # listeners that can close the pool. Keep connection-local maintenance
+        # and invalidations inline while the parser is exclusively owned.
+        with _defer_maintenance_events():
+            pending = None
+            try:
+                with owner._in_use_lock:
+                    if not owner._conn.is_connected:
+                        return False
+                    if owner._in_use:
+                        # Hits neither touch a busy socket nor extend its grace.
+                        return time.monotonic() < owner._busy_cache_deadline
+                    owner._idle_drain_thread = threading.get_ident()
+                    try:
+                        parser = getattr(owner._conn, "_parser", None)
+                        previous_defer = getattr(
+                            parser, "_deferred_oss_cluster_handler", None
+                        )
+                        if parser is not None:
+                            pending = []
+
+                            def defer(handler, notification):
+                                pending.append((handler, notification))
+                                # A removed node's entries must not be reused in
+                                # the gap between releasing ownership and refresh.
+                                with self._cache_lock:
+                                    self._cache.flush()
+
+                            parser._deferred_oss_cluster_handler = defer
+                        conn = owner._conn
+                        defer_timeouts = isinstance(
+                            conn, MaintNotificationsAbstractConnection
+                        )
+                        try:
+                            if defer_timeouts:
+                                # Reserve the whole poll, not just its temporary
+                                # socket timeout of zero. The owner lock excludes
+                                # other drains; the pool lock coordinates MOVING.
+                                with owner._pool_lock:
+                                    conn._socket_timeout_updates_deferred = True
+                            self._drain_invalidations(conn)
+                        finally:
+                            try:
+                                if defer_timeouts:
+                                    with owner._pool_lock:
+                                        conn._socket_timeout_updates_deferred = False
+                                        timeout = conn._deferred_socket_timeout
+                                        conn._deferred_socket_timeout = SENTINEL
+                                        if timeout is not SENTINEL:
+                                            conn.update_current_socket_timeout(timeout)
+                            finally:
+                                if parser is not None:
+                                    parser._deferred_oss_cluster_handler = (
+                                        previous_defer
+                                    )
+                                # A removed node may never be checked out again. Finish
+                                # cleanup that could not close the socket mid-drain,
+                                # including when parsing fails or is interrupted.
+                                if owner.should_reconnect():
+                                    owner.disconnect()
+                        return True
+                    finally:
+                        owner._idle_drain_thread = None
+            finally:
+                for handler, notification in pending or ():
+                    try:
+                        handler(notification)
+                    except Exception as e:
+                        # Match inline parser handling: log ordinary handler
+                        # errors, but allow cancellation to propagate.
+                        logger.error(f"Error handling {notification}: {e}")
+
     def _drain_invalidations(self, conn: ConnectionInterface):
         while conn.can_read():
             try:
@@ -2855,6 +3051,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     def _process_pending_invalidations(self):
         self._drain_invalidations(self._conn)
+        self._busy_cache_deadline = time.monotonic() + self._BUSY_CACHE_GRACE_SECONDS
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
@@ -3523,6 +3720,7 @@ class MaintNotificationsAbstractConnectionPool:
         ] = None,
     ):
         """Update the maintenance notifications config for all connections in the pool."""
+        cached_connections = []
         with self._get_pool_lock():
             for conn in self._get_free_connections():
                 if oss_cluster_maint_notifications_handler:
@@ -3544,7 +3742,13 @@ class MaintNotificationsAbstractConnectionPool:
                     raise ValueError(
                         "Either maint_notifications_pool_handler or oss_cluster_maint_notifications_handler must be set"
                     )
-                conn.disconnect()
+                if isinstance(conn, CacheProxyConnection):
+                    # Checkout may take this connection before the drain ends.
+                    # In that case defer reconnect as for an active connection.
+                    conn.mark_for_reconnect()
+                    cached_connections.append(conn)
+                else:
+                    conn.disconnect()
             for conn in self._get_in_use_connections():
                 if oss_cluster_maint_notifications_handler:
                     # Use set_maint_notifications_cluster_handler_for_connection
@@ -3577,6 +3781,9 @@ class MaintNotificationsAbstractConnectionPool:
                         f"config update: {conn}, {conn.extract_connection_details()}"
                     )
                 conn.mark_for_reconnect()
+
+        for conn in cached_connections:
+            conn._disconnect_from_pool(inuse_connections=False)
 
     def _should_update_connection(
         self,
@@ -3786,17 +3993,28 @@ class MaintNotificationsAbstractConnectionPool:
         :param moving_address_src: The address of the node that is being moved.
         """
         debug = logger.isEnabledFor(logging.DEBUG)
-        with self._get_pool_lock():
-            for conn in self._get_free_connections():
-                if self._should_update_connection(
-                    conn, "connected_address", moving_address_src
-                ):
-                    if debug:
-                        logger.debug(
-                            f"Disconnecting free connection: {conn}, "
-                            f"{conn.extract_connection_details()}"
-                        )
-                    conn.disconnect()
+        with _defer_maintenance_events() if self.cache is not None else nullcontext():
+            with self._get_pool_lock():
+                for conn in self._get_free_connections():
+                    if self._should_update_connection(
+                        conn, "connected_address", moving_address_src
+                    ):
+                        if debug:
+                            logger.debug(
+                                f"Disconnecting free connection: {conn}, "
+                                f"{conn.extract_connection_details()}"
+                            )
+                        cached = isinstance(conn, CacheProxyConnection)
+                        if cached and not conn._try_acquire_idle():
+                            conn.mark_for_reconnect()
+                            continue
+                        try:
+                            # Queue completion while still owning the connection;
+                            # callbacks run after both idle and pool locks release.
+                            conn.disconnect()
+                        finally:
+                            if cached:
+                                conn._release_idle()
 
 
 class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInterface):
@@ -4116,6 +4334,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
+        self._releasing_connections = {}
 
         self._on_reset_after_fork()
 
@@ -4229,6 +4448,18 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 is_created = True
             self._in_use_connections.add(connection)
 
+        if isinstance(connection, CacheProxyConnection):
+            # Wait only for this connection's drain, without holding the pool lock.
+            try:
+                connection._acquire()
+            except BaseException:
+                # No ownership or metrics transition occurred. Return the slot
+                # without release events or socket I/O on the existing owner.
+                with self._lock:
+                    self._in_use_connections.remove(connection)
+                    self._available_connections.append(connection)
+                raise
+
         # Record state transition for observability
         pool_name = get_pool_name(self)
         if is_created:
@@ -4285,6 +4516,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     connection.handle_pending_push_notifications()
                 elif self.cache is None:
                     raise ConnectionError("Connection has data")
+                elif isinstance(connection, CacheProxyConnection):
+                    connection._process_pending_invalidations()
+            if isinstance(connection, CacheProxyConnection):
+                # The readiness poll or drain checked invalidations. Renew the
+                # window revoked by checkout without polling the socket again.
+                connection._busy_cache_deadline = (
+                    time.monotonic() + connection._BUSY_CACHE_GRACE_SECONDS
+                )
         except (ConnectionError, TimeoutError, OSError):
             connection.disconnect()
             connection.connect()
@@ -4327,7 +4566,20 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
-        with self._lock:
+        if isinstance(
+            connection, CacheProxyConnection
+        ) and self._release_cache_connection(connection):
+            return
+        # Sentinel may already reject a cached connection at entry. Its
+        # disconnect must not invoke completion listeners under the pool lock.
+        with (
+            (
+                _defer_maintenance_events()
+                if isinstance(connection, CacheProxyConnection)
+                else nullcontext()
+            ),
+            self._lock,
+        ):
             try:
                 self._in_use_connections.remove(connection)
             except KeyError:
@@ -4344,9 +4596,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         )
                     connection.disconnect()
                 self._available_connections.append(connection)
-                self._event_dispatcher.dispatch(
-                    AfterConnectionReleasedEvent(connection)
-                )
+                try:
+                    self._event_dispatcher.dispatch(
+                        AfterConnectionReleasedEvent(connection)
+                    )
+                finally:
+                    if isinstance(connection, CacheProxyConnection):
+                        connection._in_use = False
 
                 # Record state transition: USED -> IDLE
                 pool_name = get_pool_name(self)
@@ -4364,6 +4620,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
                 connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    connection._in_use = False
                 # Subclasses such as SentinelConnectionPool can override
                 # owns_connection() with a comparison different from local PID
                 # ownership. When such a subclass rejects a connection, also require
@@ -4381,6 +4639,59 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     )
                 return
 
+    def _release_cache_connection(self, connection):
+        with self._lock:
+            if (
+                connection not in self._in_use_connections
+                or connection in self._releasing_connections
+            ):
+                return True
+            if not self.owns_connection(connection):
+                return False
+            # Keep it active for disconnect and maintenance, but prevent a
+            # recursive release and retain any newer token until listeners finish.
+            self._releasing_connections[connection] = None
+
+        try:
+            if connection.should_reconnect():
+                with _defer_maintenance_events():
+                    connection.disconnect()
+            # A listener can close the pool and join a peer's idle drain.
+            # That drain may process MOVING and need the pool lock.
+            self._event_dispatcher.dispatch(AfterConnectionReleasedEvent(connection))
+        finally:
+            with _defer_maintenance_events(), self._lock:
+                token = self._releasing_connections.pop(connection)
+                if token is not None:
+                    connection.set_re_auth_token(token)
+                # Sentinel discovery during a listener can change which master
+                # this pool owns while the connection is still active.
+                owned = self.owns_connection(connection)
+                try:
+                    if not owned or connection.should_reconnect():
+                        connection.disconnect()
+                finally:
+                    self._in_use_connections.remove(connection)
+                    connection._in_use = False
+                    if owned:
+                        self._available_connections.append(connection)
+                    elif connection.pid == self.pid:
+                        self._created_connections -= 1
+                    pool_name = get_pool_name(self)
+                    if owned or connection.pid == self.pid:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.USED,
+                            counter=-1,
+                        )
+                    if owned:
+                        record_connection_count(
+                            pool_name=pool_name,
+                            connection_state=ConnectionState.IDLE,
+                            counter=1,
+                        )
+        return True
+
     def owns_connection(self, connection: "Connection") -> int:
         return connection.pid == self.pid
 
@@ -4393,6 +4704,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         connections that are idle in the pool.
         """
         self._checkpid()
+        cached_connections = []
         with self._lock:
             if inuse_connections:
                 connections = chain(
@@ -4402,7 +4714,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 connections = self._available_connections
 
             for connection in connections:
-                connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    if not inuse_connections:
+                        connection._disconnect_on_checkout = True
+                    cached_connections.append(connection)
+                else:
+                    connection.disconnect()
+
+        for connection in cached_connections:
+            connection._disconnect_from_pool(inuse_connections)
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
@@ -4429,29 +4749,78 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def re_auth_callback(self, token: TokenInterface):
         first_error = None
-        with self._lock:
-            for conn in self._available_connections:
-                try:
-                    conn.retry.call_with_retry(
-                        lambda: conn.send_command(
-                            "AUTH", token.try_get("oid"), token.get_value()
-                        ),
-                        lambda error: self._mock(error),
-                    )
-                    conn.retry.call_with_retry(
-                        lambda: conn.read_response(),
-                        lambda error: self._mock(error),
-                        is_retryable=lambda error: not isinstance(
-                            error, AuthenticationError
-                        ),
-                    )
-                except AuthenticationError:
-                    raise
-                except Exception as e:
-                    if first_error is None:
-                        first_error = e
-            for conn in self._in_use_connections:
-                conn.set_re_auth_token(token)
+        pending_topology = []
+        # Parser callbacks may close the pool or check out this same connection
+        # for CLUSTER SLOTS. Finish AUTH and release idle ownership and the pool
+        # lock before invoking them, including when AUTH fails.
+        with _defer_maintenance_events() if self.cache is not None else nullcontext():
+            try:
+                with self._lock:
+                    for conn in self._available_connections:
+                        cached = isinstance(conn, CacheProxyConnection)
+                        if cached and not conn._try_acquire_idle():
+                            conn.set_re_auth_token(token)
+                            continue
+                        parser = (
+                            getattr(conn._conn, "_parser", None) if cached else None
+                        )
+                        previous_defer = getattr(
+                            parser, "_deferred_oss_cluster_handler", None
+                        )
+                        if parser is not None:
+
+                            def defer(handler, notification):
+                                pending_topology.append((handler, notification))
+                                # Do not expose old entries between releasing
+                                # the AUTH claim and refreshing the slot map.
+                                self.cache.flush()
+
+                            parser._deferred_oss_cluster_handler = defer
+                        try:
+                            conn.retry.call_with_retry(
+                                lambda: conn.send_command(
+                                    "AUTH", token.try_get("oid"), token.get_value()
+                                ),
+                                lambda error: self._mock(error),
+                            )
+                            conn.retry.call_with_retry(
+                                lambda: conn.read_response(),
+                                lambda error: self._mock(error),
+                                is_retryable=lambda error: not isinstance(
+                                    error, AuthenticationError
+                                ),
+                            )
+                            conn.set_re_auth_token(None)
+                        except AuthenticationError:
+                            raise
+                        except Exception as e:
+                            if first_error is None:
+                                first_error = e
+                        finally:
+                            if parser is not None:
+                                parser._deferred_oss_cluster_handler = previous_defer
+                            if cached:
+                                try:
+                                    if (
+                                        conn.should_reconnect()
+                                        or conn._disconnect_on_checkout
+                                    ):
+                                        conn.disconnect()
+                                finally:
+                                    conn._release_idle()
+                    for conn in self._in_use_connections:
+                        if conn in self._releasing_connections:
+                            self._releasing_connections[conn] = token
+                        else:
+                            conn.set_re_auth_token(token)
+            finally:
+                for handler, notification in pending_topology:
+                    try:
+                        handler(notification)
+                    except Exception as e:
+                        # Match inline parser error handling; cancellation
+                        # still propagates after ownership has been released.
+                        logger.error(f"Error handling {notification}: {e}")
         if first_error is not None:
             raise first_error
 
@@ -4713,41 +5082,53 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
-        connection = None
+        if self._in_maintenance:
+            # Wait for the current MOVING update, but never keep its lock while
+            # waiting for a slot: a checked-out connection may need that lock
+            # to complete maintenance during socket-error cleanup and release.
+            with self._lock:
+                pass
         try:
-            if self._in_maintenance:
-                self._lock.acquire()
-                self._locked = True
-            try:
-                connection = self.pool.get(block=True, timeout=self.timeout)
-            except Empty:
-                record_connection_timeout(pool_name=get_pool_name(self))
-                # Note that this is not caught by the redis client and will be
-                # raised unless handled by application code. If you want never to
-                raise ConnectionError("No connection available.")
+            connection = self.pool.get(block=True, timeout=self.timeout)
+        except Empty:
+            record_connection_timeout(pool_name=get_pool_name(self))
+            # Note that this is not caught by the redis client and will be
+            # raised unless handled by application code. If you want never to
+            raise ConnectionError("No connection available.")
 
-            # If the ``connection`` is actually ``None`` then that's a cue to make
-            # a new connection to add to the pool.
-            if connection is None:
-                # Start timing for observability
-                start_time_created = time.monotonic()
+        # If the ``connection`` is actually ``None`` then that's a cue to make
+        # a new connection to add to the pool.
+        if connection is None:
+            # Start timing for observability
+            start_time_created = time.monotonic()
+            try:
+                connection = self.make_connection()
+            except BaseException:
+                # Hand the slot back, or the pool shrinks on every failure.
                 try:
-                    connection = self.make_connection()
-                except BaseException:
-                    # Hand the slot back, or the pool shrinks on every failure.
-                    try:
-                        self.pool.put_nowait(None)
-                    except Full:
-                        pass
-                    raise
-                is_created = True
-        finally:
-            if self._locked:
-                try:
-                    self._lock.release()
-                except Exception:
+                    self.pool.put_nowait(None)
+                except Full:
                     pass
-                self._locked = False
+                raise
+            is_created = True
+
+        if isinstance(connection, CacheProxyConnection):
+            # Join this connection's drain before connect/can_read uses the socket.
+            try:
+                # A free-only disconnect may have selected this connection just
+                # before dequeue. Let it mark the socket for retirement first.
+                # Release the pool lock before waiting for an idle owner's I/O.
+                with self._lock:
+                    pass
+                connection._acquire()
+            except BaseException:
+                # Maintenance may still own it; release() would clear that state
+                # and could disconnect its socket. Only return the reserved slot.
+                try:
+                    self.pool.put_nowait(connection)
+                except Full:
+                    pass
+                raise
 
         # Record state transition for observability
         pool_name = get_pool_name(self)
@@ -4797,16 +5178,40 @@ class BlockingConnectionPool(ConnectionPool):
         # Make sure we haven't changed process.
         self._checkpid()
 
+        # Shutdown takes ownership before completing maintenance under _lock.
+        # Use the same order, including when a MOVING handoff is still active.
+        # An inherited connection's owner lock may belong to a vanished thread.
+        owner_lock = (
+            connection._in_use_lock
+            if isinstance(connection, CacheProxyConnection)
+            and connection.pid == self.pid
+            else None
+        )
+        owner_locked = False
+        pool_locked = False
+        deferred_events = None
         try:
+            if owner_lock is not None:
+                deferred_events = _defer_maintenance_events()
+                deferred_events.__enter__()
+                owner_lock.acquire()
+                owner_locked = True
             if self._in_maintenance:
                 self._lock.acquire()
-                self._locked = True
+                pool_locked = True
             if not self.owns_connection(connection):
                 # pool doesn't own this connection. do not add it back
                 # to the pool. instead add a None value which is a placeholder
                 # that will cause the pool to recreate the connection if
                 # its needed.
+                if self.cache is not None and deferred_events is None:
+                    # An inherited connection has no local owner lock, but its
+                    # disconnect can still dispatch maintenance completion.
+                    deferred_events = _defer_maintenance_events()
+                    deferred_events.__enter__()
                 connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    connection._in_use = False
                 self.pool.put_nowait(None)
                 # Subclasses can override owns_connection() with a comparison
                 # different from local PID ownership. When such a subclass
@@ -4831,10 +5236,15 @@ class BlockingConnectionPool(ConnectionPool):
                         "Disconnecting released connection marked for reconnect: "
                         f"{connection}, {connection.extract_connection_details()}"
                     )
+                if self.cache is not None and deferred_events is None:
+                    deferred_events = _defer_maintenance_events()
+                    deferred_events.__enter__()
                 connection.disconnect()
             # Put the connection back into the pool.
             pool_name = get_pool_name(self)
             try:
+                if isinstance(connection, CacheProxyConnection):
+                    connection._in_use = False
                 self.pool.put_nowait(connection)
 
                 # Record state transition: USED -> IDLE
@@ -4851,18 +5261,19 @@ class BlockingConnectionPool(ConnectionPool):
             except Full:
                 pass
         finally:
-            if self._locked:
-                try:
-                    self._lock.release()
-                except Exception:
-                    pass
-                self._locked = False
+            if pool_locked:
+                self._lock.release()
+            if owner_locked:
+                owner_lock.release()
+            if deferred_events is not None:
+                deferred_events.__exit__(*sys.exc_info())
 
     def disconnect(self, inuse_connections: bool = True):
         """
         Disconnects either all connections in the pool or just the free connections.
         """
         self._checkpid()
+        cached_connections = []
         try:
             if self._in_maintenance:
                 self._lock.acquire()
@@ -4871,10 +5282,19 @@ class BlockingConnectionPool(ConnectionPool):
             if inuse_connections:
                 connections = self._connections
             else:
-                connections = self._get_free_connections()
+                # Cached checkout passes this lock after dequeue and before
+                # socket use. Custom queues need no stdlib-internal mutex.
+                with self._lock:
+                    connections = self._get_free_connections()
+                    for connection in connections:
+                        if isinstance(connection, CacheProxyConnection):
+                            connection._disconnect_on_checkout = True
 
             for connection in connections:
-                connection.disconnect()
+                if isinstance(connection, CacheProxyConnection):
+                    cached_connections.append(connection)
+                else:
+                    connection.disconnect()
         finally:
             if self._locked:
                 try:
@@ -4882,6 +5302,9 @@ class BlockingConnectionPool(ConnectionPool):
                 except Exception:
                     pass
                 self._locked = False
+
+        for connection in cached_connections:
+            connection._disconnect_from_pool(inuse_connections)
 
     def _get_free_connections(self):
         with self._lock:

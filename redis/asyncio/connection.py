@@ -3439,6 +3439,7 @@ class ConnectionPool(
                             error, AuthenticationError
                         ),
                     )
+                    conn.set_re_auth_token(None)
                 except AuthenticationError:
                     raise
                 except Exception as e:
