@@ -721,7 +721,10 @@ class _AsyncRESPBase(AsyncBaseParser):
         next poll. The pieces are kept in a local list, and only the
         joined buffer is added to self._chunks once the whole payload
         has arrived, so the resume state never holds the pieces plus a
-        second full copy of the payload. If the read unwinds early (a
+        second full copy of the payload. On EOF the pieces are joined
+        once for IncompleteReadError.partial and that same buffer is
+        reused for _chunks, so the failure path never holds two full
+        copies either. If the read unwinds early (a
         per-read timeout or a cancellation), the joined pieces are added
         to self._chunks instead: a timeout on the default path usually
         disconnects, but callers that pass disconnect_on_error=False
@@ -732,6 +735,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         """
         remaining = length
         pieces = []
+        partial = None
         active_timeout = None
         try:
             while remaining > 0:
@@ -757,8 +761,11 @@ class _AsyncRESPBase(AsyncBaseParser):
                 chunk = await self._stream.read(remaining)
                 if not chunk:
                     # EOF before `length` bytes: report like readexactly did,
-                    # so callers keep raising ConnectionError.
-                    partial = b"".join(pieces)
+                    # so callers keep raising ConnectionError. Join the
+                    # pieces once here; the handler below reuses this
+                    # buffer for the resume state instead of joining a
+                    # second full copy.
+                    partial = pieces[0] if len(pieces) == 1 else b"".join(pieces)
                     raise IncompleteReadError(partial, length)
                 pieces.append(chunk)
                 remaining -= len(chunk)
@@ -769,7 +776,15 @@ class _AsyncRESPBase(AsyncBaseParser):
             # connection resumes by re-parsing the saved header, and
             # without the pieces it would read into the following reply.
             if pieces:
-                self._chunks.append(pieces[0] if len(pieces) == 1 else b"".join(pieces))
+                if partial is None:
+                    self._chunks.append(
+                        pieces[0] if len(pieces) == 1 else b"".join(pieces)
+                    )
+                else:
+                    # The EOF path already joined the pieces once: reuse
+                    # that buffer for the resume state instead of
+                    # copying it again.
+                    self._chunks.append(partial)
             raise
         finally:
             if active_timeout is not None:
