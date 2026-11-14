@@ -666,12 +666,11 @@ class _AsyncRESPBase(AsyncBaseParser):
                     # same bytes readexactly() would return, without a
                     # readexactly() coroutine - and without the flag
                     # checks below - for a read that cannot wait at all.
-                    # Release the views before resizing the buffer: on
-                    # PyPy a temporary view stays exported until
-                    # garbage collection, so `del` would raise
+                    # Slicing the bytearray copies the bytes out, so
+                    # no view is held when the buffer is resized: on
+                    # PyPy a live view would make `del` raise
                     # BufferError there.
-                    with memoryview(buffer) as view, view[:remaining] as part:
-                        data = bytes(part)
+                    data = bytes(buffer[:remaining])
                     del buffer[:remaining]
                     stream._maybe_resume_transport()
                     self._chunks.append(data)
@@ -831,12 +830,11 @@ class _AsyncRESPBase(AsyncBaseParser):
                     raise ValueError(
                         "Separator is found, but chunk is longer than limit"
                     )
-                # Release the views before resizing the buffer: on
-                # PyPy a temporary view stays exported until
-                # garbage collection, so `del` would raise
-                # BufferError there.
-                with memoryview(buffer) as view, view[: idx + 1] as part:
-                    data = bytes(part)
+                # bytes(buffer[:n]) is what StreamReader.readline()
+                # itself does: slicing copies the bytes out, so no
+                # view is held when the buffer is resized (a live view
+                # would make `del` raise BufferError on PyPy).
+                data = bytes(buffer[: idx + 1])
                 del buffer[: idx + 1]
                 stream._maybe_resume_transport()
             if data is None:
