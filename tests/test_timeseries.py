@@ -850,6 +850,22 @@ def test_mrange_exclude_empty_with_groupby_raises(client):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
+def test_mrange_groupby_requires_reduce(client):
+    # GROUPBY and REDUCE are all-or-nothing. This is validated client-side,
+    # so it does not require server support.
+    for cmd in (client.ts().mrange, client.ts().mrevrange):
+        with pytest.raises(
+            redis.DataError, match="groupby and reduce must be set together"
+        ):
+            cmd("-", 500, filters=["sensor=1"], groupby="type")
+        with pytest.raises(
+            redis.DataError, match="groupby and reduce must be set together"
+        ):
+            cmd("-", 500, filters=["sensor=1"], reduce="max")
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
