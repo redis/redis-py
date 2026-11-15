@@ -4935,7 +4935,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def re_auth_callback(self, token: TokenInterface):
         first_error = None
-        pending_topology = []
+        pending_notifications = []
         # Parser callbacks may close the pool or check out this same connection
         # for CLUSTER SLOTS. Finish AUTH and release idle ownership and the pool
         # lock before invoking them, including when AUTH fails.
@@ -4953,15 +4953,24 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         previous_defer = getattr(
                             parser, "_deferred_oss_cluster_handler", None
                         )
+                        previous_moving = getattr(
+                            parser, "node_moving_push_handler_func", None
+                        )
                         if parser is not None:
 
                             def defer(handler, notification):
-                                pending_topology.append((handler, notification))
+                                pending_notifications.append((handler, notification))
                                 # Do not expose old entries between releasing
-                                # the AUTH claim and refreshing the slot map.
+                                # the AUTH claim and applying maintenance.
                                 self.cache.flush()
 
                             parser._deferred_oss_cluster_handler = defer
+                            if previous_moving is not None:
+
+                                def defer_moving(notification, handler=previous_moving):
+                                    defer(handler, notification)
+
+                                parser.node_moving_push_handler_func = defer_moving
                         try:
                             conn.retry.call_with_retry(
                                 lambda: conn.send_command(
@@ -4985,6 +4994,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         finally:
                             if parser is not None:
                                 parser._deferred_oss_cluster_handler = previous_defer
+                                parser.node_moving_push_handler_func = previous_moving
                             if cached:
                                 try:
                                     if (
@@ -5000,7 +5010,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         else:
                             conn.set_re_auth_token(token)
             finally:
-                for handler, notification in pending_topology:
+                for handler, notification in pending_notifications:
                     try:
                         handler(notification)
                     except Exception as e:
@@ -5459,30 +5469,37 @@ class BlockingConnectionPool(ConnectionPool):
         self._checkpid()
         cached_connections = []
         locked = False
-        try:
-            if self._in_maintenance:
-                self._lock.acquire()
-                locked = True
+        # Building the free-connection snapshot can run a client's finalizer.
+        # Join its cached teardown only after every outer pool lock is released.
+        with (
+            self._defer_cached_disconnects()
+            if self.cache is not None
+            else nullcontext()
+        ):
+            try:
+                if self._in_maintenance:
+                    self._lock.acquire()
+                    locked = True
 
-            if inuse_connections:
-                connections = self._connections
-            else:
-                # Cached checkout passes this lock after dequeue and before
-                # socket use. Custom queues need no stdlib-internal mutex.
-                with self._lock:
-                    connections = self._get_free_connections()
-                    for connection in connections:
-                        if isinstance(connection, CacheProxyConnection):
-                            connection._disconnect_on_checkout = True
-
-            for connection in connections:
-                if isinstance(connection, CacheProxyConnection):
-                    cached_connections.append(connection)
+                if inuse_connections:
+                    connections = self._connections
                 else:
-                    connection.disconnect()
-        finally:
-            if locked:
-                self._lock.release()
+                    # Cached checkout passes this lock after dequeue and before
+                    # socket use. Custom queues need no stdlib-internal mutex.
+                    with self._lock:
+                        connections = self._get_free_connections()
+                        for connection in connections:
+                            if isinstance(connection, CacheProxyConnection):
+                                connection._disconnect_on_checkout = True
+
+                for connection in connections:
+                    if isinstance(connection, CacheProxyConnection):
+                        cached_connections.append(connection)
+                    else:
+                        connection.disconnect()
+            finally:
+                if locked:
+                    self._lock.release()
 
         self._disconnect_cached_connections(cached_connections, inuse_connections)
 

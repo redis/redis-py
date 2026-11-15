@@ -1,5 +1,6 @@
 import gc
 import multiprocessing
+import socket
 import threading
 import uuid
 import weakref
@@ -14,9 +15,11 @@ from redis.cache import CacheConfig
 from redis.cluster import ClusterNode, NodesManager
 from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis.event import AfterConnectionReleasedEvent
+from redis.exceptions import AuthenticationError
 from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
+    MaintNotificationsPoolHandler,
     NodeMovingNotification,
     OSSMaintNotificationsHandler,
     OSSNodeMigratedNotification,
@@ -118,6 +121,164 @@ def _run_bounded(target, args):
             worker.terminate()
         worker.join(5)
         worker.close()
+
+
+def _moving_during_idle_auth(url, parser_class, outcome):
+    config = MaintNotificationsConfig(enabled="auto")
+    pool = ConnectionPool.from_url(
+        url,
+        protocol=3,
+        parser_class=parser_class,
+        cache_config=CacheConfig(),
+        max_connections=2,
+        socket_timeout=1,
+        maint_notifications_config=config,
+    )
+    auth, owner = (pool.get_connection() for _ in range(2))
+    peers = ConnectionPool(cache=pool.cache, **pool.connection_kwargs)
+    borrower = peers.get_connection()
+    writer = Redis.from_url(url)
+    key = str(uuid.uuid4())
+    writer.set(key, "old")
+    owner.send_command("GET", key, keys=[key])
+    assert owner.read_response() == b"old"
+    writer.set(key, "new")
+    pool.release(auth)
+    pool.release(owner)
+    handler = MaintNotificationsPoolHandler(pool, config)
+    pool._maint_notifications_pool_handler = handler
+    servers = []
+    for connection in (auth, owner):
+        connection._conn.disconnect()
+        client, server = socket.socketpair()
+        server.settimeout(3)
+        servers.append(server)
+        connection._conn._sock = client
+        connection._conn._parser.on_connect(connection._conn)
+        connection._conn._parser.set_node_moving_push_handler(
+            handler.handle_notification
+        )
+    moving = b">4\r\n+MOVING\r\n:%d\r\n:60\r\n_\r\n"
+    servers[1].sendall(moving % 201)
+    peer_moving, authenticating = threading.Event(), threading.Event()
+    errors = []
+    original_dispatch = handler._dispatch_handoff_event
+    original_acquire = auth._try_acquire_idle
+    original_read = auth.read_response
+
+    class Cancelled(BaseException):
+        pass
+
+    def dispatch(*args):
+        if threading.current_thread() is reader:
+            # MOVING owns the handler lock, before asking for the pool lock.
+            peer_moving.set()
+            assert authenticating.wait(3)
+        return original_dispatch(*args)
+
+    def acquire():
+        result = original_acquire()
+        assert result
+        authenticating.set()
+        return result
+
+    def read(*args, **kwargs):
+        result = original_read(*args, **kwargs)
+        if outcome == "cancel":
+            raise Cancelled
+        return result
+
+    token = Mock()
+    token.try_get.return_value = "default"
+    token.get_value.return_value = "test-token"
+    command = b"".join(auth._conn.pack_command("AUTH", "default", "test-token"))
+
+    def respond():
+        try:
+            received = b""
+            while len(received) < len(command):
+                part = servers[0].recv(len(command) - len(received))
+                assert part, "AUTH closed before sending the command"
+                received += part
+            assert received == command
+            servers[0].sendall(
+                moving % 202
+                + (
+                    b"-WRONGPASS invalid token\r\n"
+                    if outcome == "auth_error"
+                    else b"+OK\r\n"
+                )
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    def borrow():
+        try:
+            borrower.send_command("GET", key, keys=[key])
+            assert borrower.read_response() == b"new"
+        except BaseException as error:
+            errors.append(error)
+
+    reader = threading.Thread(target=borrow, daemon=True)
+    server = threading.Thread(target=respond, daemon=True)
+    try:
+        with (
+            patch.object(handler, "_dispatch_handoff_event", dispatch),
+            patch.object(handler, "_schedule"),
+            patch.object(auth, "_try_acquire_idle", acquire),
+            patch.object(auth, "read_response", read),
+        ):
+            reader.start()
+            assert peer_moving.wait(3), "peer did not start MOVING processing"
+            server.start()
+            if outcome == "success":
+                pool.re_auth_callback(token)
+            else:
+                with pytest.raises(
+                    AuthenticationError if outcome == "auth_error" else Cancelled
+                ):
+                    pool.re_auth_callback(token)
+            reader.join(3)
+            server.join(3)
+            assert not reader.is_alive() and not server.is_alive()
+            assert not errors, errors
+            assert {n.id for n in handler._processed_notifications} == {201, 202}
+            for connection in (auth, owner):
+                assert not connection._idle_maintenance
+                assert not connection._in_use_lock.locked()
+                assert (
+                    connection._conn._parser.node_moving_push_handler_func
+                    == handler.handle_notification
+                )
+        # The socket-pair credentials are not credentials for the real server.
+        for connection in (auth, owner):
+            connection.set_re_auth_token(None)
+        pool.disconnect()
+        with Redis(connection_pool=pool) as client:
+            assert client.get(key) == b"new"
+            assert client.ping()
+    finally:
+        authenticating.set()
+        for server_socket in servers:
+            server_socket.close()
+        reader.join(3)
+        if server.ident is not None:
+            server.join(3)
+        handler.cancel_scheduled_tasks()
+        peers.release(borrower)
+        peers.close()
+        pool.close()
+        writer.delete(key)
+        writer.close()
+
+
+@pytest.mark.parametrize("parser_class", PARSERS)
+@pytest.mark.parametrize("outcome", ["success", "auth_error", "cancel"])
+def test_idle_auth_and_peer_moving_release_pool_locks(request, parser_class, outcome):
+    _run_bounded(
+        _moving_during_idle_auth,
+        (request.config.getoption("--redis-url"), parser_class, outcome),
+    )
 
 
 def _finalizer_during_shutdown(url, pool_class, parser_class, automatic, operation):
@@ -372,6 +533,7 @@ def _finalizer_during_pool_lock(
     checked_out = []
     original_acquire = owner._acquire
     connection_class = pool.connection_class
+    original_free = pool._get_free_connections
     enabled, thresholds = gc.isenabled(), gc.get_threshold()
     gc.disable()
     victim = Redis.from_pool(pool)
@@ -426,6 +588,11 @@ def _finalizer_during_pool_lock(
             collect()
         return chain(*args)
 
+    def free_connections():
+        if operation in ("blocking_snapshot", "blocking_maintenance_snapshot"):
+            collect()
+        return original_free()
+
     def configure(*args, **kwargs):
         if operation == "maintenance_config":
             collect()
@@ -456,6 +623,7 @@ def _finalizer_during_pool_lock(
             patch("redis.connection.chain", snapshot),
             patch("redis.connection.MaintNotificationsConnectionHandler", configure),
             patch.object(pool, "connection_class", create),
+            patch.object(pool, "_get_free_connections", free_connections),
         ):
             reader.start()
             assert draining.wait(3), "peer did not start draining the idle owner"
@@ -469,6 +637,11 @@ def _finalizer_during_pool_lock(
                 assert pool._created_connections == 1
             elif operation == "topology_cleanup":
                 NodesManager._free_pool_connections(pool)
+            elif operation in ("blocking_snapshot", "blocking_maintenance_snapshot"):
+                pool.set_in_maintenance(operation == "blocking_maintenance_snapshot")
+                pool.disconnect(inuse_connections=False)
+                pool.set_in_maintenance(False)
+                pool.release(released)
             elif operation == "maintenance_config":
                 pool.update_maint_notifications_config(
                     MaintNotificationsConfig(enabled="auto")
@@ -593,6 +766,26 @@ def test_finalizer_during_pool_configuration_and_checkout(
             automatic,
             operation,
             pool_class,
+        ),
+    )
+
+
+@pytest.mark.parametrize("parser_class", PARSERS)
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize(
+    "operation", ["blocking_snapshot", "blocking_maintenance_snapshot"]
+)
+def test_finalizer_during_blocking_free_snapshot(
+    request, parser_class, automatic, operation
+):
+    _run_bounded(
+        _finalizer_during_pool_lock,
+        (
+            request.config.getoption("--redis-url"),
+            parser_class,
+            automatic,
+            operation,
+            BlockingConnectionPool,
         ),
     )
 
