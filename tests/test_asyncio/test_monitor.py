@@ -135,6 +135,12 @@ class TestMonitor:
             response = await wait_for_command(r, m, "GET foo\\\\x92")
             assert response["command"] == "GET foo\\\\x92"
 
+    async def test_command_with_trailing_backslash(self, r):
+        async with r.monitor() as m:
+            await r.set("foo\\", "bar")
+            response = await wait_for_command(r, m, "SET foo\\\\ bar")
+            assert response["command"] == "SET foo\\\\ bar"
+
     @skip_if_redis_enterprise()
     async def test_lua_script(self, r):
         async with r.monitor() as m:
