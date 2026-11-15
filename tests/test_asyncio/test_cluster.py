@@ -7985,6 +7985,41 @@ class TestNodesManager:
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
+    async def test_re_auth_marks_in_use_connections_for_reconnect(self) -> None:
+        """
+        A connection that is in use while the token rotates, including one
+        taken from the free queue while another is re-authenticated, is not
+        sent AUTH. It is marked for reconnect, so it authenticates with the
+        new credentials once its current operation completes instead of
+        staying on the old ones.
+        """
+        node = ClusterNode(default_host, 7000)
+        busy = self._re_auth_connection(False)
+        idle = self._re_auth_connection(False)
+        taken = self._re_auth_connection(False)
+        node._connections.extend([busy, idle, taken])
+        node._free.extend([idle, taken])
+
+        async def take_free_connection(*args):
+            # Another task acquires a free connection while AUTH is awaited
+            assert node.acquire_connection() is taken
+
+        idle.send_command.side_effect = take_free_connection
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        await node.re_auth_callback(token)
+
+        idle.send_command.assert_awaited_once_with("AUTH", "oid", "value")
+        idle.mark_for_reconnect.assert_not_called()
+        busy.send_command.assert_not_called()
+        busy.mark_for_reconnect.assert_called_once()
+        taken.send_command.assert_not_called()
+        taken.mark_for_reconnect.assert_called_once()
+        assert list(node._free) == [idle]
+
+    @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(
         self,
     ) -> None:

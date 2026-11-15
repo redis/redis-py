@@ -2863,6 +2863,10 @@ class ClusterNode:
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        # A connection in use now, including one taken from the free queue while
+        # another was re-authenticated, still holds the old credentials. It
+        # reconnects with the new ones once its current operation completes.
+        self.update_active_connections_for_reconnect()
         if first_error is not None:
             raise first_error
 
