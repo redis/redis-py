@@ -105,7 +105,7 @@ The ``OTelConfig`` class provides fine-grained control over metrics collection:
        hide_stream_names=True,          # Hide stream names in streaming metrics
 
        # Attributes added to every metric (see Custom Attributes below)
-       custom_attributes={'env': 'prod'},
+       custom_attributes={'environment': 'production'},
    )
 
    otel = get_observability_instance()
@@ -196,7 +196,7 @@ every client:
 .. code-block:: python
 
    otel = get_observability_instance()
-   otel.init(OTelConfig(custom_attributes={'env': 'prod', 'region': 'eu-west-1'}))
+   otel.init(OTelConfig(custom_attributes={'environment': 'production', 'region': 'west'}))
 
 To add attributes to the metrics of one client only, pass an ``OTelConfig`` to
 that client as ``otel_config``. ``Redis``, ``RedisCluster``, their asyncio
@@ -205,7 +205,7 @@ counterparts and ``MultiDbConfig`` accept it:
 .. code-block:: python
 
    r = redis.Redis(otel_config=OTelConfig(custom_attributes={'tenant': 'a'}))
-   rc = redis.RedisCluster(
+   cluster = redis.RedisCluster(
        host='localhost',
        port=16379,
        otel_config=OTelConfig(custom_attributes={'tenant': 'b'}),
@@ -223,7 +223,7 @@ replace a global one.
 Things to keep in mind:
 
 - Every custom attribute lands on every data point, so keep the list short and the
-  values low-cardinality.
+  number of distinct values small.
 - Only ``custom_attributes`` is read from a per-client config. Metric groups,
   command filters and the other options are taken from the config passed to
   ``init()``.

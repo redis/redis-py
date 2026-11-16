@@ -6,6 +6,7 @@ import pytest
 
 from redis._parsers import Encoder
 from redis.asyncio.multidb.client import MultiDBClient
+from redis.asyncio.connection import ConnectionPool
 from redis.asyncio.multidb.config import InitialHealthCheck
 from redis.asyncio.multidb.database import AsyncDatabase
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
@@ -22,6 +23,7 @@ from redis.exceptions import (
 )
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import DatabaseConfig
+from redis.observability.config import OTelConfig
 from redis.multidb.exception import (
     NoValidDatabaseException,
     UnhealthyDatabaseException,
@@ -1691,3 +1693,101 @@ class TestInitialHealthCheckPolicy:
             with pytest.raises(InitialHealthCheckFailedError):
                 async with MultiDBClient(mock_multi_db_config) as client:
                     await client.set("key", "value")
+
+
+@pytest.mark.fixed_client
+class TestOTelConfig:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_client_exposes_the_active_database_otel_config(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        config = OTelConfig(custom_attributes={"tenant": "a"})
+        database_config = OTelConfig(custom_attributes={"tenant": "b"})
+        mock_multi_db_config.otel_config = config
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_db.client.otel_config = None
+        mock_db2.client.otel_config = database_config
+        databases = create_weighted_list(mock_db, mock_db2)
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db2.client.execute_command.return_value = 1
+            mock_hc.check_health = AsyncMock(return_value=True)
+
+            client = MultiDBClient(mock_multi_db_config)
+            # No database is active before the client is initialized
+            assert client.otel_config is config
+            assert client.pipeline().otel_config is config
+
+            async with client:
+                with patch("redis.commands.core.record_pubsub_message") as record:
+                    assert await client.publish("channel", "message") == 1
+
+                assert client.otel_config is database_config
+                assert client.pipeline().otel_config is database_config
+                assert record.call_args.kwargs["otel_config"] is database_config
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_added_database_inherits_the_otel_config(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        config = OTelConfig(custom_attributes={"tenant": "a"})
+        own_config = OTelConfig(custom_attributes={"tenant": "b"})
+        pool_config = OTelConfig(custom_attributes={"tenant": "c"})
+        mock_multi_db_config.otel_config = config
+        mock_multi_db_config.health_checks = [mock_hc]
+        databases = create_weighted_list(mock_db, mock_db2)
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db2.client.execute_command.return_value = "OK2"
+            mock_hc.check_health = AsyncMock(return_value=True)
+
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert await client.set("key", "value") == "OK2"
+
+                # Each added database has the highest weight, so it becomes active
+                await client.add_database(
+                    DatabaseConfig(weight=0.8, from_url="redis://localhost:6379")
+                )
+                assert client.otel_config is config
+
+                await client.add_database(
+                    DatabaseConfig(
+                        weight=0.9,
+                        client_kwargs={"host": "localhost", "otel_config": own_config},
+                    )
+                )
+                assert client.otel_config is own_config
+
+                await client.add_database(
+                    DatabaseConfig(
+                        weight=1.0,
+                        from_pool=ConnectionPool(
+                            host="localhost", otel_config=pool_config
+                        ),
+                    )
+                )
+                assert client.otel_config is pool_config

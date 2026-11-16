@@ -26,6 +26,7 @@ from redis.multidb.exception import (
     UnhealthyDatabaseException,
 )
 from redis.observability.attributes import GeoFailoverReason
+from redis.observability.config import OTelConfig
 from redis.typing import ChannelT, EncodableT, KeyT, PubSubHandler, Subscription
 from redis.utils import experimental
 
@@ -195,6 +196,17 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         database, _ = self._databases.get_top_n(1)[0]
         return database.client
 
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """
+        The OpenTelemetry configuration of the active database's client, or the
+        one of the MultiDB configuration when no database is active yet.
+        """
+        active_database = self.command_executor.active_database
+        if active_database is None:
+            return self._config.otel_config
+        return getattr(active_database.client, "otel_config", None)
+
     def get_databases(self) -> Databases:
         """
         Returns a sorted (by weight) list of all databases.
@@ -252,6 +264,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             config.client_kwargs["maint_notifications_config"] = (
                 MaintNotificationsConfig(enabled=False)
             )
+
+        # A database added later inherits the per-client OTel configuration
+        # unless it has its own. A supplied pool keeps its own configuration.
+        if (
+            self._config.otel_config is not None
+            and not config.from_pool
+            and "otel_config" not in config.client_kwargs
+        ):
+            config.client_kwargs["otel_config"] = self._config.otel_config
 
         if config.from_url:
             client = self._config.client_class.from_url(
@@ -538,6 +559,11 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     def get_connection_kwargs(self) -> Dict[str, Any]:
         """Get the connection keyword arguments of the parent client."""
         return self._client.get_connection_kwargs()
+
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The OpenTelemetry configuration of the parent client."""
+        return self._client.otel_config
 
     def get_encoder(self) -> Encoder:
         """Get the encoder of the parent client."""
