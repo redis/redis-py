@@ -25,6 +25,7 @@ from tests.conftest import (
     get_credential_provider,
     get_endpoint,
     skip_if_redis_enterprise,
+    stop_credential_provider,
 )
 from tests.entraid_utils import AuthType
 
@@ -75,6 +76,8 @@ def r_entra(request, endpoint):
         from_url=endpoint,
     ) as client:
         yield client
+
+    stop_credential_provider(credential_provider)
 
 
 class NoPassCredProvider(CredentialProvider):

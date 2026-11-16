@@ -392,27 +392,11 @@ class TestActiveActive:
             {
                 "client_class": Redis,
                 "min_num_failures": 2,
-                "health_checks": [
-                    LagAwareHealthCheck(
-                        verify_tls=False,
-                        auth_basic=lag_aware_auth_basic(),
-                        lag_aware_tolerance=10000,
-                        health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
-                    )
-                ],
                 "health_check_interval": FAILOVER_HEALTH_CHECK_INTERVAL,
             },
             {
                 "client_class": RedisCluster,
                 "min_num_failures": 2,
-                "health_checks": [
-                    LagAwareHealthCheck(
-                        verify_tls=False,
-                        auth_basic=lag_aware_auth_basic(),
-                        lag_aware_tolerance=10000,
-                        health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
-                    )
-                ],
                 "health_check_interval": FAILOVER_HEALTH_CHECK_INTERVAL,
             },
         ],
@@ -432,6 +416,18 @@ class TestActiveActive:
             backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
         )
 
+        # Adding additional health check to the client. Passing it as the only
+        # entry of "health_checks" would replace the default ping health check.
+        await client.add_health_check(
+            LagAwareHealthCheck(
+                verify_tls=False,
+                auth_basic=lag_aware_auth_basic(),
+                lag_aware_tolerance=10000,
+                health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
+            )
+        )
+
+        # Client initialized on entering the context manager.
         async with client as r_multi_db:
             event = asyncio.Event()
             failures = []

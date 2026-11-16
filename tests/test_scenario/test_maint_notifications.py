@@ -84,6 +84,10 @@ DEFAULT_TRIGGER_OP_TIMEOUT = 180
 # with margin, so a legitimately slow ASM scale runs to completion instead of being killed mid-way.
 # Only bites on the slow path; fast reshards are unaffected.
 RESHARD_TEST_TIMEOUT = RESHARD_OP_TIMEOUT + SMIGRATED_TIMEOUT + 180
+# The server sends the closing SMIGRATED when the reshard completes, so the command workers keep
+# running this long after the trigger reports the effect as done. That way a command handles it, as
+# it would in an application under load, instead of it waiting in the buffers of idle connections.
+POST_EFFECT_COMMANDS_DURATION = 5
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
@@ -2320,6 +2324,10 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
         else:
             execution_duration = 40
 
+        # Set once the effect has completed, so the workers run through the
+        # whole maintenance however long the reshard takes.
+        effect_done = threading.Event()
+
         def execute_commands(duration: int, errors: Queue):
             start = time.time()
             executed_commands_count = 0
@@ -2329,7 +2337,7 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
             )
 
             logging.info("Starting commands execution...")
-            while time.time() - start < duration:
+            while time.time() - start < duration or not effect_done.is_set():
                 for key in keys_for_all_shards:
                     try:
                         # the slot is covered by the first shard - this one will have slots migrated
@@ -2381,11 +2389,13 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
         self.maintenance_ops_threads.append(trigger_effect_thread)
         trigger_effect_thread.start()
 
-        for thread in threads:
-            thread.join()
-
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
+
+        time.sleep(POST_EFFECT_COMMANDS_DURATION)
+        effect_done.set()
+        for thread in threads:
+            thread.join()
 
         # go through all nodes and all their connections and consume the buffers - to validate no
         # notifications were left unconsumed

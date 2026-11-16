@@ -64,6 +64,10 @@ RESHARD_SMIGRATING_TIMEOUT = int(SLOT_SHUFFLE_TIMEOUT / 2)
 RESHARD_OP_TIMEOUT = 600
 DEFAULT_TRIGGER_OP_TIMEOUT = 180
 RESHARD_TEST_TIMEOUT = RESHARD_OP_TIMEOUT + SMIGRATED_TIMEOUT + 180
+# The server sends the closing SMIGRATED when the reshard completes, so the command tasks keep
+# running this long after the trigger reports the effect as done. That way a command handles it, as
+# it would in an application under load, instead of it waiting in the buffers of idle connections.
+POST_EFFECT_COMMANDS_DURATION = 5
 
 DEFAULT_BIND_TTL = 15
 DEFAULT_STANDALONE_CLIENT_SOCKET_TIMEOUT = 1
@@ -1818,11 +1822,15 @@ class TestAsyncClusterClientCommandsExecutionWithPushNotificationsWithEffectTrig
             for name in task_names
         }
 
+        # Set once the effect has completed, so the tasks run through the whole
+        # maintenance however long the reshard takes.
+        effect_done = asyncio.Event()
+
         async def execute_commands(duration: int, task_name: str):
             start = time.time()
             executed_commands_count = 0
             keys_for_all_shards = keys_by_task[task_name]
-            while time.time() - start < duration:
+            while time.time() - start < duration or not effect_done.is_set():
                 for key in keys_for_all_shards:
                     try:
                         await client.set(key, "value")
@@ -1857,6 +1865,11 @@ class TestAsyncClusterClientCommandsExecutionWithPushNotificationsWithEffectTrig
         )
         self.maintenance_ops_tasks.append(trigger_task)
 
+        # Wait without raising: a failed trigger must still stop the command
+        # tasks, or gathering them would never return.
+        await asyncio.wait([trigger_task])
+        await asyncio.sleep(POST_EFFECT_COMMANDS_DURATION)
+        effect_done.set()
         await asyncio.gather(*tasks)
 
         await trigger_task
