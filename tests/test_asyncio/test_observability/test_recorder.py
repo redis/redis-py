@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from redis._parsers.response_callbacks import get_response_callbacks
 
 from redis.asyncio.observability import recorder
+from redis.exceptions import ResponseError
 from redis.observability.attributes import (
     ConnectionState,
     GeoFailoverReason,
@@ -21,6 +22,8 @@ from redis.observability.attributes import (
     SERVER_PORT,
     DB_NAMESPACE,
     DB_OPERATION_NAME,
+    DB_SYSTEM,
+    DB_SYSTEM_NAME,
     DB_RESPONSE_STATUS_CODE,
     DB_CLIENT_CONNECTION_STATE,
     ERROR_TYPE,
@@ -33,6 +36,7 @@ from redis.observability.attributes import (
     REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS,
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
+    REDIS_CLIENT_STREAM_CONSUMER_GROUP,
     REDIS_CLIENT_PUBSUB_CHANNEL,
     REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION,
     REDIS_CLIENT_PUBSUB_SHARDED,
@@ -196,6 +200,35 @@ class TestRecordOperationDuration:
         assert attrs[SERVER_PORT] == 6379
         assert attrs[DB_NAMESPACE] == "0"
         assert attrs[DB_OPERATION_NAME] == "SET"
+        assert attrs[DB_SYSTEM_NAME] == "redis"
+        assert DB_SYSTEM not in attrs
+
+    async def test_record_operation_duration_keeps_command_name_case(
+        self, setup_async_recorder
+    ):
+        instruments = setup_async_recorder
+
+        await recorder.record_operation_duration(
+            command_name="get", duration_seconds=0.001
+        )
+
+        attrs = instruments.operation_duration.record.call_args[1]["attributes"]
+        assert attrs[DB_OPERATION_NAME] == "get"
+
+    async def test_record_operation_duration_with_server_status_code(
+        self, setup_async_recorder
+    ):
+        instruments = setup_async_recorder
+
+        error = ResponseError(
+            "WRONGTYPE Operation against a key", status_code="WRONGTYPE"
+        )
+        await recorder.record_operation_duration(
+            command_name="LPUSH", duration_seconds=0.001, error=error
+        )
+
+        attrs = instruments.operation_duration.record.call_args[1]["attributes"]
+        assert attrs[DB_RESPONSE_STATUS_CODE] == "WRONGTYPE"
 
     async def test_record_operation_duration_with_error(self, setup_async_recorder):
         """Test that error information is included in attributes."""
@@ -215,7 +248,8 @@ class TestRecordOperationDuration:
 
         attrs = call_args[1]["attributes"]
         assert attrs[DB_OPERATION_NAME] == "GET"
-        assert attrs[DB_RESPONSE_STATUS_CODE] == "error"
+        # A client-side error has no server status code
+        assert DB_RESPONSE_STATUS_CODE not in attrs
         assert attrs[ERROR_TYPE] == "ConnectionError"
 
 
@@ -567,10 +601,7 @@ class TestHidePubSubChannelNames:
 
         instruments.pubsub_messages.add.assert_called_once()
         attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
-        assert (
-            attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION]
-            == PubSubDirection.PUBLISH.value
-        )
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == "out"
         # Channel should NOT be in attributes when hidden
         assert REDIS_CLIENT_PUBSUB_CHANNEL not in attrs
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is False
@@ -656,7 +687,10 @@ class TestRecordStreamingLag:
             assert call.kwargs["attributes"][REDIS_CLIENT_STREAM_NAME] == "events"
             assert call.args[0] >= 0
             if group is not None:
-                assert call.kwargs["attributes"][REDIS_CLIENT_CONSUMER_GROUP] == group
+                assert (
+                    call.kwargs["attributes"][REDIS_CLIENT_STREAM_CONSUMER_GROUP]
+                    == group
+                )
 
     @pytest.mark.parametrize("protocol", [None, 2, 3])
     @pytest.mark.parametrize("legacy_responses", [False, True])
@@ -766,7 +800,8 @@ class TestRecordStreamingLagFromResponse:
         call_args = instruments.stream_lag.record.call_args
         attrs = call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
-        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_STREAM_CONSUMER_GROUP] == "my-group"
+        assert REDIS_CLIENT_CONSUMER_GROUP not in attrs
         # Lag should be non-negative and small (just created)
         assert call_args[0][0] >= 0.0
         assert call_args[0][0] < 1.0  # Should be less than 1 second
@@ -802,7 +837,7 @@ class TestRecordStreamingLagFromResponse:
         attrs = call_args[1]["attributes"]
         # Stream name should be normalized from bytes to str
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
-        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_STREAM_CONSUMER_GROUP] == "my-group"
 
     async def test_record_streaming_lag_from_response_multiple_messages(
         self, setup_async_recorder

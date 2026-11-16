@@ -19,6 +19,7 @@ from redis.observability.registry import (
     ObservablesRegistry,
     get_observables_registry_instance,
 )
+from redis.exceptions import ResponseError
 from redis.observability.attributes import (
     ConnectionState,
     GeoFailoverReason,
@@ -31,6 +32,8 @@ from redis.observability.attributes import (
     # Database attributes
     DB_NAMESPACE,
     DB_OPERATION_NAME,
+    DB_SYSTEM,
+    DB_SYSTEM_NAME,
     DB_RESPONSE_STATUS_CODE,
     # Error attributes
     ERROR_TYPE,
@@ -47,6 +50,7 @@ from redis.observability.attributes import (
     # Streaming attributes
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
+    REDIS_CLIENT_STREAM_CONSUMER_GROUP,
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
     DB_CLIENT_GEOFAILOVER_FAIL_TO,
     DB_CLIENT_GEOFAILOVER_REASON,
@@ -227,6 +231,29 @@ class TestRecordOperationDuration:
         assert attrs[SERVER_PORT] == 6379
         assert attrs[DB_NAMESPACE] == "0"
         assert attrs[DB_OPERATION_NAME] == "SET"
+        assert attrs[DB_SYSTEM_NAME] == "redis"
+        assert DB_SYSTEM not in attrs
+
+    def test_record_operation_duration_keeps_command_name_case(self, setup_recorder):
+        instruments = setup_recorder
+
+        record_operation_duration(command_name="get", duration_seconds=0.001)
+
+        attrs = instruments.operation_duration.record.call_args[1]["attributes"]
+        assert attrs[DB_OPERATION_NAME] == "get"
+
+    def test_record_operation_duration_with_server_status_code(self, setup_recorder):
+        instruments = setup_recorder
+
+        error = ResponseError(
+            "WRONGTYPE Operation against a key", status_code="WRONGTYPE"
+        )
+        record_operation_duration(
+            command_name="LPUSH", duration_seconds=0.001, error=error
+        )
+
+        attrs = instruments.operation_duration.record.call_args[1]["attributes"]
+        assert attrs[DB_RESPONSE_STATUS_CODE] == "WRONGTYPE"
 
     def test_record_operation_duration_with_error(self, setup_recorder):
         """Test that error information is included in attributes."""
@@ -247,7 +274,8 @@ class TestRecordOperationDuration:
 
         attrs = call_args[1]["attributes"]
         assert attrs[DB_OPERATION_NAME] == "GET"
-        assert attrs[DB_RESPONSE_STATUS_CODE] == "error"
+        # A client-side error has no server status code
+        assert DB_RESPONSE_STATUS_CODE not in attrs
         assert attrs[ERROR_TYPE] == "ConnectionError"
 
     def test_record_operation_duration_with_bytes_command_name(self, setup_recorder):
@@ -269,7 +297,7 @@ class TestRecordOperationDuration:
         call_args = instruments.operation_duration.record.call_args
 
         attrs = call_args[1]["attributes"]
-        # Verify command_name is converted to uppercase string, not bytes
+        # Verify command_name is converted to a str, not bytes
         assert attrs[DB_OPERATION_NAME] == "SET"
         assert isinstance(attrs[DB_OPERATION_NAME], str)
 
@@ -656,10 +684,7 @@ class TestRecordPubsubMessage:
 
         assert call_args[0][0] == 1
         attrs = call_args[1]["attributes"]
-        assert (
-            attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION]
-            == PubSubDirection.PUBLISH.value
-        )
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == "out"
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "my-channel"
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is False
 
@@ -676,10 +701,7 @@ class TestRecordPubsubMessage:
 
         instruments.pubsub_messages.add.assert_called_once()
         attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
-        assert (
-            attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION]
-            == PubSubDirection.RECEIVE.value
-        )
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == "in"
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "sharded-channel"
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is True
 
@@ -708,7 +730,8 @@ class TestRecordStreamingLag:
         # Verify attributes
         attrs = call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "my-stream"
-        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_STREAM_CONSUMER_GROUP] == "my-group"
+        assert REDIS_CLIENT_CONSUMER_GROUP not in attrs
 
     def test_record_streaming_lag_minimal(self, setup_recorder):
         """Test recording streaming lag with only required attributes."""
@@ -764,7 +787,10 @@ class TestRecordStreamingLag:
             assert call.kwargs["attributes"][REDIS_CLIENT_STREAM_NAME] == "events"
             assert call.args[0] >= 0
             if group is not None:
-                assert call.kwargs["attributes"][REDIS_CLIENT_CONSUMER_GROUP] == group
+                assert (
+                    call.kwargs["attributes"][REDIS_CLIENT_STREAM_CONSUMER_GROUP]
+                    == group
+                )
 
     @pytest.mark.parametrize("protocol", [None, 2, 3])
     @pytest.mark.parametrize("legacy_responses", [False, True])
@@ -844,10 +870,7 @@ class TestHidePubSubChannelNames:
 
         instruments.pubsub_messages.add.assert_called_once()
         attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
-        assert (
-            attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION]
-            == PubSubDirection.PUBLISH.value
-        )
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == "out"
         # Channel should NOT be in attributes when hidden
         assert REDIS_CLIENT_PUBSUB_CHANNEL not in attrs
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is False
@@ -906,7 +929,7 @@ class TestHideStreamNames:
         attrs = instruments.stream_lag.record.call_args[1]["attributes"]
         # Stream name should NOT be in attributes when hidden
         assert REDIS_CLIENT_STREAM_NAME not in attrs
-        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_STREAM_CONSUMER_GROUP] == "my-group"
 
     def test_stream_name_visible_when_not_configured(self, setup_recorder):
         """Test that stream name is visible when hide_stream_names=False (default)."""
