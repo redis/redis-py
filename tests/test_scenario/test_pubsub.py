@@ -104,6 +104,8 @@ PUBSUB_DB_PORT_BASE = 14000
 # when one case's database is created seconds after the previous case's was deleted.
 # The base is random so a run cannot collide with a database another run left behind.
 _DB_SUFFIXES = itertools.count(random.randint(0, 500))
+# Ports create_database_on_free_port tries before it gives up on port_unavailable.
+PUBSUB_DB_CREATE_ATTEMPTS = 5
 SHARD_KEY_REGEX = [{"regex": ".*\\{(?<tag>.*)\\}.*"}, {"regex": "(?<tag>.*)"}]
 PUBSUB_CLIENT_TIMEOUT = 5
 # The fault injector blocks on a reshard for up to 600s (ASM scale), so the wait for the
@@ -261,6 +263,35 @@ def next_db_suffix() -> int:
     return next(_DB_SUFFIXES)
 
 
+def create_database_on_free_port(
+    fault_injector_client: FaultInjectorClient,
+    db_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Create the database on the next port from the suite's counter.
+
+    The counter only keeps this suite's databases apart. A database the suite did not
+    create - a pre-provisioned endpoint, or one created by another test - can hold a
+    port in the same range, because Redis Enterprise auto-assigns ports from it. Redis
+    Enterprise rejects that create with port_unavailable before it provisions anything,
+    so the create is retried on the next port. Any other failure is re-raised as is.
+    The caller's config is copied, not changed, so a shared parametrize dict keeps no
+    port.
+    """
+    for _ in range(PUBSUB_DB_CREATE_ATTEMPTS - 1):
+        port = PUBSUB_DB_PORT_BASE + next_db_suffix()
+        try:
+            return fault_injector_client.create_database({**db_config, "port": port})
+        except pytest.fail.Exception as e:
+            if "port_unavailable" not in str(e):
+                raise
+            logging.info(
+                f"Port {port} is taken, creating database {db_config['name']} "
+                "on the next port"
+            )
+    port = PUBSUB_DB_PORT_BASE + next_db_suffix()
+    return fault_injector_client.create_database({**db_config, "port": port})
+
+
 def create_effect_database(
     fault_injector_client: FaultInjectorClient,
     db_config: dict[str, Any],
@@ -277,12 +308,12 @@ def create_effect_database(
     The port is the one value not taken as supplied. The injector serves a fixed port
     per effect config, several configs share one, and Redis Enterprise still holds the
     port of a database deleted seconds earlier, so a case whose predecessor used the
-    same port fails to provision with port_unavailable. The copy also keeps the port
-    off the parametrize dict, which the sync and async classes share.
+    same port fails to provision with port_unavailable. create_database_on_free_port
+    picks the port and keeps it off the parametrize dict, which the sync and async
+    classes share.
     """
     delete_database_if_exists(fault_injector_client, db_config["name"])
-    db_config = {**db_config, "port": PUBSUB_DB_PORT_BASE + next_db_suffix()}
-    endpoint_config = fault_injector_client.create_database(db_config)
+    endpoint_config = create_database_on_free_port(fault_injector_client, db_config)
     endpoint_config["shards_count"] = db_config["shards_count"]
     return endpoint_config
 
@@ -315,17 +346,16 @@ def make_pubsub_db_config(shards_placement: str = SPARSE_SHARDS_PLACEMENT):
 
     Defined here rather than read from a bdb config file so the suite carries its own
     requirements: sharded, OSS-cluster API across every master shard, and a hashtag
-    shard_key_regex so channels can be pinned to a slot. Name and port carry a suffix
+    shard_key_regex so channels can be pinned to a slot. The name carries a suffix
     unique to the run, mirroring how the fault injector generates its own configs, so
     concurrent runs cannot collide with each other or with a fault-injector database.
+    The config has no port; create_database_on_free_port picks it.
 
     shards_placement is a parameter because the two groups of scenarios want opposite
     layouts; see the pubsub_shards_placement fixture and its override.
     """
-    suffix = next_db_suffix()
     return {
-        "name": f"pubsub-oss-api-{suffix}",
-        "port": PUBSUB_DB_PORT_BASE + suffix,
+        "name": f"pubsub-oss-api-{next_db_suffix()}",
         "memory_size": 1273741824,
         "eviction_policy": "noeviction",
         "sharding": True,
@@ -395,7 +425,9 @@ def cluster_endpoint_config(
 
     delete_database_if_exists(fault_injector_client_oss_api, db_config["name"])
     try:
-        endpoint_config = fault_injector_client_oss_api.create_database(db_config)
+        endpoint_config = create_database_on_free_port(
+            fault_injector_client_oss_api, db_config
+        )
         endpoint_config["shards_count"] = db_config["shards_count"]
         yield endpoint_config
     finally:
