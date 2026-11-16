@@ -115,6 +115,28 @@ class TestClusterTransaction:
             assert pipe.execute() == [b"OK"]
 
     @pytest.mark.onlycluster
+    def test_reset_does_not_reconnect_for_unwatch_on_dropped_connection(self, r):
+        """
+        A dropped connection already cleared the server-side WATCH, so reset()
+        must not reconnect just to send UNWATCH.
+        """
+        r["a"] = 0
+
+        pipe = r.pipeline(transaction=True)
+        pipe.watch("a")
+        strategy = pipe._execution_strategy
+        leased = strategy._transaction_connection
+        leased.disconnect()
+
+        with patch.object(leased, "connect", wraps=leased.connect) as connect:
+            pipe.reset()
+
+        connect.assert_not_called()
+        assert not leased.is_connected
+        assert strategy._watching is False
+        assert strategy._transaction_connection is None
+
+    @pytest.mark.onlycluster
     @pytest.mark.parametrize(
         "error_type",
         [
@@ -588,6 +610,21 @@ class TestClusterTransaction:
             # Restore original pool so teardown can work
             node_importing.redis_connection.connection_pool = original_pool
             r.nodes_manager.slots_cache[slot] = original_slots_cache
+
+    @pytest.mark.onlycluster
+    def test_touch_in_transaction(self, r):
+        """
+        TOUCH is queued inside MULTI/EXEC, so it sees a key set earlier in
+        the same transaction
+        """
+        r["{foo}a"] = 1
+        r["{foo}b"] = 2
+        with r.pipeline(transaction=True) as tx:
+            tx.set("{foo}c", 3)
+            assert tx.touch("{foo}a", "{foo}b", "{foo}c") is tx
+            result = tx.execute()
+        assert len(result) == 2
+        assert result[1] == 3
 
     @pytest.mark.onlycluster
     def test_exec_error_raised(self, r):

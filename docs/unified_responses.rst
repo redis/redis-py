@@ -281,6 +281,10 @@ TimeSeries
      - Sorted list of dicts becomes a dict with metadata slot.
      - ``[{b"k": [labels, samples]}]``
      - ``{b"k": [labels, metadata, samples]}``
+   * - ``TS.INFO``
+     - ``rules`` list becomes a dict keyed by destination key.
+     - ``[[b"dst", 100, b"AVG", 0]]``
+     - ``{b"dst": [100, b"AVG", 0]}``
    * - ``TS.QUERYINDEX``
      - Key strings are preserved instead of coerced to numbers.
      - ``2``
@@ -337,6 +341,14 @@ Probabilistic
      - Item names are preserved instead of coerced through numeric parsing.
      - ``"42"`` could become ``42``
      - ``"42"`` stays ``"42"``
+   * - ``TDIGEST.BYRANK``, ``TDIGEST.BYREVRANK``, ``TDIGEST.CDF``, ``TDIGEST.QUANTILE``
+     - Values are always floats, as on RESP3, including ``nan``.
+     - ``[3, "nan"]``
+     - ``[3.0, nan]``
+   * - ``TOPK.INFO``
+     - The decay is a float, as on RESP3.
+     - ``info.decay == "0.9"``
+     - ``info.decay == 0.9``
 
 Vector Sets
 ^^^^^^^^^^^

@@ -7,6 +7,7 @@ import binascii
 import datetime
 import re
 import sys
+import time
 import warnings
 from collections import ChainMap, UserDict
 from string import ascii_letters
@@ -151,6 +152,12 @@ class TestRedisCommands:
         await r.lpush("a", "1")
         with pytest.raises(redis.ResponseError):
             await r.get("a")
+
+    async def test_unmapped_error_keeps_its_status_code(self, r: redis.Redis):
+        await r.lpush("a", "1")
+        with pytest.raises(redis.ResponseError) as e:
+            await r.get("a")
+        assert e.value.status_code == "WRONGTYPE"
 
     # SERVER INFORMATION
     @skip_if_server_version_lt(REDIS_6_VERSION)
@@ -1256,6 +1263,89 @@ class TestRedisCommands:
                     f"Field '{field}' is missing from HOTKEYS GET response"
                 )
 
+    async def _wait_for_backup_state(self, r, state, timeout=10):
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while (await r.backup_status())[b"state"] != state:
+            if loop.time() > deadline:
+                raise AssertionError(f"backup did not reach the {state!r} state")
+            await asyncio.sleep(0.05)
+
+    async def _reset_backup(self, r):
+        try:
+            await r.backup_abort()
+        except ResponseError:
+            pass
+        await r.backup_cleanup()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.10.0")
+    @skip_if_redis_enterprise()
+    async def test_backup_lifecycle(self, r):
+        await self._reset_backup(r)
+        status = await r.backup_status()
+        assert status[b"state"] == b"idle"
+        assert status[b"start_time"] == 0
+        await r.set("a", "1")
+        try:
+            assert await r.backup_start() == b"OK"
+            await self._wait_for_backup_state(r, b"incrementing")
+            files = await r.backup_list()
+            assert len(files) == 1
+            assert files[0].endswith(b".base.rdb")
+
+            assert await r.backup_seal() == b"OK"
+            status = await r.backup_status()
+            assert status[b"state"] == b"sealed"
+            assert status[b"error"] == b""
+            assert 0 < status[b"start_time"] <= status[b"end_time"]
+            files = await r.backup_list()
+            assert len(files) == 3
+            assert files[2].endswith(b"appendonly.aof.manifest")
+
+            assert await r.backup_cleanup() == b"OK"
+            assert (await r.backup_status())[b"state"] == b"idle"
+        finally:
+            await self._reset_backup(r)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.10.0")
+    @skip_if_redis_enterprise()
+    async def test_backup_abort(self, r):
+        await self._reset_backup(r)
+        try:
+            assert await r.backup_start() == b"OK"
+            await self._wait_for_backup_state(r, b"incrementing")
+            assert await r.backup_abort() == b"OK"
+            status = await r.backup_status()
+            assert status[b"state"] == b"failed"
+            assert status[b"error"] == b"aborted by user"
+        finally:
+            await self._reset_backup(r)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.10.0")
+    @skip_if_redis_enterprise()
+    async def test_backup_invalid_state_transitions(self, r):
+        await self._reset_backup(r)
+        with pytest.raises(ResponseError, match="No backup in progress"):
+            await r.backup_abort()
+        with pytest.raises(ResponseError, match="No backup ready to seal"):
+            await r.backup_seal()
+        assert await r.backup_list() == []
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.10.0")
+    @skip_if_redis_enterprise()
+    async def test_backup_status_decoded(self, decoded_r: redis.Redis):
+        await self._reset_backup(decoded_r)
+        assert await decoded_r.backup_status() == {
+            "state": "idle",
+            "error": "",
+            "start_time": 0,
+            "end_time": 0,
+        }
+
     async def test_never_decode_option(self, r: redis.Redis):
         opts = {NEVER_DECODE: []}
         await r.delete("a")
@@ -1460,6 +1550,115 @@ class TestRedisCommands:
             await r.bitpos(key, 0, end=1) == 12
         with pytest.raises(exceptions.RedisError):
             await r.bitpos(key, 7) == 12
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray(self, r: redis.Redis):
+        # The first and the last bit of each of four bytes are set.
+        await r.set("a", b"\x81\x81\x81\x81")
+        assert await r.bitrangeintarray("a", 0, -1) == [0, 7, 8, 15, 16, 23, 24, 31]
+        assert await r.bitrangeintarray("a", 1, 1) == [8, 15]
+        assert await r.bitrangeintarray("a", 1, 2) == [8, 15, 16, 23]
+        assert await r.bitrangeintarray("a", -1, -1) == [24, 31]
+        assert await r.bitrangeintarray("a", -2, -1) == [16, 23, 24, 31]
+        assert await r.bitrangeintarray("a", 2, 99) == [16, 23, 24, 31]
+        assert await r.bitrangeintarray("a", -99, 0) == [0, 7]
+        assert await r.bitrangeintarray("a", 3, 1) == []
+        assert await r.bitrangeintarray("a", 4, 9) == []
+        assert await r.bitrangeintarray("a", -1, -2) == []
+        for start, end in ((0, -1), (1, 2), (-2, -1), (3, 1)):
+            assert len(await r.bitrangeintarray("a", start, end)) == await r.bitcount(
+                "a", start, end
+            )
+        assert await r.bitrangeintarray("missing", 0, -1) == []
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_mode(self, r: redis.Redis):
+        await r.set("a", b"\x81\x81\x81\x81")
+        assert await r.bitrangeintarray("a", 0, 0, "bit") == [0]
+        assert await r.bitrangeintarray("a", 7, 8, "BIT") == [7, 8]
+        assert await r.bitrangeintarray("a", 1, 6, "bit") == []
+        assert await r.bitrangeintarray("a", 9, 15, "bit") == [15]
+        assert await r.bitrangeintarray("a", -8, -1, "bit") == [24, 31]
+        assert await r.bitrangeintarray("a", 30, 1000, "bit") == [31]
+        assert await r.bitrangeintarray("a", 32, 40, "bit") == []
+        assert await r.bitrangeintarray("a", 1, 1, "byte") == [8, 15]
+        with pytest.raises(redis.ResponseError):
+            await r.bitrangeintarray("a", 0, -1, "bite")
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_limit(self, r: redis.Redis):
+        # Bytes 0, 7 and 8 are full, byte 1 has bits 8 and 15, byte 9 has bit 73.
+        await r.set("a", b"\xff\x81\x00\x00\x00\x00\x00\xff\xff\x40")
+        # A page in byte units completes the byte that holds the last offset.
+        assert await r.bitrangeintarray("a", 0, -1, limit=1) == list(range(8))
+        assert await r.bitrangeintarray("a", 0, -1, limit=9) == [*range(9), 15]
+        assert await r.bitrangeintarray("a", 1, -1, limit=1) == [8, 15]
+        assert await r.bitrangeintarray("a", 0, -1, "bit", limit=9) == list(range(9))
+        assert await r.bitrangeintarray("a", 57, -1, "bit", limit=2) == [57, 58]
+        assert await r.bitrangeintarray("a", 0, -1, limit=0) == []
+        with pytest.raises(redis.ResponseError):
+            await r.bitrangeintarray("a", 0, -1, limit=-1)
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_paging(self, r: redis.Redis):
+        await r.set("a", b"\xff\x81\x00\x00\x00\x00\x00\xff\xff\x40")
+        expected = await r.bitrangeintarray("a", 0, -1)
+        assert len(expected) == 27
+        offsets, pages, start = [], [], 0
+        while True:
+            page = await r.bitrangeintarray("a", start, -1, "bit", limit=9)
+            pages.append(page)
+            offsets.extend(page)
+            if len(page) < 9:
+                break
+            start = page[-1] + 1
+        assert [len(page) for page in pages] == [9, 9, 9, 0]
+        assert offsets == expected
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_zeros(self, r: redis.Redis):
+        await r.set("a", b"\x81\x81\x81\x81")
+        assert await r.bitrangeintarray("a", 0, 0, "bit", zeros=True) == []
+        assert await r.bitrangeintarray("a", 1, 6, "bit", zeros=True) == list(
+            range(1, 7)
+        )
+        assert await r.bitrangeintarray("a", 0, -1, limit=1, zeros=True) == list(
+            range(1, 7)
+        )
+        await r.set("a", b"\xff\x7e")
+        assert await r.bitrangeintarray("a", 0, -1, zeros=True) == [8, 15]
+        assert await r.bitrangeintarray("a", 0, 99, zeros=True) == [8, 15]
+        # Unlike BITPOS, no clear bits are assumed past the end of the value.
+        await r.set("a", b"\xff\xff")
+        assert await r.bitpos("a", 0) == 16
+        assert await r.bitrangeintarray("a", 0, -1, zeros=True) == []
+
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_wrong_type(self, r: redis.Redis):
+        await r.rpush("a", "a1")
+        with pytest.raises(redis.ResponseError):
+            await r.bitrangeintarray("a", 0, -1)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.240")
+    async def test_bitrangeintarray_native_bitmap(self, r: redis.Redis):
+        old_value = (await r.config_get("bitmap-default-roaring"))[
+            "bitmap-default-roaring"
+        ]
+        await r.config_set("bitmap-default-roaring", "yes")
+        try:
+            for offset in (0, 7, 8, 15, 16, 23, 24, 31):
+                await r.setbit("a", offset, 1)
+        finally:
+            await r.config_set("bitmap-default-roaring", old_value)
+        assert await r.type("a") == b"bitmap"
+        assert await r.bitrangeintarray("a", 0, -1) == [0, 7, 8, 15, 16, 23, 24, 31]
+        assert await r.bitrangeintarray("a", 1, 2) == [8, 15, 16, 23]
+        assert await r.bitrangeintarray("a", 7, 8, "bit") == [7, 8]
+        assert await r.bitrangeintarray("a", 0, -1, "bit", limit=3) == [0, 7, 8]
+        assert await r.bitrangeintarray("a", 1, 6, "bit", zeros=True) == list(
+            range(1, 7)
+        )
 
     async def test_decr(self, r: redis.Redis):
         assert await r.decr("a") == -1
@@ -2304,11 +2503,33 @@ class TestRedisCommands:
         assert await r.pttl("a") == -1
 
     @skip_if_server_version_lt("2.6.0")
+    async def test_pexpire_timedelta_is_exact(self, r: redis.Redis):
+        await r.set("a", "foo")
+        with patch.object(r, "execute_command", AsyncMock(return_value=True)) as cmd:
+            await r.pexpire("a", datetime.timedelta(milliseconds=1001))
+        assert cmd.call_args.args == ("PEXPIRE", "a", 1001)
+        assert await r.pexpire("a", datetime.timedelta(milliseconds=1001))
+        assert 0 < await r.pttl("a") <= 1001
+
+    @skip_if_server_version_lt("2.6.0")
     async def test_pexpireat_datetime(self, r: redis.Redis):
         expire_at = await redis_server_time(r) + datetime.timedelta(minutes=1)
         await r.set("a", "foo")
         assert await r.pexpireat("a", expire_at)
         assert 0 < await r.pttl("a") <= 61000
+
+    async def test_pexpireat_datetime_ms_is_exact(self):
+        # Argument level only: constructs its own client, so it needs no
+        # server. int(when.timestamp() * 1000) can land 1 ms low for instants
+        # whose seconds part sits just above a power of two (2**31 seconds
+        # is 2038-01-19T03:14:08Z).
+        r = redis.Redis()
+        when = datetime.datetime(
+            2038, 1, 19, 3, 14, 8, 2000, tzinfo=datetime.timezone.utc
+        )
+        with patch.object(r, "execute_command", AsyncMock(return_value=True)) as cmd:
+            assert await r.pexpireat("a", when) is True
+        assert cmd.call_args.args == ("PEXPIREAT", "a", 2147483648002)
 
     @skip_if_server_version_lt("2.6.0")
     async def test_pexpireat_no_key(self, r: redis.Redis):
@@ -2335,6 +2556,14 @@ class TestRedisCommands:
         assert await r.psetex("a", expire_at, "value")
         assert await r.get("a") == b"value"
         assert 0 < await r.pttl("a") <= 1000
+
+    @skip_if_server_version_lt("2.6.0")
+    async def test_psetex_timedelta_is_exact(self, r: redis.Redis):
+        with patch.object(r, "execute_command", AsyncMock(return_value=True)) as cmd:
+            await r.psetex("a", datetime.timedelta(milliseconds=1001), "value")
+        assert cmd.call_args.args == ("PSETEX", "a", 1001, "value")
+        assert await r.psetex("a", datetime.timedelta(milliseconds=1001), "value")
+        assert 0 < await r.pttl("a") <= 1001
 
     @skip_if_server_version_lt("2.6.0")
     async def test_pttl(self, r: redis.Redis):
@@ -3835,6 +4064,21 @@ class TestRedisCommands:
         assert 0 < (await r.spttl("test:set", "member1"))[0] <= 5000
         assert await r.spttl("test:set", "member2") == [-1]
 
+    async def test_spexpire_timedelta_is_exact(self, r: redis.Redis):
+        # argument level only, so it needs no SPEXPIRE support on the server
+        with patch.object(r, "execute_command", AsyncMock(return_value=[1])) as cmd:
+            await r.spexpire(
+                "test:set", datetime.timedelta(milliseconds=1001), "member1"
+            )
+        assert cmd.call_args.args == (
+            "SPEXPIRE",
+            "test:set",
+            1001,
+            "MEMBERS",
+            1,
+            "member1",
+        )
+
     @skip_if_server_version_lt("8.11.240")
     async def test_spexpire_conditions(self, r: redis.Redis):
         await r.delete("test:set")
@@ -3914,6 +4158,26 @@ class TestRedisCommands:
             int(exp_time.timestamp() * 1000),
             -1,
         ]
+
+    async def test_spexpireat_datetime_ms_is_exact(self):
+        # Argument level only: constructs its own client, so it needs no
+        # server. int(when.timestamp() * 1000) can land 1 ms low for instants
+        # whose seconds part sits just above a power of two (2**31 seconds
+        # is 2038-01-19T03:14:08Z).
+        r = redis.Redis()
+        when = datetime.datetime(
+            2038, 1, 19, 3, 14, 8, 2000, tzinfo=datetime.timezone.utc
+        )
+        with patch.object(r, "execute_command", AsyncMock(return_value=[1])) as cmd:
+            assert await r.spexpireat("test:set", when, "member1") == [1]
+        assert cmd.call_args.args == (
+            "SPEXPIREAT",
+            "test:set",
+            2147483648002,
+            "MEMBERS",
+            1,
+            "member1",
+        )
 
     @skip_if_server_version_lt("8.11.240")
     async def test_sexpireat_multiple_condition_flags_error(self, r: redis.Redis):
@@ -4513,6 +4777,192 @@ class TestRedisCommands:
             r, await r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
         )
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmove(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        # without count, min moves one member, still as a list of one pair
+        assert await r.zmove("a", "b", min=True) == [[b"a1", 1.0]]
+        assert await r.zmove("a", "b", max=True, count=2) == [
+            [b"a5", 5.0],
+            [b"a4", 4.0],
+        ]
+        # count larger than the source moves what is there
+        await r.zadd("c", {"c1": 1})
+        assert await r.zmove("c", "b", min=True, count=10) == [[b"c1", 1.0]]
+        # the emptied source is deleted
+        assert await r.exists("c") == 0
+        # scores are kept in the destination
+        assert await r.zrange("b", 0, -1) == [b"a1", b"c1", b"a4", b"a5"]
+        assert await r.zscore("b", "a5") == 5.0
+        assert await r.zrange("a", 0, -1) == [b"a2", b"a3"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmove_byscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5, "inf": "inf"})
+        # exclusive bound, lowest scores first
+        assert await r.zmove("a", "b", byscore=("(1", 3)) == [
+            [b"a2", 2.0],
+            [b"a3", 3.0],
+        ]
+        # with count, the lowest members of the range
+        assert await r.zmove("a", "b", byscore=("-inf", "+inf"), count=1) == [
+            [b"a1", 1.0]
+        ]
+        # without count, the whole range moves
+        assert await r.zmove("a", "b", byscore=(4, "+inf")) == [
+            [b"a4", 4.0],
+            [b"a5", 5.0],
+            [b"inf", float("inf")],
+        ]
+        assert await r.exists("a") == 0
+        assert await r.zscore("b", "inf") == float("inf")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmove_nothing_moved(self, r: redis.Redis):
+        # missing source; a None flag counts as unset, as in zmpop
+        assert await r.zmove("a", "b", min=True, max=None) is None
+        await r.zadd("a", {"a1": 1})
+        # same key for source and destination
+        assert await r.zmove("a", "a", min=True) is None
+        # empty score range
+        assert await r.zmove("a", "b", byscore=(5, 10), count=2) is None
+        assert await r.exists("b") == 0
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmove_errors(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1})
+        # the count passes through unchanged, so the server rejects 0
+        with pytest.raises(ResponseError, match="count should be greater than 0"):
+            await r.zmove("a", "b", min=True, count=0)
+        with pytest.raises(ResponseError, match="min or max is not a float"):
+            await r.zmove("a", "b", byscore=("nan", 2))
+        await r.set("s", "x")
+        with pytest.raises(ResponseError, match="WRONGTYPE"):
+            await r.zmove("a", "s", min=True)
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.zmove("a", "b")
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.zmove("a", "b", min=True, max=True)
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.zmove("a", "b", min=True, byscore=(1, 2))
+        assert await r.zrange("a", 0, -1) == [b"a1"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_bzmove(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        assert await r.bzmove("a", "b", 1, min=True) == [[b"a1", 1.0]]
+        assert await r.bzmove("a", "b", 1, max=True, count=5) == [
+            [b"a3", 3.0],
+            [b"a2", 2.0],
+        ]
+        # the source is gone; a fractional timeout reaches the server
+        assert await r.bzmove("a", "b", 0.1, min=True) is None
+        with pytest.raises(ResponseError, match="count should be greater than 0"):
+            await r.bzmove("a", "b", 0, min=True, count=0)
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.bzmove("a", "b", 1)
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.bzmove("a", "b", 1, min=True, max=True)
+        with pytest.raises(DataError, match="exactly one of"):
+            await r.bzmove("a", "b", 1, min=None, max=False)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmovemember(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "NX": 4, "MEMBERS": 5})
+        # argument order, a missing member skipped, a duplicate moved once
+        assert await r.zmovemember("a", "b", ["a3", "missing", "a1", "a3"]) == [
+            [b"a3", 3.0],
+            [b"a1", 1.0],
+        ]
+        # members named like keywords are data
+        assert await r.zmovemember("a", "b", ["NX", "MEMBERS"]) == [
+            [b"NX", 4.0],
+            [b"MEMBERS", 5.0],
+        ]
+        assert await r.zmovemember("a", "b", ["missing"]) is None
+        # a single member may be given without a list
+        await r.zadd("a", {"a": 6})
+        assert await r.zmovemember("a", "b", "a2") == [[b"a2", 2.0]]
+        assert await r.zrange("a", 0, -1) == [b"a"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmovemember_nx_xx(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2})
+        await r.zadd("b", {"a1": 10})
+        # nx: a member the destination has stays in the source
+        assert await r.zmovemember("a", "b", ["a1", "a2"], nx=True) == [[b"a2", 2.0]]
+        assert await r.zscore("a", "a1") == 1.0
+        assert await r.zscore("b", "a1") == 10.0
+        await r.zadd("a", {"a3": 3})
+        # xx: a member the destination does not have stays in the source
+        assert await r.zmovemember("a", "b", ["a1", "a3"], xx=True) == [[b"a1", 1.0]]
+        assert await r.zscore("b", "a1") == 1.0
+        assert await r.zrange("a", 0, -1) == [b"a3"]
+        # xx on a missing destination moves nothing and creates nothing
+        assert await r.zmovemember("a", "c", ["a3"], xx=True) is None
+        assert await r.exists("c") == 0
+        with pytest.raises(DataError, match="either 'nx' or 'xx'"):
+            await r.zmovemember("a", "b", ["a3"], nx=True, xx=True)
+        # an empty member list goes to the server, which rejects it
+        with pytest.raises(ResponseError, match="wrong number of arguments"):
+            await r.zmovemember("a", "b", [])
+        with pytest.raises(ResponseError, match="Number of members must be a positive"):
+            await r.zmovemember("a", "b", [], nx=True)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_zmove_pipeline(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        async with r.pipeline() as pipe:
+            pipe.zmove("a", "b", min=True)
+            pipe.bzmove("a", "b", 1, max=True)
+            pipe.zmovemember("a", "b", ["a2"])
+            pipe.zmove("a", "b", min=True)
+            assert await pipe.execute() == [
+                [[b"a1", 1.0]],
+                [[b"a3", 3.0]],
+                [[b"a2", 2.0]],
+                None,
+            ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_bzmove_in_transaction_does_not_block(self, r: redis.Redis):
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.bzmove("a", "b", 0, min=True)
+            assert await pipe.execute() == [None]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.11.242")
+    async def test_bzmove_wakes_on_new_member(self, r: redis.Redis):
+        other = redis.Redis(connection_pool=r.connection_pool)
+        blocked_before = (await other.info("clients"))["blocked_clients"]
+
+        async def add_members():
+            # wait until BZMOVE is blocked, so the test covers the wake-up path
+            deadline = time.monotonic() + 5
+            while (await other.info("clients"))["blocked_clients"] <= blocked_before:
+                assert time.monotonic() < deadline, "BZMOVE never blocked"
+                await asyncio.sleep(0.01)
+            await other.zadd("a", {"a1": 1, "a2": 2})
+
+        task = asyncio.create_task(add_members())
+        try:
+            assert await r.bzmove("a", "b", 5, min=True, count=10) == [
+                [b"a1", 1.0],
+                [b"a2", 2.0],
+            ]
+        finally:
+            await task
+            await other.aclose()
+
     async def test_zrange(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zrange("a", 0, 1) == [b"a1", b"a2"]
@@ -4537,6 +4987,7 @@ class TestRedisCommands:
             [[b"a1", "1.0"], [b"a2", "2.0"]],
         )
 
+    @pytest.mark.fixed_client
     async def test_zrange_desc_sends_zrevrange_by_default(self):
         """Rank-only desc=True keeps ZREVRANGE unless use_rev is set."""
         r = redis.Redis()
@@ -4548,6 +4999,7 @@ class TestRedisCommands:
             "ZREVRANGE", "a", 0, -1, withscores=False, score_cast_func=float, keys=["a"]
         )
 
+    @pytest.mark.fixed_client
     async def test_zrange_desc_use_rev_sends_zrange_rev(self):
         r = redis.Redis()
         with patch.object(
@@ -4565,6 +5017,7 @@ class TestRedisCommands:
             keys=["a"],
         )
 
+    @pytest.mark.fixed_client
     async def test_zrange_desc_use_rev_withscores_and_score_cast(self):
         def cast_score(value):
             return value
@@ -6517,8 +6970,8 @@ class TestRedisCommands:
         # read all the messages - this will save the msgs in PEL
         await r.xreadgroup(group, consumer_1, streams={stream: ">"})
 
-        # wait for 100ms - so that the messages would have been in the PEL for long enough
-        await asyncio.sleep(0.1)
+        # wait for 200ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.2)
 
         m3 = await r.xadd(stream, {"key_m3": "val_m3"})
         m4 = await r.xadd(stream, {"key_m4": "val_m4"})
@@ -6613,8 +7066,8 @@ class TestRedisCommands:
         # read all the messages - this will save the msgs in PEL
         await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
-        # wait for 100ms - so that the messages would have been in the PEL for long enough
-        await asyncio.sleep(0.1)
+        # wait for 200ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.2)
 
         m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
         m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})
@@ -6729,8 +7182,8 @@ class TestRedisCommands:
         # read all the messages - this will save the msgs in PEL
         await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
-        # wait for 100ms - so that the messages would have been in the PEL for long enough
-        await asyncio.sleep(0.1)
+        # wait for 200ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.2)
 
         m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
         m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})

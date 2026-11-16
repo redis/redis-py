@@ -124,8 +124,10 @@ class JSONCommands:
         For more information see `JSON.ARRINDEX <https://redis.io/commands/json.arrindex>`_.
         """  # noqa
         pieces = [name, str(path), self._encode(scalar)]
-        if start is not None:
-            pieces.append(start)
+        if start is not None or stop is not None:
+            # ``stop`` is positional, so a ``stop`` without ``start`` needs the
+            # server's default start (0) in front of it.
+            pieces.append(0 if start is None else start)
             if stop is not None:
                 pieces.append(stop)
 
@@ -205,9 +207,15 @@ class JSONCommands:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
+        ``index`` defaults to -1 (the last element). ``None`` omits it, which
+        the server also treats as the last element.
+
         For more information see `JSON.ARRPOP <https://redis.io/commands/json.arrpop>`_.
         """  # noqa
-        return self.execute_command("JSON.ARRPOP", name, _path_arg(path), index)
+        pieces = [name, _path_arg(path)]
+        if index is not None:
+            pieces.append(index)
+        return self.execute_command("JSON.ARRPOP", *pieces)
 
     @overload
     def arrtrim(
@@ -709,10 +717,8 @@ class JSONCommands:
             for file in files:
                 file_path = os.path.join(root, file)
                 try:
-                    # TODO: rsplit(".") splits on all dots, mishandling paths
-                    # with dots in directories (e.g. /data/v1.2/file.json).
-                    # Should be rsplit(".", 1) — fix in a separate PR.
-                    file_name = file_path.rsplit(".")[0]
+                    # Strip only the extension of the final path component.
+                    file_name = os.path.splitext(file_path)[0]
                     self.set_file(
                         file_name,
                         json_path,

@@ -3,7 +3,7 @@ import logging
 import re
 import threading
 import time
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -15,6 +15,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Self,
     Sequence,
     Set,
     Type,
@@ -32,6 +33,7 @@ from redis._defaults import (
 )
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
+from redis._parsers.response_callbacks import _get_response_callback
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -50,7 +52,7 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
-from redis.credentials import CredentialProvider
+from redis.credentials import CredentialProvider, StreamingCredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
@@ -65,6 +67,7 @@ from redis.exceptions import (
     PubSubError,
     RedisError,
     ResponseError,
+    TimeoutError,
     WatchError,
 )
 from redis.himport import HImportRegistry, parse_himport_set_args
@@ -461,9 +464,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Argument is ignored when connection_pool is provided - configure it on the pool
             instead.
         """
-        if event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
-        else:
+        if event_dispatcher is not None:
             self._event_dispatcher = event_dispatcher
         if not connection_pool:
             if not retry_on_error:
@@ -584,14 +585,19 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     }
                 )
             connection_pool = ConnectionPool(**kwargs)
-            self._event_dispatcher.dispatch(
-                AfterPooledConnectionsInstantiationEvent(
-                    [connection_pool], ClientType.SYNC, credential_provider
-                )
-            )
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
+
+        # A user-supplied dispatcher always gets the event, for its own
+        # listeners. The default one is private to this client, so its only
+        # listener is the built-in re-auth one, which acts on a
+        # StreamingCredentialProvider alone: skip the no-op dispatch (and
+        # building the dispatcher) for any other provider.
+        if event_dispatcher is not None or (
+            credential_provider is not None
+            and isinstance(credential_provider, StreamingCredentialProvider)
+        ):
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.SYNC, credential_provider
@@ -621,6 +627,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             connection_kwargs.get("protocol"),
             connection_kwargs.get("legacy_responses", True),
         )
+
+    @cached_property
+    def _event_dispatcher(self) -> EventDispatcher:
+        # Built on first use when the client was given no dispatcher; a
+        # dispatcher passed to __init__ is stored on the instance instead.
+        return EventDispatcher()
 
     def __repr__(self) -> str:
         return (
@@ -796,7 +808,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             raise_on_release_error=raise_on_release_error,
         )
 
-    def pubsub(self, **kwargs):
+    def pubsub(self, **kwargs) -> "PubSub":
         """
         Return a Publish/Subscribe object. With this object, you can
         subscribe to channels and listen for messages that get published to
@@ -1024,8 +1036,14 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # Remove keys entry, it needs only for cache.
         options.pop("keys", None)
 
-        if command_name in self.response_callbacks:
-            return self.response_callbacks[command_name](response, **options)
+        if connection._resp2_fallback:
+            callback = _get_response_callback(
+                self.response_callbacks, command_name, connection
+            )
+        else:
+            callback = self.response_callbacks.get(command_name)
+        if callback is not None:
+            return callback(response, **options)
         return response
 
     def get_cache(self) -> Optional[CacheInterface]:
@@ -1111,12 +1129,26 @@ class Monitor:
         self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
-        self._start_monitor()
+        if self.connection is None:
+            self.connection = self.connection_pool.get_connection()
+        try:
+            self._start_monitor()
+        except BaseException:
+            try:
+                self.__exit__()
+            except Exception:
+                pass
+            raise
         return self
 
     def __exit__(self, *args):
-        self.connection.disconnect()
-        self.connection_pool.release(self.connection)
+        connection, self.connection = self.connection, None
+        if connection is None:
+            return
+        try:
+            connection.disconnect()
+        finally:
+            self.connection_pool.release(connection)
 
     def next_command(self):
         """Parse the response from a monitor command"""
@@ -1225,7 +1257,7 @@ class PubSub:
             _set_info_logger()
         self.reset()
 
-    def __enter__(self) -> "PubSub":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
@@ -1244,6 +1276,16 @@ class PubSub:
         if self.connection:
             self.connection.disconnect()
             self.connection.deregister_connect_callback(self.on_connect)
+            if self.push_handler_func is not None:
+                # The handler is set on the parser of a pooled connection: put
+                # the parser's own back, or the next PubSub that gets this
+                # connection has its messages handed to ours
+                parser = self.connection._get_parser()
+                if (
+                    getattr(parser, "pubsub_push_handler_func", None)
+                    is self.push_handler_func
+                ):
+                    parser.set_pubsub_push_handler(parser.handle_pubsub_push_response)
             self.connection_pool.release(self.connection)
             self.connection = None
         self.health_check_response_counter = 0
@@ -1474,9 +1516,18 @@ class PubSub:
                 # (and restore the original socket_timeout afterwards), so the
                 # configured socket_timeout does not abort the read.
                 read_timeout = None
-            return conn.read_response(
-                disconnect_on_error=False, push_request=True, timeout=read_timeout
-            )
+            try:
+                return conn.read_response(
+                    disconnect_on_error=False, push_request=True, timeout=read_timeout
+                )
+            except TimeoutError:
+                # Only part of a message arrived in time. The parser keeps it,
+                # so the next call resumes it, while the retry layer would
+                # reconnect and drop it. A push handler can raise TimeoutError
+                # itself, so that case still goes to the retry layer.
+                if block or self.push_handler_func is not None:
+                    raise
+                return None
 
         response = self._execute(conn, try_read)
 
@@ -1967,8 +2018,9 @@ class Pipeline(Redis):
         self.command_stack = []
         self.scripts = set()
         # make sure to reset the connection state in the event that we were
-        # watching something
-        if self.watching and self.connection:
+        # watching something. A dropped connection has already lost its
+        # WATCHes, so skip the UNWATCH instead of reconnecting to send it.
+        if self.watching and self.connection and self.connection.is_connected:
             try:
                 # call this manually since our unwatch or
                 # immediate_execute_command methods can call reset()
@@ -2193,8 +2245,14 @@ class Pipeline(Redis):
                 # Remove keys entry, it needs only for cache.
                 options.pop("keys", None)
                 command_name = args[0]
-                if command_name in self.response_callbacks:
-                    r = self.response_callbacks[command_name](r, **options)
+                if connection._resp2_fallback:
+                    callback = _get_response_callback(
+                        self.response_callbacks, command_name, connection
+                    )
+                else:
+                    callback = self.response_callbacks.get(command_name)
+                if callback is not None:
+                    r = callback(r, **options)
             data.append(r)
 
         return data

@@ -1,6 +1,6 @@
 ---
 name: pr-draft-summary
-description: Produce PR-ready output for redis-py — a one-line commit message and a copy-pasteable Markdown PR description (Change summary + Test coverage, 5–6 paragraphs) covering all staged changes plus the commits already on the current branch. Trigger whenever the user's message mentions any of these keywords or phrases: "PR", "pr", "PR description", "PR draft", "pull request", "the PR block", "commit msg", "commit message", or otherwise asks for a commit message or PR write-up for their local changes.
+description: Use when the user's message mentions "PR", "pr", "PR description", "PR draft", "pull request", "the PR block", "commit msg" or "commit message", or otherwise asks for a commit message or PR write-up for their local redis-py changes. Produces a one-line commit message and a copy-pasteable Markdown PR description (Change summary + Test coverage, 5-6 paragraphs) covering all staged changes plus the commits already on the current branch.
 ---
 
 # PR Draft Summary
@@ -13,6 +13,9 @@ After eligible work is complete, produce exactly two things for redis-py:
 2. A **PR description** as a single Markdown block the user can copy-paste into
    the GitHub PR UI with all formatting preserved. Keep it to **5–6 short
    paragraphs** that explain what the changes do.
+
+After the two blocks, add one line with the **suggested PR label** (see
+workflow step 3).
 
 By default, emit both as text in the chat. Write them to a `.md` file **only**
 if the user explicitly asks for a file.
@@ -64,6 +67,14 @@ Classify the change from the touched paths: runtime (`redis/`,
 3. Infer change type from touched paths (feature, fix, refactor, perf, or
    docs-with-impact). Pick the commit-message prefix accordingly: `feat:`,
    `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `chore:`.
+   Also pick the category label the PR should carry, using
+   `.agents/skills/generate-release-notes/references/pr-labels-guide.md` as the
+   authoritative mapping. Judge it from the diff, not from the branch name. For
+   example, a new opt-in public option is `feature`, even when it was written
+   to fix a reported problem. Keep the commit prefix consistent with the label.
+   If more than one category applies (for example `deprecation` and
+   `breakingchange`), list every matching label. Only suggest labels; never
+   apply them.
 4. Flag **backward-compatibility risk** in the description only when the diff
    changes the public API (signatures, argument names, defaults, return types),
    command semantics, error/exception types, wire-protocol (RESP2/RESP3)
@@ -119,6 +130,12 @@ testable or no tests were added, say so briefly and explain why.>
 Resolves #<number>.   <!-- include only when an issue number is known -->
 ```
 ````
+
+### Suggested label
+
+```
+Suggested label: <label(s) per pr-labels-guide.md>
+```
 
 Keep it tight — 5–6 paragraphs total across both sections, no redundant prose
 around the blocks, and no repeating the same detail in both sections.

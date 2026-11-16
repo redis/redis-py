@@ -85,6 +85,7 @@ from redis.typing import (
     XPendingRangeResponse,
     XReadGroupResponse,
     XReadResponse,
+    ZMoveResponse,
     ZMPopResponse,
     ZRandMemberResponse,
     ZScanResponse,
@@ -92,6 +93,8 @@ from redis.typing import (
     ZSetRangeResponse,
 )
 from redis.utils import (
+    _datetime_to_unix_ms,
+    _timedelta_to_ms,
     experimental_args,
     experimental_method,
     extract_expire_flags,
@@ -2512,6 +2515,111 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS GET", **kwargs)
 
+    @overload
+    def backup_start(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def backup_start(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def backup_start(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+        """
+        Start a new backup into the directory set by the ``backupdirname``
+        configuration (a subdirectory of the Redis working directory).
+        The backup directory must be empty, and only one backup can be in
+        progress at a time.
+
+        Poll :meth:`backup_status` until the state is ``incrementing``,
+        then call :meth:`backup_seal` to freeze the backup files.
+
+        For more information, see https://redis.io/commands/backup-start
+        """
+        return self.execute_command("BACKUP START", **kwargs)
+
+    @overload
+    def backup_status(self: SyncClientProtocol, **kwargs) -> dict[str | bytes, Any]: ...
+
+    @overload
+    def backup_status(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[dict[str | bytes, Any]]: ...
+
+    def backup_status(
+        self, **kwargs
+    ) -> dict[str | bytes, Any] | Awaitable[dict[str | bytes, Any]]:
+        """
+        Return the state of the current backup as a dict with the keys
+        ``state`` (one of ``idle``, ``pending``, ``snapshotting``,
+        ``incrementing``, ``sealed`` or ``failed``), ``error``,
+        ``start_time`` and ``end_time``.
+
+        For more information, see https://redis.io/commands/backup-status
+        """
+        return self.execute_command("BACKUP STATUS", **kwargs)
+
+    @overload
+    def backup_list(self: SyncClientProtocol, **kwargs) -> list[bytes | str]: ...
+
+    @overload
+    def backup_list(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[list[bytes | str]]: ...
+
+    def backup_list(self, **kwargs) -> list[bytes | str] | Awaitable[list[bytes | str]]:
+        """
+        Return the absolute paths of the backup files pinned so far: the base
+        file while the backup is in progress, and the base, incremental and
+        manifest files once it is sealed.
+
+        For more information, see https://redis.io/commands/backup-list
+        """
+        return self.execute_command("BACKUP LIST", **kwargs)
+
+    @overload
+    def backup_seal(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def backup_seal(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def backup_seal(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+        """
+        Freeze the current backup. After this, the files returned by
+        :meth:`backup_list` are complete and will not change, so they can be
+        copied elsewhere.
+
+        For more information, see https://redis.io/commands/backup-seal
+        """
+        return self.execute_command("BACKUP SEAL", **kwargs)
+
+    @overload
+    def backup_abort(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def backup_abort(self: AsyncClientProtocol, **kwargs) -> Awaitable[bytes | str]: ...
+
+    def backup_abort(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+        """
+        Cancel a backup that has not been sealed yet.
+
+        For more information, see https://redis.io/commands/backup-abort
+        """
+        return self.execute_command("BACKUP ABORT", **kwargs)
+
+    @overload
+    def backup_cleanup(self: SyncClientProtocol, **kwargs) -> bytes | str: ...
+
+    @overload
+    def backup_cleanup(
+        self: AsyncClientProtocol, **kwargs
+    ) -> Awaitable[bytes | str]: ...
+
+    def backup_cleanup(self, **kwargs) -> (bytes | str) | Awaitable[bytes | str]:
+        """
+        Remove the files of a sealed backup and return to the ``idle`` state.
+
+        For more information, see https://redis.io/commands/backup-cleanup
+        """
+        return self.execute_command("BACKUP CLEANUP", **kwargs)
+
 
 class AsyncManagementCommands(ManagementCommands):
     async def command_info(self, **kwargs) -> None:
@@ -2873,6 +2981,65 @@ class BasicKeyCommands(CommandsProtocol):
         if mode is not None:
             params.append(mode)
         return self.execute_command("BITPOS", *params, keys=[key])
+
+    @overload
+    def bitrangeintarray(
+        self: SyncClientProtocol,
+        key: KeyT,
+        start: int,
+        end: int,
+        mode: str | None = None,
+        limit: int | None = None,
+        zeros: bool = False,
+    ) -> list[int]: ...
+
+    @overload
+    def bitrangeintarray(
+        self: AsyncClientProtocol,
+        key: KeyT,
+        start: int,
+        end: int,
+        mode: str | None = None,
+        limit: int | None = None,
+        zeros: bool = False,
+    ) -> Awaitable[list[int]]: ...
+
+    def bitrangeintarray(
+        self,
+        key: KeyT,
+        start: int,
+        end: int,
+        mode: str | None = None,
+        limit: int | None = None,
+        zeros: bool = False,
+    ) -> list[int] | Awaitable[list[int]]:
+        """
+        Return the offsets of the set bits in the value of ``key``, in
+        ascending order, between ``start`` and ``end`` inclusive. The range is
+        interpreted as in BITCOUNT, with negative indexes counted from the end.
+        ``mode`` is ``"BYTE"`` or ``"BIT"`` (case-insensitive) and sets
+        whether ``start`` and ``end`` count bytes or bits. When ``mode`` is
+        not set, the server uses ``"BYTE"``. Any other value is rejected by
+        the server. The returned offsets are bit offsets in both modes.
+
+        ``limit`` returns only the lowest ``limit`` offsets of the range.
+        In byte mode the server completes the byte that holds the last
+        offset, so the reply can hold up to 7 offsets more than ``limit``.
+        ``limit=0`` returns an empty list.
+
+        ``zeros`` returns the offsets of the clear bits instead. Unlike
+        BITPOS, no clear bits are assumed past the end of the value.
+
+        For more information, see https://redis.io/commands/bitrangeintarray
+        """
+        params = [key, start, end]
+        if mode is not None:
+            params.append(mode)
+        if limit is not None:
+            params.extend(["LIMIT", limit])
+        if zeros:
+            params.append("ZEROS")
+        return self.execute_command("BITRANGEINTARRAY", *params, keys=[key])
 
     @overload
     def copy(
@@ -4096,7 +4263,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/pexpire
         """
         if isinstance(time, datetime.timedelta):
-            time = int(time.total_seconds() * 1000)
+            time = _timedelta_to_ms(time)
 
         exp_option = list()
         if nx:
@@ -4154,7 +4321,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/pexpireat
         """
         if isinstance(when, datetime.datetime):
-            when = int(when.timestamp() * 1000)
+            when = _datetime_to_unix_ms(when)
         exp_option = list()
         if nx:
             exp_option.append("NX")
@@ -4202,7 +4369,7 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/psetex
         """
         if isinstance(time_ms, datetime.timedelta):
-            time_ms = int(time_ms.total_seconds() * 1000)
+            time_ms = _timedelta_to_ms(time_ms)
         return self.execute_command("PSETEX", name, time_ms, value)
 
     @overload
@@ -7217,7 +7384,7 @@ class SetCommands(CommandsProtocol):
             raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
 
         if isinstance(milliseconds, datetime.timedelta):
-            milliseconds = int(milliseconds.total_seconds() * 1000)
+            milliseconds = _timedelta_to_ms(milliseconds)
 
         options = []
         if nx:
@@ -7396,7 +7563,7 @@ class SetCommands(CommandsProtocol):
             raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
 
         if isinstance(unix_time_milliseconds, datetime.datetime):
-            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
+            unix_time_milliseconds = _datetime_to_unix_ms(unix_time_milliseconds)
 
         options = []
         if nx:
@@ -9546,6 +9713,181 @@ class SortedSetCommands(CommandsProtocol):
 
         return self.execute_command("BZMPOP", *args)
 
+    @overload
+    def zmove(
+        self: SyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        min: bool | None = False,
+        max: bool | None = False,
+        byscore: tuple[ZScoreBoundT, ZScoreBoundT] | None = None,
+        count: int | None = None,
+    ) -> ZMoveResponse: ...
+
+    @overload
+    def zmove(
+        self: AsyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        min: bool | None = False,
+        max: bool | None = False,
+        byscore: tuple[ZScoreBoundT, ZScoreBoundT] | None = None,
+        count: int | None = None,
+    ) -> Awaitable[ZMoveResponse]: ...
+
+    def zmove(
+        self,
+        source: KeyT,
+        destination: KeyT,
+        min: bool | None = False,
+        max: bool | None = False,
+        byscore: tuple[ZScoreBoundT, ZScoreBoundT] | None = None,
+        count: int | None = None,
+    ) -> ZMoveResponse | Awaitable[ZMoveResponse]:
+        """
+        Atomically move members from the sorted set ``source`` to the sorted
+        set ``destination``, keeping their scores.
+
+        Exactly one selection must be given: ``min`` takes the members with
+        the lowest scores, ``max`` the members with the highest scores, and
+        ``byscore`` a ``(min, max)`` score range, lowest score first. Unlike
+        ``zrange``, ``byscore`` takes the bounds as a tuple, not a flag. The
+        bounds are inclusive; prefix a bound with ``(`` to make it exclusive,
+        or use ``-inf`` / ``+inf``.
+
+        ``count`` is the greatest number of members to move. Without it,
+        ``min`` and ``max`` move one member and ``byscore`` moves every member
+        in the range in one command; a large range blocks the server for the
+        whole move.
+
+        Returns a list of ``[member, score]`` pairs, also for a single member,
+        or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/zmove
+        """
+        if bool(min) + bool(max) + (byscore is not None) != 1:
+            raise DataError("ZMOVE requires exactly one of 'min', 'max' or 'byscore'")
+        pieces: list[EncodableT] = [source, destination]
+        if byscore is not None:
+            score_min, score_max = byscore
+            pieces.extend(("BYSCORE", score_min, score_max))
+        else:
+            pieces.append("MIN" if min else "MAX")
+        if count is not None:
+            pieces.extend(("COUNT", count))
+        return self.execute_command("ZMOVE", *pieces)
+
+    @overload
+    def bzmove(
+        self: SyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        timeout: float,
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = None,
+    ) -> ZMoveResponse: ...
+
+    @overload
+    def bzmove(
+        self: AsyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        timeout: float,
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = None,
+    ) -> Awaitable[ZMoveResponse]: ...
+
+    def bzmove(
+        self,
+        source: KeyT,
+        destination: KeyT,
+        timeout: float,
+        min: bool | None = False,
+        max: bool | None = False,
+        count: int | None = None,
+    ) -> ZMoveResponse | Awaitable[ZMoveResponse]:
+        """
+        Blocking version of zmove, for the ``min`` and ``max`` selections.
+
+        If ``source`` is empty or missing, block for ``timeout`` seconds, or
+        until a member gets added to ``source``, then move up to ``count``
+        members (default 1) without waiting for more. A ``timeout`` of ``0``
+        blocks indefinitely. Inside a transaction it never blocks.
+
+        Returns a list of ``[member, score]`` pairs, or ``None`` if the
+        timeout passed and nothing was moved.
+
+        For more information, see https://redis.io/commands/bzmove
+        """
+        if bool(min) == bool(max):
+            raise DataError("BZMOVE requires exactly one of 'min' or 'max'")
+        pieces: list[EncodableT] = [
+            source,
+            destination,
+            "MIN" if min else "MAX",
+            timeout,
+        ]
+        if count is not None:
+            pieces.extend(("COUNT", count))
+        return self.execute_command("BZMOVE", *pieces)
+
+    @overload
+    def zmovemember(
+        self: SyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        members: EncodableT | Iterable[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+    ) -> ZMoveResponse: ...
+
+    @overload
+    def zmovemember(
+        self: AsyncClientProtocol,
+        source: KeyT,
+        destination: KeyT,
+        members: EncodableT | Iterable[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+    ) -> Awaitable[ZMoveResponse]: ...
+
+    def zmovemember(
+        self,
+        source: KeyT,
+        destination: KeyT,
+        members: EncodableT | Iterable[EncodableT],
+        nx: bool = False,
+        xx: bool = False,
+    ) -> ZMoveResponse | Awaitable[ZMoveResponse]:
+        """
+        Atomically move the ``members`` (one member or an iterable of members)
+        from the sorted set ``source`` to the sorted set ``destination``,
+        keeping their scores.
+
+        Members are evaluated in the given order. A member that ``source``
+        does not have is skipped, and a member given twice moves once.
+
+        ``nx`` moves a member only if ``destination`` does not have it.
+        ``xx`` moves a member only if ``destination`` has it.
+
+        Returns a list of ``[member, score]`` pairs for the members that
+        moved, or ``None`` if nothing was moved.
+
+        For more information, see https://redis.io/commands/zmovemember
+        """
+        if nx and xx:
+            raise DataError("ZMOVEMEMBER allows either 'nx' or 'xx', not both")
+        members = list_or_args(members, None)
+        pieces: list[EncodableT] = [source, destination]
+        if nx:
+            pieces.append("NX")
+        elif xx:
+            pieces.append("XX")
+        pieces.extend(("MEMBERS", len(members)))
+        return self.execute_command("ZMOVEMEMBER", *pieces, *members)
+
     def _zrange(
         self,
         command,
@@ -11162,7 +11504,7 @@ class HashCommands(CommandsProtocol):
             raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
 
         if isinstance(milliseconds, datetime.timedelta):
-            milliseconds = int(milliseconds.total_seconds() * 1000)
+            milliseconds = _timedelta_to_ms(milliseconds)
 
         options = []
         if nx:
@@ -11336,7 +11678,7 @@ class HashCommands(CommandsProtocol):
             raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
 
         if isinstance(unix_time_milliseconds, datetime.datetime):
-            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
+            unix_time_milliseconds = _datetime_to_unix_ms(unix_time_milliseconds)
 
         options = []
         if nx:
@@ -13055,7 +13397,12 @@ class FunctionCommands:
         """
         Load a library to Redis.
         :param code: the source code (must start with
-        Shebang statement that provides a metadata about the library)
+        Shebang statement that provides a metadata about the library).
+        The code is sent to the server unchanged, so nothing may come
+        before the ``#!`` line, not even a newline or whitespace.
+        Otherwise the server raises ``Missing library metadata``.
+        Triple-quoted strings usually start with a newline, so pass
+        ``code.strip()`` for them.
         :param replace: changes the behavior to overwrite the existing library
         with the new contents.
         Return the library name that was loaded.
@@ -13118,11 +13465,12 @@ class FunctionCommands:
 
         Args:
 
-            library: specify a pattern for matching library names
+            library: specify a pattern for matching library names, or None for all
+                libraries
             withcode: cause the server to include the libraries source implementation
                 in the reply
         """
-        args = ["LIBRARYNAME", library]
+        args = [] if library is None else ["LIBRARYNAME", library]
         if withcode:
             args.append("WITHCODE")
         return self.execute_command("FUNCTION LIST", *args)
@@ -13206,11 +13554,15 @@ class FunctionCommands:
         """
         Restore libraries from the serialized ``payload``.
         You can use the optional policy argument to provide a policy
-        for handling existing libraries.
+        for handling existing libraries. ``None`` omits it, which the server
+        treats as ``APPEND``.
 
         For more information, see https://redis.io/commands/function-restore
         """
-        return self.execute_command("FUNCTION RESTORE", payload, policy)
+        pieces = [payload]
+        if policy is not None:
+            pieces.append(policy)
+        return self.execute_command("FUNCTION RESTORE", *pieces)
 
     @overload
     def function_kill(self: SyncClientProtocol) -> bytes | str: ...

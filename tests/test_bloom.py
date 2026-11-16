@@ -1,7 +1,9 @@
-from math import inf
+from math import inf, isnan
+from unittest.mock import Mock
 
 import pytest
 import redis.commands.bf
+from redis.client import NEVER_DECODE
 from redis.exceptions import RedisError
 
 from .conftest import (
@@ -186,6 +188,38 @@ def test_bf_scandump_and_loadchunk(client):
     do_verify()
 
     client.bf().client.delete("myBloom")
+
+
+@pytest.mark.redismod
+@skip_if_redis_enterprise()
+def test_cf_scandump_and_loadchunk(client):
+    # The client decodes responses, but the dumped chunks are binary.
+    client.cf().create("myCuckoo", 1000)
+    for x in range(100):
+        client.cf().add("myCuckoo", x)
+
+    chunks = []
+    it = 0
+    while True:
+        it, data = client.cf().scandump("myCuckoo", it)
+        if it == 0:
+            break
+        assert isinstance(data, bytes)
+        chunks.append((it, data))
+
+    client.delete("myCuckoo")
+    for it, data in chunks:
+        client.cf().loadchunk("myCuckoo", it, data)
+
+    assert all(client.cf().mexists("myCuckoo", *range(100)))
+
+
+def test_cf_scandump_does_not_decode_response():
+    mock_client = Mock()
+    redis.commands.bf.CFBloom(mock_client).scandump("myCuckoo", 0)
+    mock_client.execute_command.assert_called_once_with(
+        "CF.SCANDUMP", "myCuckoo", 0, **{NEVER_DECODE: []}
+    )
 
 
 @pytest.mark.redismod
@@ -640,3 +674,63 @@ def test_tdigest_byrevrank(client):
 #
 #     for i in range(100):
 #         assert client.bf().exists("pipeline", i)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.experimental
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_tdigest_unified_responses_are_floats(request, stack_url, protocol):
+    with _get_client(
+        redis.Redis,
+        request,
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        from_url=stack_url,
+    ) as client:
+        client.flushdb()
+        tdigest = client.tdigest()
+        assert tdigest.create("t-digest", 100)
+        assert tdigest.add("t-digest", [1, 2, 3, 4, 5])
+        assert tdigest.create("empty", 100)
+        # Redis replies with doubles, which RESP2 sends as bulk strings.
+        results = [
+            (tdigest.quantile("t-digest", 0.5, 0.9), [3.0, 5.0]),
+            (tdigest.cdf("t-digest", 1, 5), [0.1, 0.9]),
+            (tdigest.byrank("t-digest", 0, 2, 100), [1.0, 3.0, inf]),
+            (tdigest.byrevrank("t-digest", 0, 100), [5.0, -inf]),
+        ]
+        for result, expected in results:
+            assert result == expected
+            assert all(type(value) is float for value in result)
+        # An empty sketch answers nan, as a float as well
+        for result in (
+            tdigest.quantile("empty", 0.5),
+            tdigest.cdf("empty", 1),
+            tdigest.byrank("empty", 0),
+            tdigest.byrevrank("empty", 0),
+        ):
+            assert len(result) == 1
+            assert type(result[0]) is float and isnan(result[0])
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_topk_info_unified_responses(request, stack_url, protocol):
+    with _get_client(
+        redis.Redis,
+        request,
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        from_url=stack_url,
+    ) as client:
+        client.flushdb()
+        assert client.topk().reserve("topk", 3, 50, 4, 0.9)
+        info = client.topk().info("topk")
+        assert (info["k"], info["width"], info["depth"]) == (3, 50, 4)
+        # The decay is a double, which RESP2 sends as a bulk string.
+        assert info["decay"] == 0.9
+        assert type(info["decay"]) is float

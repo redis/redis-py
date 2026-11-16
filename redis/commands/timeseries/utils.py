@@ -160,7 +160,11 @@ def parse_m_range(response, **kwargs):
     return sorted(res, key=lambda d: list(d.keys()))
 
 
-def _m_range_metadata(aggregation_type=None):
+def _m_range_metadata(aggregation_type=None, reduce=None):
+    if reduce is not None:
+        # With GROUPBY/REDUCE, RESP3 reports the reducer instead of the
+        # aggregators, e.g. {"reducers": ["sum"]}.
+        return {"reducers": [nativestr(reduce).lower()]}
     if aggregation_type is None:
         # Aggregators are empty when TS.MRANGE/TS.MREVRANGE is called without
         # AGGREGATION; this mirrors RESP3 metadata such as {"aggregators": []}.
@@ -170,6 +174,13 @@ def _m_range_metadata(aggregation_type=None):
     else:
         aggregators = [aggregation_type]
     return {"aggregators": [nativestr(agg).lower() for agg in aggregators]}
+
+
+def _nativestr_metadata(metadata):
+    """Apply ``nativestr`` to RESP3 metadata so it matches the RESP2 shape."""
+    return {
+        nativestr(k): [nativestr(v) for v in values] for k, values in metadata.items()
+    }
 
 
 def parse_m_range_unified(response, **kwargs):
@@ -183,11 +194,11 @@ def parse_m_range_unified(response, **kwargs):
     if isinstance(response, dict):
         res = {}
         for key, item in response.items():
-            metadata = item[1] if len(item) > 2 else []
+            metadata = _nativestr_metadata(item[1]) if len(item) > 2 else []
             res[key] = [item[0], metadata, parse_range_unified(item[-1])]
         return res
     res = {}
-    metadata = _m_range_metadata(kwargs.get("aggregation_type"))
+    metadata = _m_range_metadata(kwargs.get("aggregation_type"), kwargs.get("reduce"))
     for item in response:
         res[item[0]] = [
             _pairs_to_dict(item[1]),
