@@ -1590,7 +1590,7 @@ class TimeSeriesCommands:
             MRANGE_CMD,
             *params,
             aggregation_type=aggregation_type,
-            reduce=reduce if groupby is not None else None,
+            reduce=reduce,
         )
 
     @overload
@@ -1744,7 +1744,7 @@ class TimeSeriesCommands:
             MREVRANGE_CMD,
             *params,
             aggregation_type=aggregation_type,
-            reduce=reduce if groupby is not None else None,
+            reduce=reduce,
         )
 
     @overload
