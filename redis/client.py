@@ -67,6 +67,7 @@ from redis.exceptions import (
     PubSubError,
     RedisError,
     ResponseError,
+    TimeoutError,
     WatchError,
 )
 from redis.himport import HImportRegistry, parse_himport_set_args
@@ -1515,9 +1516,18 @@ class PubSub:
                 # (and restore the original socket_timeout afterwards), so the
                 # configured socket_timeout does not abort the read.
                 read_timeout = None
-            return conn.read_response(
-                disconnect_on_error=False, push_request=True, timeout=read_timeout
-            )
+            try:
+                return conn.read_response(
+                    disconnect_on_error=False, push_request=True, timeout=read_timeout
+                )
+            except TimeoutError:
+                # Only part of a message arrived in time. The parser keeps it,
+                # so the next call resumes it, while the retry layer would
+                # reconnect and drop it. A push handler can raise TimeoutError
+                # itself, so that case still goes to the retry layer.
+                if block or self.push_handler_func is not None:
+                    raise
+                return None
 
         response = self._execute(conn, try_read)
 
@@ -2008,8 +2018,9 @@ class Pipeline(Redis):
         self.command_stack = []
         self.scripts = set()
         # make sure to reset the connection state in the event that we were
-        # watching something
-        if self.watching and self.connection:
+        # watching something. A dropped connection has already lost its
+        # WATCHes, so skip the UNWATCH instead of reconnecting to send it.
+        if self.watching and self.connection and self.connection.is_connected:
             try:
                 # call this manually since our unwatch or
                 # immediate_execute_command methods can call reset()
