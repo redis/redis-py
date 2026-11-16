@@ -6149,6 +6149,18 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False)
         assert await r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("6.2.0")
+    async def test_xautoclaim_negative(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        with pytest.raises(redis.DataError):
+            await r.xautoclaim(stream, group, consumer, min_idle_time=-1)
+        with pytest.raises(ValueError):
+            await r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
+        with pytest.raises(redis.DataError, match="XAUTOCLAIM count"):
+            await r.xautoclaim(stream, group, consumer, min_idle_time=0, count=-1)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xclaim(self, r: redis.Redis):
         stream = "stream"
