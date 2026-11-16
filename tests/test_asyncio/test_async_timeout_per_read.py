@@ -16,6 +16,7 @@ from unittest import mock
 import pytest
 
 import redis._parsers.base as parser_base
+import redis._parsers.hiredis as hiredis_parser
 from redis._parsers.encoders import Encoder
 from redis._parsers.hiredis import _AsyncHiredisParser
 from redis._parsers.resp2 import _AsyncRESP2Parser
@@ -102,6 +103,24 @@ async def test_socket_timeout_is_per_read_not_per_response(factory):
     assert response == PAYLOAD
     # prove the transfer really took longer than one socket_timeout window
     assert elapsed > SOCKET_TIMEOUT
+
+
+async def test_read_large_bulk_copied_out_of_stream_buffer_once():
+    # A large bulk that is already fully buffered is copied out of the
+    # stream buffer only once: as the whole buffer (bytes + clear, as
+    # readexactly does) and with more data behind it (a single copy
+    # through a temporary view). The bytes behind the bulk must stay
+    # buffered for the next response.
+    conn, reader = make_resp2_connection()
+    parser = conn._parser
+
+    reader.feed_data(PAYLOAD + b"\r\n")
+    assert await parser._read(len(PAYLOAD)) == PAYLOAD
+    assert not reader._buffer
+
+    reader.feed_data(PAYLOAD + b"\r\n" + b"+OK\r\n")
+    assert await parser._read(len(PAYLOAD)) == PAYLOAD
+    assert bytes(reader._buffer) == b"+OK\r\n"
 
 
 @pytest.mark.parametrize("factory", CONNECTION_FACTORIES)
@@ -478,8 +497,6 @@ async def test_hiredis_read_from_socket_shares_one_timeout_per_response(monkeypa
     # One response's socket reads share a single timeout context,
     # rescheduled before each read that waits, instead of entering a
     # fresh context per socket read.
-    import redis._parsers.hiredis as hiredis_parser
-
     real_async_timeout = hiredis_parser.async_timeout
     timeout_count = 0
 

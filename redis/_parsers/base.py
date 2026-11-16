@@ -73,6 +73,13 @@ from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 # must not tear down a healthy connection.
 UNRECOVERABLE_PARSE_ERRORS = (InvalidResponse, UnicodeDecodeError, RecursionError)
 
+# Bulks at least this large are copied out of the stream buffer only once in
+# the _read fast path (see _AsyncParser._read): slicing a large bulk out of
+# the bytearray and converting the slice to bytes copies it twice, which the
+# Benchmarks gate measures on large replies. Small bulks keep the slice, so
+# the per-element cost of the single-copy path does not come back.
+_BULK_SINGLE_COPY_SIZE = 64 * 1024
+
 
 def _parse_int(value: bytes, raw: bytes) -> int:
     """int() for a RESP numeric field; a non-numeric field is a protocol error."""
@@ -256,7 +263,7 @@ class AsyncBaseParser(BaseParser):
         # _active_read_timeout so the connection can reschedule it. Reads
         # with an explicit caller timeout do not apply per-read deadlines,
         # and a None _read_timeout never arms one.
-        self._read_timeout: Optional[float] = None
+        self._read_timeout: float | None = None
         self._apply_read_timeout: bool = False
         self._active_read_timeout = None
 
@@ -666,12 +673,31 @@ class _AsyncRESPBase(AsyncBaseParser):
                     # same bytes readexactly() would return, without a
                     # readexactly() coroutine - and without the flag
                     # checks below - for a read that cannot wait at all.
-                    # Slicing the bytearray copies the bytes out, so
-                    # no view is held when the buffer is resized: on
-                    # PyPy a live view would make `del` raise
-                    # BufferError there.
-                    data = bytes(buffer[:remaining])
-                    del buffer[:remaining]
+                    # A large bulk is copied out only once: slicing it
+                    # out of the bytearray and converting the slice to
+                    # bytes would copy it twice.
+                    if len(buffer) == remaining:
+                        # The bulk is the whole buffer: copy it out
+                        # once and clear, as readexactly() does.
+                        data = bytes(buffer)
+                        buffer.clear()
+                    elif remaining >= _BULK_SINGLE_COPY_SIZE:
+                        # More data follows the bulk: copy it out once
+                        # through a temporary view. The view is released
+                        # when the expression completes, before the del
+                        # below resizes the buffer, so no view is held
+                        # when the buffer is resized: on PyPy a live view
+                        # would make `del` raise BufferError there.
+                        data = bytes(memoryview(buffer)[:remaining])
+                        del buffer[:remaining]
+                    else:
+                        # Small bulks keep the slice. Slicing the
+                        # bytearray copies the bytes out, so no view is
+                        # held when the buffer is resized: on PyPy a
+                        # live view would make `del` raise
+                        # BufferError there.
+                        data = bytes(buffer[:remaining])
+                        del buffer[:remaining]
                     stream._maybe_resume_transport()
                     self._chunks.append(data)
                 elif (
