@@ -7908,7 +7908,7 @@ class TestRedisCommands:
             r.xautoclaim(stream, group, consumer, min_idle_time=-1)
         with pytest.raises(ValueError):
             r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
-        with pytest.raises(redis.DataError):
+        with pytest.raises(redis.DataError, match="XAUTOCLAIM count"):
             r.xautoclaim(stream, group, consumer, min_idle_time=0, count=-1)
 
     @skip_if_server_version_lt("5.0.0")
