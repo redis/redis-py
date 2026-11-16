@@ -157,6 +157,7 @@ from redis.exceptions import (
 )
 from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.maint_notifications import MaintNotificationsConfig
+from redis.observability.config import OTelConfig
 from redis.typing import (
     AnyKeyT,
     ChannelT,
@@ -489,6 +490,13 @@ class RedisCluster(
           Server-pushed refreshes (SMIGRATED), the first initialization and the
           refresh a ``CLUSTERDOWN`` or an uncovered slot runs are not limited.
           Defaults to one second when not set.
+    :param otel_config:
+        | Per-client OpenTelemetry configuration - see
+          :class:`~redis.observability.OTelConfig` for details. Its custom
+          attributes are added to the metrics recorded for this client and its
+          nodes, after the ones of the configuration passed to
+          ``get_observability_instance().init()``. Only ``custom_attributes`` is
+          read from it.
 
     | Rest of the arguments will be passed to the
       :class:`~redis.asyncio.connection.Connection` instances when created
@@ -633,6 +641,7 @@ class RedisCluster(
         maint_notifications_config: MaintNotificationsConfig | None = None,
         metadata_resolver: AsyncMetadataResolver | None = None,
         topology_refresh_min_interval: float | None = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -746,6 +755,10 @@ class RedisCluster(
         # the Connection, which is internal plumbing, not a public param.)
         self._himport_registry = HImportRegistry()
         kwargs["himport_registry"] = self._himport_registry
+
+        if otel_config is not None:
+            # A connection kwarg, so it reaches every node's connections
+            kwargs["otel_config"] = otel_config
 
         self.connection_kwargs = kwargs
 
@@ -1662,6 +1675,11 @@ class RedisCluster(
             )
         return nodes
 
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The per-client OpenTelemetry configuration shared with every node."""
+        return self.nodes_manager.connection_kwargs.get("otel_config")
+
     async def _record_error_metric(
         self,
         error: Exception,
@@ -1681,6 +1699,7 @@ class RedisCluster(
             error_type=error,
             retry_attempts=retry_attempts if retry_attempts is not None else 0,
             is_internal=is_internal,
+            otel_config=self.otel_config,
         )
 
     async def _record_command_metric(
@@ -1706,6 +1725,7 @@ class RedisCluster(
             server_port=connection.port,
             db_namespace=str(db) if db is not None else None,
             error=error,
+            otel_config=self.otel_config,
         )
 
     async def execute_command(self, *args: EncodableT, **kwargs: Any) -> Any:
@@ -3644,6 +3664,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The per-client OpenTelemetry configuration of the cluster client."""
+        return self.cluster_client.otel_config
+
     def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
         """Get the connection kwargs from the cluster client."""
         return self.cluster_client.get_connection_kwargs()
@@ -4315,6 +4340,7 @@ class PipelineStrategy(AbstractStrategy):
                 server_port=node.port,
                 db_namespace=str(db) if db is not None else None,
                 error=node_error,
+                otel_config=self._pipe.cluster_client.otel_config,
             )
 
         if any(errors):
@@ -4794,6 +4820,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_address=connection.host,
                 server_port=connection.port,
                 db_namespace=str(connection.db),
+                otel_config=self._pipe.cluster_client.otel_config,
             )
 
             return response
@@ -4806,6 +4833,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_port=connection.port,
                 db_namespace=str(connection.db),
                 error=e,
+                otel_config=self._pipe.cluster_client.otel_config,
             )
             raise
 
@@ -4865,6 +4893,7 @@ class TransactionStrategy(AbstractStrategy):
                 error_type=error,
                 retry_attempts=failure_count,
                 is_internal=True,
+                otel_config=self._pipe.cluster_client.otel_config,
             )
 
         # WATCH is requested before the first attempt, but only a reply
@@ -4939,6 +4968,7 @@ class TransactionStrategy(AbstractStrategy):
                     server_port=self._transaction_connection.port,
                     db_namespace=str(self._transaction_connection.db),
                     error=r,
+                    otel_config=self._pipe.cluster_client.otel_config,
                 )
 
                 raise r
@@ -5122,6 +5152,7 @@ class TransactionStrategy(AbstractStrategy):
             server_address=connection.host,
             server_port=connection.port,
             db_namespace=str(connection.db),
+            otel_config=self._pipe.cluster_client.otel_config,
         )
 
         return data
@@ -5229,6 +5260,7 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
     def __init__(self, node: "ClusterNode") -> None:
         self._node = node
         self.connection_kwargs = node.connection_kwargs
+        self.otel_config: OTelConfig | None = node.connection_kwargs.get("otel_config")
 
     # -- methods used by PubSub ------------------------------------------------
 

@@ -103,6 +103,9 @@ The ``OTelConfig`` class provides fine-grained control over metrics collection:
        # Privacy controls
        hide_pubsub_channel_names=True,  # Hide channel names in PubSub metrics
        hide_stream_names=True,          # Hide stream names in streaming metrics
+
+       # Attributes added to every metric (see Custom Attributes below)
+       custom_attributes={'env': 'prod'},
    )
 
    otel = get_observability_instance()
@@ -181,6 +184,61 @@ You can customize histogram bucket boundaries for better granularity:
        buckets_connection_wait_time=[0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1],
        buckets_stream_processing_duration=[0.001, 0.01, 0.1, 1, 10],
    )
+
+Custom Attributes
+^^^^^^^^^^^^^^^^^
+
+You can add your own attributes to the metrics, for all clients and per client.
+
+Attributes on the ``OTelConfig`` passed to ``init()`` are added to every metric of
+every client:
+
+.. code-block:: python
+
+   otel = get_observability_instance()
+   otel.init(OTelConfig(custom_attributes={'env': 'prod', 'region': 'eu-west-1'}))
+
+To add attributes to the metrics of one client only, pass an ``OTelConfig`` to
+that client as ``otel_config``. ``Redis``, ``RedisCluster``, their asyncio
+counterparts and ``MultiDbConfig`` accept it:
+
+.. code-block:: python
+
+   r = redis.Redis(otel_config=OTelConfig(custom_attributes={'tenant': 'a'}))
+   rc = redis.RedisCluster(
+       host='localhost',
+       port=16379,
+       otel_config=OTelConfig(custom_attributes={'tenant': 'b'}),
+   )
+
+Attributes are applied in this order, and for a duplicate key the later one wins:
+
+1. Built-in attributes (``db.system``, ``server.address``, ...)
+2. ``custom_attributes`` of the config passed to ``init()``
+3. ``custom_attributes`` of the client's ``otel_config``
+
+So a custom attribute can replace a built-in one, and a per-client attribute can
+replace a global one.
+
+Things to keep in mind:
+
+- Every custom attribute lands on every data point, so keep the list short and the
+  values low-cardinality.
+- Only ``custom_attributes`` is read from a per-client config. Metric groups,
+  command filters and the other options are taken from the config passed to
+  ``init()``.
+- The attributes are copied when the ``OTelConfig`` is created. Changing the
+  mapping afterwards has no effect.
+- ``otel_config`` is ignored when a ``connection_pool`` is passed to the client.
+  Pass it to the ``ConnectionPool`` instead.
+- A ``RedisCluster`` shares its ``otel_config`` with all its nodes. Databases of a
+  ``MultiDbConfig`` inherit its ``otel_config`` unless they set their own in
+  ``client_kwargs``.
+- ``otel_config`` is forwarded to the connections of the client, so a custom
+  ``connection_class`` must accept it (or ``**kwargs``).
+- Evictions of a full client-side cache (``redis.client.csc.evictions`` with the
+  ``full`` reason) carry only the global custom attributes, because a cache is
+  not tied to one client.
 
 Context Manager Usage
 ^^^^^^^^^^^^^^^^^^^^^

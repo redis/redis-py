@@ -1013,6 +1013,7 @@ class MaintNotificationsPoolHandler:
 
             record_connection_handoff(
                 pool_name=get_pool_name(self.pool),
+                otel_config=getattr(self.pool, "otel_config", None),
             )
 
             self._processed_notifications.add(notification)
@@ -1206,6 +1207,7 @@ class MaintNotificationsConnectionHandler:
             network_peer_address=self.connection.host,
             network_peer_port=self.connection.port,
             maint_notification=maint_notification,
+            otel_config=getattr(self.connection, "otel_config", None),
         )
 
         if notification_type is None:
@@ -1246,6 +1248,7 @@ class MaintNotificationsConnectionHandler:
             connection_name=self._get_pool_name(),
             maint_notification=maint_notification,
             relaxed=True,
+            otel_config=getattr(self.connection, "otel_config", None),
         )
 
         _dispatch_maintenance_event(
@@ -1292,6 +1295,7 @@ class MaintNotificationsConnectionHandler:
                 connection_name=self._get_pool_name(),
                 maint_notification=maint_notification,
                 relaxed=False,
+                otel_config=getattr(self.connection, "otel_config", None),
             )
 
         if was_relaxed:
@@ -1435,7 +1439,8 @@ class OSSMaintNotificationsHandler:
                             record_connection_handoff(
                                 pool_name=get_pool_name(
                                     current_node.redis_connection.connection_pool
-                                )
+                                ),
+                                otel_config=current_node.redis_connection.connection_pool.otel_config,
                             )
                             handoff_recorded = True
                         else:
@@ -1459,7 +1464,8 @@ class OSSMaintNotificationsHandler:
                                 record_connection_handoff(
                                     pool_name=get_pool_name(
                                         current_node.redis_connection.connection_pool
-                                    )
+                                    ),
+                                    otel_config=current_node.redis_connection.connection_pool.otel_config,
                                 )
 
                 # mark the notification as processed

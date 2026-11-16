@@ -77,6 +77,7 @@ from redis.maint_notifications import (
     OSSMaintNotificationsHandler,
 )
 from redis.observability.attributes import PubSubDirection
+from redis.observability.config import OTelConfig
 from redis.observability.recorder import (
     record_error_count,
     record_operation_duration,
@@ -386,6 +387,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
         | None = None,
         metadata_resolver: MetadataResolver | None = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -463,6 +465,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             package.
             Argument is ignored when connection_pool is provided - configure it on the pool
             instead.
+        otel_config:
+            per-client OpenTelemetry configuration - see
+            `redis.observability.OTelConfig` for details. Its custom attributes
+            are added to the metrics recorded for this client, after the ones of
+            the configuration passed to `get_observability_instance().init()`.
+            Only `custom_attributes` is read from it.
+            Argument is ignored when connection_pool is provided.
         """
         if event_dispatcher is not None:
             self._event_dispatcher = event_dispatcher
@@ -584,6 +593,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         "metadata_resolver": metadata_resolver,
                     }
                 )
+            if otel_config is not None:
+                kwargs.update(
+                    {
+                        "otel_config": otel_config,
+                    }
+                )
             connection_pool = ConnectionPool(**kwargs)
             self.auto_close_connection_pool = True
         else:
@@ -647,6 +662,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self) -> Dict:
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The per-client OpenTelemetry configuration of the connection pool."""
+        return getattr(self.connection_pool, "otel_config", None)
 
     @property
     def himport_registry(self) -> HImportRegistry:
@@ -948,6 +968,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
 
         conn.disconnect()
@@ -990,6 +1011,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
             return result
         except Exception as e:
@@ -1001,6 +1023,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 
@@ -1257,6 +1280,11 @@ class PubSub:
             _set_info_logger()
         self.reset()
 
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The per-client OpenTelemetry configuration of the connection pool."""
+        return getattr(self.connection_pool, "otel_config", None)
+
     def __enter__(self) -> Self:
         return self
 
@@ -1395,6 +1423,7 @@ class PubSub:
                     db_namespace=str(conn.db),
                     error=error,
                     retry_attempts=failure_count,
+                    otel_config=self.otel_config,
                 )
         conn.disconnect()
         conn.connect()
@@ -1441,6 +1470,7 @@ class PubSub:
                     server_address=getattr(conn, "host", None),
                     server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
+                    otel_config=self.otel_config,
                 )
 
             return response
@@ -1453,6 +1483,7 @@ class PubSub:
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 
@@ -1807,6 +1838,7 @@ class PubSub:
             record_pubsub_message(
                 direction=PubSubDirection.RECEIVE,
                 channel=channel,
+                otel_config=self.otel_config,
             )
         elif message_type == "smessage":
             channel = str_if_bytes(message["channel"])
@@ -1814,6 +1846,7 @@ class PubSub:
                 direction=PubSubDirection.RECEIVE,
                 channel=channel,
                 sharded=True,
+                otel_config=self.otel_config,
             )
 
         # if this is an unsubscribe message, remove it from memory.
@@ -2088,6 +2121,7 @@ class Pipeline(Redis):
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
         conn.disconnect()
 
@@ -2142,6 +2176,7 @@ class Pipeline(Redis):
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
 
             return response
@@ -2154,6 +2189,7 @@ class Pipeline(Redis):
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 
@@ -2364,6 +2400,7 @@ class Pipeline(Redis):
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -2421,6 +2458,7 @@ class Pipeline(Redis):
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
             return response
         except Exception as e:
@@ -2432,6 +2470,7 @@ class Pipeline(Redis):
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 

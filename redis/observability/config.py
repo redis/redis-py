@@ -1,5 +1,5 @@
 from enum import IntFlag, auto
-from typing import List, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence
 
 """
 OpenTelemetry configuration for redis-py.
@@ -7,6 +7,18 @@ OpenTelemetry configuration for redis-py.
 This module handles configuration for OTel observability features,
 including parsing environment variables and validating settings.
 """
+
+
+AttributeValue = (
+    str
+    | bool
+    | int
+    | float
+    | Sequence[str]
+    | Sequence[bool]
+    | Sequence[int]
+    | Sequence[float]
+)
 
 
 class MetricGroup(IntFlag):
@@ -68,6 +80,16 @@ class OTelConfig:
         exclude_commands: Blocklist of commands to track
         hide_pubsub_channel_names: If True, hide PubSub channel names in metrics (default: False)
         hide_stream_names: If True, hide stream names in streaming metrics (default: False)
+        custom_attributes: Attributes added to every metric. A custom attribute
+                           with the same key as a built-in one replaces it. Every
+                           custom attribute lands on every data point, so keep the
+                           values low-cardinality. The mapping is copied, later
+                           changes to it have no effect.
+
+    A config can also be passed to a client as ``otel_config`` to add custom
+    attributes to that client's metrics only. They are applied after the ones of
+    the config passed to ``init()``, so they win for a duplicate key. Only
+    ``custom_attributes`` is read from a per-client config.
 
     Note:
         Redis-py uses the global MeterProvider set by your application.
@@ -123,6 +145,7 @@ class OTelConfig:
         ] = default_histogram_buckets(),
         buckets_connection_create_time: Sequence[float] = default_histogram_buckets(),
         buckets_connection_wait_time: Sequence[float] = default_histogram_buckets(),
+        custom_attributes: Mapping[str, AttributeValue] | None = None,
     ):
         # Core enablement
         if enabled_telemetry is None:
@@ -153,6 +176,9 @@ class OTelConfig:
         self.buckets_stream_processing_duration = buckets_stream_processing_duration
         self.buckets_connection_create_time = buckets_connection_create_time
         self.buckets_connection_wait_time = buckets_connection_wait_time
+
+        # Snapshot, so that later changes to the caller's mapping have no effect
+        self.custom_attributes = dict(custom_attributes) if custom_attributes else None
 
     def is_enabled(self) -> bool:
         """Check if any observability feature is enabled."""

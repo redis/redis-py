@@ -22,6 +22,7 @@ from redis.multidb.failover import (
 )
 from redis.multidb.failure_detector import FailureDetector
 from redis.observability.attributes import GeoFailoverReason
+from redis.observability.config import OTelConfig
 from redis.observability.recorder import record_geo_failover
 from redis.retry import Retry
 
@@ -168,6 +169,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
         failover_delay: float = DEFAULT_FAILOVER_DELAY,
         auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Initialize the DefaultCommandExecutor instance.
@@ -181,6 +183,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
             failover_attempts: Number of failover attempts
             failover_delay: Delay between failover attempts
             auto_fallback_interval: Time interval in seconds between attempts to fall back to a primary database
+            otel_config: Per-client OpenTelemetry configuration supplying custom attributes
         """
         super().__init__(auto_fallback_interval)
 
@@ -194,6 +197,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
             failover_strategy, failover_attempts, failover_delay
         )
         self._event_dispatcher = event_dispatcher
+        self._otel_config = otel_config
         self._active_database: Optional[Database] = None
         self._active_pubsub: Optional[PubSub] = None
         self._active_pubsub_kwargs = {}
@@ -230,6 +234,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
                 fail_from=old_active,
                 fail_to=database,
                 reason=reason,
+                otel_config=self._otel_config,
             )
             self._event_dispatcher.dispatch(
                 ActiveDatabaseChanged(

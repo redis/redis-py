@@ -79,6 +79,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             failover_delay=config.failover_delay,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
+            otel_config=config.otel_config,
         )
         self.initialized = False
         self._hc_lock = asyncio.Lock()

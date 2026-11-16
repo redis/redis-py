@@ -98,6 +98,7 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     OSSMaintNotificationsHandler,
 )
+from redis.observability.config import OTelConfig
 from redis.observability.recorder import (
     record_error_count,
     record_operation_duration,
@@ -1191,6 +1192,7 @@ class RedisCluster(
         maint_notifications_config: MaintNotificationsConfig | None = None,
         metadata_resolver: MetadataResolver | None = None,
         topology_refresh_min_interval: float | None = None,
+        otel_config: OTelConfig | None = None,
         **kwargs,
     ):
         """
@@ -1322,6 +1324,13 @@ class RedisCluster(
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the NodesManager
             initialization).
+        :param otel_config:
+            Per-client OpenTelemetry configuration - see
+            `redis.observability.OTelConfig` for details. Its custom attributes
+            are added to the metrics recorded for this client and its nodes, after
+            the ones of the configuration passed to
+            `get_observability_instance().init()`. Only `custom_attributes` is
+            read from it.
         :param topology_refresh_min_interval:
             The minimum number of seconds between two topology refreshes
             triggered by errors (connection errors, the ``reinitialize_steps``
@@ -1423,6 +1432,9 @@ class RedisCluster(
         self.user_on_connect_func = kwargs.pop("redis_connect_func", None)
         kwargs.update({"redis_connect_func": self.on_connect})
         kwargs = cleanup_kwargs(**kwargs)
+        if otel_config is not None:
+            # A connection kwarg, so it reaches every node's pool and connections
+            kwargs["otel_config"] = otel_config
         if retry:
             self.retry = retry
         else:
@@ -2981,6 +2993,11 @@ class RedisCluster(
         )
         raise e
 
+    @property
+    def otel_config(self) -> OTelConfig | None:
+        """The per-client OpenTelemetry configuration shared with every node."""
+        return self.nodes_manager.connection_kwargs.get("otel_config")
+
     def _record_command_metric(
         self,
         command_name: str,
@@ -3002,6 +3019,7 @@ class RedisCluster(
             server_port=port,
             db_namespace=db,
             error=error,
+            otel_config=self.otel_config,
         )
 
     def _record_error_metric(
@@ -3023,6 +3041,7 @@ class RedisCluster(
             error_type=error,
             retry_attempts=retry_attempts if retry_attempts is not None else 0,
             is_internal=is_internal,
+            otel_config=self.otel_config,
         )
 
     def close(self) -> None:
@@ -6293,6 +6312,7 @@ class PipelineStrategy(AbstractStrategy):
                     command_name="PIPELINE",
                     duration_seconds=time.monotonic() - start_time,
                     error=r,
+                    otel_config=self._pipe.otel_config,
                 )
 
                 raise r
@@ -6665,6 +6685,7 @@ class PipelineStrategy(AbstractStrategy):
                     server_port=n.connection.port,
                     db_namespace=str(n.connection.db),
                     error=node_error,
+                    otel_config=self._pipe.otel_config,
                 )
                 nodes_read += 1
         finally:
@@ -7235,6 +7256,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_address=connection.host,
                 server_port=connection.port,
                 db_namespace=str(connection.db),
+                otel_config=self._pipe.otel_config,
             )
 
             return response
@@ -7249,6 +7271,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_port=connection.port,
                 db_namespace=str(connection.db),
                 error=e,
+                otel_config=self._pipe.otel_config,
             )
             raise
 
@@ -7296,6 +7319,7 @@ class TransactionStrategy(AbstractStrategy):
                 error_type=error,
                 retry_attempts=failure_count,
                 is_internal=True,
+                otel_config=self._pipe.otel_config,
             )
 
         # WATCH is requested before the first attempt, but only a reply
@@ -7376,6 +7400,7 @@ class TransactionStrategy(AbstractStrategy):
                     server_address=self._transaction_connection.host,
                     server_port=self._transaction_connection.port,
                     db_namespace=str(self._transaction_connection.db),
+                    otel_config=self._pipe.otel_config,
                 )
 
                 raise r
@@ -7491,6 +7516,7 @@ class TransactionStrategy(AbstractStrategy):
             server_address=connection.host,
             server_port=connection.port,
             db_namespace=str(connection.db),
+            otel_config=self._pipe.otel_config,
         )
 
         # EXEC clears any watched keys

@@ -93,6 +93,7 @@ from .observability.attributes import (
     CSCResult,
     get_pool_name,
 )
+from .observability.config import OTelConfig
 from .observability.metrics import CloseReason
 from .observability.recorder import (
     init_csc_items,
@@ -1097,6 +1098,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             OSSMaintNotificationsHandler
         ] = None,
         himport_registry: HImportRegistry | None = None,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Initialize a new Connection.
@@ -1116,6 +1118,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
         lib_version : str, optional
             **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
+        otel_config : OTelConfig, optional
+            Per-client OpenTelemetry configuration. Its custom attributes are added
+            to the metrics recorded for this connection.
         """
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -1128,6 +1133,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+        self.otel_config = otel_config
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
@@ -1321,6 +1327,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_port=self.port,
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
+                otel_config=self.otel_config,
             )
             raise e
         except OSError as e:
@@ -1332,6 +1339,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_port=getattr(self, "port", None),
                 error_type=conn_error,
                 retry_attempts=actual_retry_attempts[0],
+                otel_config=self.otel_config,
             )
             # Preserve the original OSError (with its errno) as the cause so
             # the retry policy can tell unrecoverable failures apart. Clear the
@@ -1636,15 +1644,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                     network_peer_port=self.port,
                     error_type=error,
                     retry_attempts=failure_count,
+                    otel_config=self.otel_config,
                 )
 
             record_connection_closed(
                 close_reason=close_reason,
                 error_type=error,
+                otel_config=self.otel_config,
             )
         else:
             record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
+                otel_config=self.otel_config,
             )
 
     def mark_for_reconnect(self):
@@ -2164,6 +2175,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self.port = getattr(self._conn, "port", None)
         self.db = self._conn.db
         self._event_dispatcher = self._conn._event_dispatcher
+        self.otel_config = getattr(conn, "otel_config", None)
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
@@ -2515,9 +2527,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             self._pending_cache_hit = _NO_PENDING_HIT
             record_csc_request(
                 result=CSCResult.HIT,
+                otel_config=self.otel_config,
             )
             record_csc_network_saved(
                 bytes_saved=len(response) if hasattr(response, "__len__") else 0,
+                otel_config=self.otel_config,
             )
             return response
 
@@ -2526,6 +2540,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             # command: by construction a miss.
             record_csc_request(
                 result=CSCResult.MISS,
+                otel_config=self.otel_config,
             )
 
         try:
@@ -2944,6 +2959,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     record_csc_eviction(
                         count=len(keys_deleted),
                         reason=CSCReason.INVALIDATION,
+                        otel_config=self.otel_config,
                     )
 
     def extract_connection_details(self) -> str:
@@ -4029,6 +4045,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
 
+        # Stays in the connection kwargs, so every connection of the pool gets it too
+        self.otel_config: OTelConfig | None = connection_kwargs.get("otel_config")
+
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if not check_protocol_version(self._connection_kwargs.get("protocol"), 3):
                 raise RedisError("Client caching is only supported with RESP version 3")
@@ -4095,6 +4114,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             register_csc_items_callback(
                 callback=lambda: self.cache.size,
                 pool_name=get_pool_name(self),
+                otel_config=self.otel_config,
             )
 
         connection_kwargs.pop("cache", None)
@@ -4210,12 +4230,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             pool_name=pool_name,
                             connection_state=ConnectionState.IDLE,
                             counter=-idle_count,
+                            otel_config=self.otel_config,
                         )
                     if in_use_count > 0:
                         record_connection_count(
                             pool_name=pool_name,
                             connection_state=ConnectionState.USED,
                             counter=-in_use_count,
+                            otel_config=self.otel_config,
                         )
 
         self._created_connections = 0
@@ -4254,12 +4276,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         pool_name=pool_name,
                         connection_state=ConnectionState.IDLE,
                         counter=-idle_count,
+                        otel_config=self.otel_config,
                     )
                 if in_use_count > 0:
                     record_connection_count(
                         pool_name=pool_name,
                         connection_state=ConnectionState.USED,
                         counter=-in_use_count,
+                        otel_config=self.otel_config,
                     )
         except Exception:
             pass
@@ -4343,6 +4367,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 pool_name=pool_name,
                 connection_state=ConnectionState.USED,
                 counter=1,
+                otel_config=self.otel_config,
             )
         else:
             # Existing connection acquired from pool: IDLE -> USED
@@ -4350,11 +4375,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 pool_name=pool_name,
                 connection_state=ConnectionState.IDLE,
                 counter=-1,
+                otel_config=self.otel_config,
             )
             record_connection_count(
                 pool_name=pool_name,
                 connection_state=ConnectionState.USED,
                 counter=1,
+                otel_config=self.otel_config,
             )
 
         try:
@@ -4369,6 +4396,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             record_connection_create_time(
                 connection_pool=self,
                 duration_seconds=time.monotonic() - start_time_created,
+                otel_config=self.otel_config,
             )
 
         return connection
@@ -4459,11 +4487,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     pool_name=pool_name,
                     connection_state=ConnectionState.USED,
                     counter=-1,
+                    otel_config=self.otel_config,
                 )
                 record_connection_count(
                     pool_name=pool_name,
                     connection_state=ConnectionState.IDLE,
                     counter=1,
+                    otel_config=self.otel_config,
                 )
             else:
                 # Pool doesn't own this connection, do not add it back
@@ -4483,6 +4513,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         pool_name=get_pool_name(self),
                         connection_state=ConnectionState.USED,
                         counter=-1,
+                        otel_config=self.otel_config,
                     )
                 return
 
@@ -4696,12 +4727,14 @@ class BlockingConnectionPool(ConnectionPool):
                                 pool_name=pool_name,
                                 connection_state=ConnectionState.IDLE,
                                 counter=-idle_count,
+                                otel_config=self.otel_config,
                             )
                         if in_use_count > 0:
                             record_connection_count(
                                 pool_name=pool_name,
                                 connection_state=ConnectionState.USED,
                                 counter=-in_use_count,
+                                otel_config=self.otel_config,
                             )
 
             self.pool = self.queue_class(self.max_connections)
@@ -4753,12 +4786,14 @@ class BlockingConnectionPool(ConnectionPool):
                             pool_name=pool_name,
                             connection_state=ConnectionState.IDLE,
                             counter=-idle_count,
+                            otel_config=self.otel_config,
                         )
                     if in_use_count > 0:
                         record_connection_count(
                             pool_name=pool_name,
                             connection_state=ConnectionState.USED,
                             counter=-in_use_count,
+                            otel_config=self.otel_config,
                         )
         except Exception:
             pass
@@ -4819,7 +4854,10 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 connection = self.pool.get(block=True, timeout=self.timeout)
             except Empty:
-                record_connection_timeout(pool_name=get_pool_name(self))
+                record_connection_timeout(
+                    pool_name=get_pool_name(self),
+                    otel_config=self.otel_config,
+                )
                 # Note that this is not caught by the redis client and will be
                 # raised unless handled by application code. If you want never to
                 raise ConnectionError("No connection available.")
@@ -4852,6 +4890,7 @@ class BlockingConnectionPool(ConnectionPool):
                 pool_name=pool_name,
                 connection_state=ConnectionState.USED,
                 counter=1,
+                otel_config=self.otel_config,
             )
         else:
             # Existing connection acquired from pool: IDLE -> USED
@@ -4859,11 +4898,13 @@ class BlockingConnectionPool(ConnectionPool):
                 pool_name=pool_name,
                 connection_state=ConnectionState.IDLE,
                 counter=-1,
+                otel_config=self.otel_config,
             )
             record_connection_count(
                 pool_name=pool_name,
                 connection_state=ConnectionState.USED,
                 counter=1,
+                otel_config=self.otel_config,
             )
 
         try:
@@ -4877,11 +4918,13 @@ class BlockingConnectionPool(ConnectionPool):
             record_connection_create_time(
                 connection_pool=self,
                 duration_seconds=time.monotonic() - start_time_created,
+                otel_config=self.otel_config,
             )
 
         record_connection_wait_time(
             pool_name=pool_name,
             duration_seconds=time.monotonic() - start_time_acquired,
+            otel_config=self.otel_config,
         )
 
         return connection
@@ -4918,6 +4961,7 @@ class BlockingConnectionPool(ConnectionPool):
                         pool_name=get_pool_name(self),
                         connection_state=ConnectionState.USED,
                         counter=-1,
+                        otel_config=self.otel_config,
                     )
                 return
             if connection.should_reconnect():
@@ -4937,11 +4981,13 @@ class BlockingConnectionPool(ConnectionPool):
                     pool_name=pool_name,
                     connection_state=ConnectionState.USED,
                     counter=-1,
+                    otel_config=self.otel_config,
                 )
                 record_connection_count(
                     pool_name=pool_name,
                     connection_state=ConnectionState.IDLE,
                     counter=1,
+                    otel_config=self.otel_config,
                 )
             except Full:
                 pass

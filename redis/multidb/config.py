@@ -39,6 +39,7 @@ from redis.multidb.failure_detector import (
     CommandFailureDetector,
     FailureDetector,
 )
+from redis.observability.config import OTelConfig
 from redis.retry import Retry
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120
@@ -120,6 +121,9 @@ class MultiDbConfig:
         event_dispatcher: Interface for dispatching events related to database operations.
         initial_health_check_policy: Defines the policy used to determine whether the databases setup is
                                      healthy during the initial health check.
+        otel_config: Per-client OpenTelemetry configuration. Its custom attributes are added to
+            the failover metrics and to the metrics of every database client that has no
+            ``otel_config`` of its own in ``client_kwargs``. Only ``custom_attributes`` is read.
 
     Methods:
         databases:
@@ -167,6 +171,7 @@ class MultiDbConfig:
         default_factory=default_event_dispatcher
     )
     initial_health_check_policy: InitialHealthCheck = InitialHealthCheck.ALL_AVAILABLE
+    otel_config: OTelConfig | None = None
 
     def databases(self) -> Databases:
         databases = WeightedList()
@@ -188,6 +193,15 @@ class MultiDbConfig:
                 database_config.client_kwargs["maint_notifications_config"] = (
                     MaintNotificationsConfig(enabled=False)
                 )
+
+            # Databases inherit the per-client OTel configuration unless they have
+            # their own. A supplied pool keeps its own configuration.
+            if (
+                self.otel_config is not None
+                and not database_config.from_pool
+                and "otel_config" not in database_config.client_kwargs
+            ):
+                database_config.client_kwargs["otel_config"] = self.otel_config
 
             if database_config.from_url:
                 client = self.client_class.from_url(
