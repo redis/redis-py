@@ -487,6 +487,7 @@ def _finalizer_during_pool_lock(
         "proactive_reconnect",
         "moving_reconnect",
         "scheduled_reconnect",
+        "cancel_moving",
     )
     kwargs = dict(
         protocol=3,
@@ -521,9 +522,17 @@ def _finalizer_during_pool_lock(
         "proactive_reconnect",
         "moving_reconnect",
         "scheduled_reconnect",
+        "cancel_moving",
     ):
         pool.release(released)
     reconnect_handler = None
+    if operation == "cancel_moving":
+        reconnect_handler = pool._maint_notifications_pool_handler
+        with patch.object(reconnect_handler, "_schedule"):
+            reconnect_handler.handle_notification(
+                NodeMovingNotification(2, None, port, 60)
+            )
+        assert reconnect_handler._pending_handoffs
     draining, finalizing = threading.Event(), threading.Event()
     errors = []
     original_poll = owner._conn.can_read
@@ -534,6 +543,7 @@ def _finalizer_during_pool_lock(
     original_acquire = owner._acquire
     connection_class = pool.connection_class
     original_free = pool._get_free_connections
+    original_used = pool._get_in_use_connections
     enabled, thresholds = gc.isenabled(), gc.get_threshold()
     gc.disable()
     victim = Redis.from_pool(pool)
@@ -591,7 +601,17 @@ def _finalizer_during_pool_lock(
     def free_connections():
         if operation in ("blocking_snapshot", "blocking_maintenance_snapshot"):
             collect()
+        elif operation == "connection_count_free":
+            # Snapshot allocation can run GC while holding this pool lock.
+            with pool._lock:
+                collect()
         return original_free()
+
+    def used_connections():
+        if operation in ("connection_count_used", "cancel_moving"):
+            with pool._lock:
+                collect()
+        return original_used()
 
     def configure(*args, **kwargs):
         if operation == "maintenance_config":
@@ -624,6 +644,7 @@ def _finalizer_during_pool_lock(
             patch("redis.connection.MaintNotificationsConnectionHandler", configure),
             patch.object(pool, "connection_class", create),
             patch.object(pool, "_get_free_connections", free_connections),
+            patch.object(pool, "_get_in_use_connections", used_connections),
         ):
             reader.start()
             assert draining.wait(3), "peer did not start draining the idle owner"
@@ -635,6 +656,16 @@ def _finalizer_during_pool_lock(
                 assert released not in pool._available_connections
                 assert not released._in_use
                 assert pool._created_connections == 1
+            elif operation in ("connection_count_free", "connection_count_used"):
+                counts = pool.get_connection_count()
+                assert [count for count, _ in counts] == [1, 1]
+                pool.release(released)
+            elif operation == "cancel_moving":
+                pool.close()
+                assert not reconnect_handler._pending_handoffs
+                assert not reconnect_handler._scheduled_timers
+                assert pool.connection_kwargs["host"] == host
+                assert pool.connection_kwargs["socket_timeout"] == 1
             elif operation == "topology_cleanup":
                 NodesManager._free_pool_connections(pool)
             elif operation in ("blocking_snapshot", "blocking_maintenance_snapshot"):
@@ -756,6 +787,27 @@ def _finalizer_during_pool_lock(
 @pytest.mark.parametrize("automatic", [False, True])
 @pytest.mark.parametrize("operation", ["maintenance_config", "checkout"])
 def test_finalizer_during_pool_configuration_and_checkout(
+    request, pool_class, parser_class, automatic, operation
+):
+    _run_bounded(
+        _finalizer_during_pool_lock,
+        (
+            request.config.getoption("--redis-url"),
+            parser_class,
+            automatic,
+            operation,
+            pool_class,
+        ),
+    )
+
+
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@pytest.mark.parametrize("parser_class", PARSERS)
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize(
+    "operation", ["connection_count_free", "connection_count_used", "cancel_moving"]
+)
+def test_finalizer_during_metrics_and_moving_cancellation(
     request, pool_class, parser_class, automatic, operation
 ):
     _run_bounded(

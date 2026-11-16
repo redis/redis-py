@@ -1198,7 +1198,15 @@ class MaintNotificationsPoolHandler:
         timer.start()
 
     def cancel_scheduled_tasks(self) -> None:
-        with _defer_maintenance_events(), self._lock:
+        # MOVING cleanup snapshots can finalize a pool-owning client. Keep
+        # its cached teardown outside this outer handler lock as for timers.
+        with (
+            _defer_maintenance_events(),
+            self.pool._defer_cached_disconnects()
+            if self.pool.cache is not None
+            else nullcontext(),
+            self._lock,
+        ):
             if not self._scheduled_timers and not self._pending_handoffs:
                 return
             timers = tuple(self._scheduled_timers)

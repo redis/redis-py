@@ -5054,10 +5054,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             ConnectionState.USED.value
         )
 
-        return [
-            (len(self._get_free_connections()), free_connections_attributes),
-            (len(self._get_in_use_connections()), in_use_connections_attributes),
-        ]
+        # Snapshot allocation can finalize a pool-owning client. Finish that
+        # cached teardown only after the snapshot methods release their locks.
+        with (
+            self._defer_cached_disconnects()
+            if self.cache is not None
+            else nullcontext()
+        ):
+            return [
+                (len(self._get_free_connections()), free_connections_attributes),
+                (len(self._get_in_use_connections()), in_use_connections_attributes),
+            ]
 
 
 class BlockingConnectionPool(ConnectionPool):
