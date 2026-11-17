@@ -13,7 +13,11 @@ from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider
-from tests.conftest import REDIS_INFO, get_credential_provider
+from tests.conftest import (
+    REDIS_INFO,
+    get_credential_provider,
+    stop_credential_provider,
+)
 
 
 async def _get_info(redis_url):
@@ -231,7 +235,9 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 @pytest_asyncio.fixture()
 async def credential_provider(request) -> CredentialProvider:
-    return get_credential_provider(request)
+    provider = get_credential_provider(request)
+    yield provider
+    stop_credential_provider(provider)
 
 
 async def wait_for_command(

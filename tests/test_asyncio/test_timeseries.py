@@ -1108,16 +1108,26 @@ async def test_info(decoded_r: redis.Redis):
     "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
 )
 async def test_info_without_decode_responses(create_redis, stack_url, protocol):
-    kwargs = {"decode_responses": False, "url": stack_url}
-    if protocol is not SENTINEL:
-        kwargs["protocol"] = protocol
-    r = await create_redis(**kwargs)
-    await r.ts().create(KEY1, retention_msecs=5, labels={"currentLabel": "currentData"})
-    await r.ts().add(KEY1, 1, 1.5)
-    info = await r.ts().info(KEY1)
-    assert info.total_samples == 1
-    assert info.retention_msecs == 5
-    assert info.labels == {"currentLabel": "currentData"}
+    if protocol is SENTINEL:
+        # Built directly, because create_redis applies --protocol. An explicit
+        # protocol=3 returns the native RESP3 dict, not the default TSInfo.
+        r = redis.Redis.from_url(stack_url, decode_responses=False)
+        await r.flushdb()
+    else:
+        r = await create_redis(decode_responses=False, url=stack_url, protocol=protocol)
+    try:
+        await r.ts().create(
+            KEY1, retention_msecs=5, labels={"currentLabel": "currentData"}
+        )
+        await r.ts().add(KEY1, 1, 1.5)
+        info = await r.ts().info(KEY1)
+        assert info.total_samples == 1
+        assert info.retention_msecs == 5
+        assert info.labels == {"currentLabel": "currentData"}
+    finally:
+        if protocol is SENTINEL:
+            await r.flushdb()
+            await r.aclose()
 
 
 @pytest.mark.redismod
