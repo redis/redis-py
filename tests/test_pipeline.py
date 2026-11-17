@@ -11,7 +11,11 @@ from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 
-from .conftest import skip_if_server_version_lt, wait_for_command
+from .conftest import (
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+    wait_for_command,
+)
 
 
 class TestPipeline:
@@ -64,6 +68,7 @@ class TestPipeline:
             assert r["c"] == b"c1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_info_in_transaction(self, decoded_r):
         with decoded_r.pipeline() as pipe:
             pipe.info("server")
@@ -71,6 +76,7 @@ class TestPipeline:
             assert "redis_version" in info
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_info_in_transaction_with_custom_callback(self, decoded_r):
         decoded_r.set_response_callback("INFO", lambda response, **options: response)
         with decoded_r.pipeline() as pipe:
@@ -431,6 +437,7 @@ class TestPipeline:
         assert r[key] == b"1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     def test_exec_error_in_pipeline_redacts_credentials(self, r, request):
         request.addfinalizer(lambda: r.acl_deluser("redis-py-user"))
@@ -1046,6 +1053,10 @@ class TestPipelineRetryChecker:
 
         def disconnect(self, *args, **kwargs):
             self.disconnected = True
+
+        def extract_connection_details(self):
+            # Read by the failure debug log, which runs with DEBUG logging on.
+            return f"{self.host}:{self.port}"
 
     class FakeConnectionPool:
         def __init__(self, connection):
