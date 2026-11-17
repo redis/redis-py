@@ -251,6 +251,35 @@ class TestPubSubCloseServerCleanup:
             [(channel.encode(), 0)],
         )
 
+    @pytest.mark.fixed_client
+    def test_close_during_read_does_not_reconnect_released_connection(self):
+        # A reader blocked in get_message() gets EOF when another thread
+        # closes the PubSub. Its retry must not reconnect and read from the
+        # connection close() has already returned to the pool.
+        pool = mock.MagicMock()
+        conn = mock.MagicMock()
+        conn.retry = Retry(NoBackoff(), 3)
+        conn.health_check_interval = 0
+        conn.should_reconnect.return_value = False
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        p.connection = conn
+
+        def closed_during_read(*args, **kwargs):
+            p.close()
+            raise ConnectionError("Connection closed by server.")
+
+        conn.read_response.side_effect = closed_during_read
+
+        with pytest.raises(ConnectionError):
+            p.parse_response(block=True)
+
+        pool.release.assert_called_once_with(conn)
+        assert conn.read_response.call_count == 1
+        assert conn.connect.call_count == 1
+
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("7.0.0")
     def test_close_while_ssubscribed_removes_shardnumsub_entry(self, r):

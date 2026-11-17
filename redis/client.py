@@ -1385,6 +1385,11 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
+        if conn is not self.connection:
+            # reset() released this connection to the pool while it was being
+            # read from, so it may already serve another caller. Reconnecting
+            # it here would read that caller's replies as pubsub messages.
+            raise error or ConnectionError("PubSub connection was released")
         if error and failure_count <= conn.retry.get_retries():
             if command_name:
                 record_operation_duration(
