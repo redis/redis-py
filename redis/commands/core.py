@@ -7882,9 +7882,10 @@ class StreamCommands(CommandsProtocol):
         Can't be specified with minid.
         approximate: actual stream length may be slightly more than maxlen
         nomkstream: When set to true, do not make a stream
-        minid: the minimum id in the stream to query.
+        minid: evict entries with IDs lower than this ID.
         Can't be specified with maxlen.
-        limit: specifies the maximum number of entries to retrieve
+        limit: the maximum number of entries to evict in one call. Only
+        valid with approximate trimming.
         ref_policy: optional reference policy for consumer groups when trimming:
             - KEEPREF (default): When trimming, preserves references in consumer groups' PEL
             - DELREF: When trimming, removes all references from consumer groups' PEL
@@ -8094,7 +8095,7 @@ class StreamCommands(CommandsProtocol):
 
         try:
             if int(count) < 0:
-                raise DataError("XPENDING count must be a integer >= 0")
+                raise DataError("XAUTOCLAIM count must be a integer >= 0")
             pieces.extend([b"COUNT", count])
         except TypeError:
             pass
@@ -9074,9 +9075,10 @@ class StreamCommands(CommandsProtocol):
         maxlen: truncate old stream messages beyond this size
         Can't be specified with minid.
         approximate: actual stream length may be slightly more than maxlen
-        minid: the minimum id in the stream to query
+        minid: evict entries with IDs lower than this ID.
         Can't be specified with maxlen.
-        limit: specifies the maximum number of entries to retrieve
+        limit: the maximum number of entries to evict in one call. Only
+        valid with approximate trimming.
         ref_policy: optional reference policy for consumer groups:
             - KEEPREF (default): Trims entries but preserves references in consumer groups' PEL
             - DELREF: Trims entries and removes all references from consumer groups' PEL
