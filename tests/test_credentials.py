@@ -68,16 +68,17 @@ def r_entra(request, endpoint):
     if credential_provider is not None:
         credential_provider = get_credential_provider(request)
 
-    with _get_client(
-        redis.Redis,
-        request,
-        credential_provider=credential_provider,
-        single_connection_client=single_connection,
-        from_url=endpoint,
-    ) as client:
-        yield client
-
-    stop_credential_provider(credential_provider)
+    try:
+        with _get_client(
+            redis.Redis,
+            request,
+            credential_provider=credential_provider,
+            single_connection_client=single_connection,
+            from_url=endpoint,
+        ) as client:
+            yield client
+    finally:
+        stop_credential_provider(credential_provider)
 
 
 class NoPassCredProvider(CredentialProvider):

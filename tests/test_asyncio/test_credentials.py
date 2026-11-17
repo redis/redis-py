@@ -68,8 +68,10 @@ async def r_credential(request, create_redis, endpoint):
         "credential_provider": credential_provider,
     }
 
-    yield await create_redis(url=endpoint, **kwargs)
-    stop_credential_provider(credential_provider)
+    try:
+        yield await create_redis(url=endpoint, **kwargs)
+    finally:
+        stop_credential_provider(credential_provider)
 
 
 @pytest_asyncio.fixture()
