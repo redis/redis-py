@@ -161,10 +161,17 @@ class SentinelConnectionPool(ConnectionPool):
         self.slave_rr_counter = None
 
     def owns_connection(self, connection: Connection):
-        check = not self.is_master or (
+        return not self.is_master or (
             self.is_master and self.master_address == (connection.host, connection.port)
         )
-        return check and super().owns_connection(connection)
+
+    async def release(self, connection: Connection):
+        if not self.owns_connection(connection):
+            # Still connected to a master that Sentinel no longer reports. It was
+            # in use when get_master_address() disconnected the idle connections,
+            # so disconnect it now and let its next use ask Sentinel again.
+            connection.mark_for_reconnect()
+        await super().release(connection)
 
     async def get_master_address(self):
         master_address = await self.sentinel_manager.discover_master(self.service_name)
