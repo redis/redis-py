@@ -754,6 +754,7 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         "_buffer_cutoff",
         "_lock",
         "_socket_read_size",
+        "otel_config",
         "__dict__",
     )
 
