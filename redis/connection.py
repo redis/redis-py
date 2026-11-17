@@ -4565,6 +4565,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             error, AuthenticationError
                         ),
                     )
+                    # This AUTH supersedes a token an earlier release left
+                    # pending. Sending that one later would fail once expired.
+                    conn.set_re_auth_token(None)
                 except AuthenticationError:
                     raise
                 except Exception as e:
@@ -4955,6 +4958,14 @@ class BlockingConnectionPool(ConnectionPool):
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
                 )
+            except Exception:
+                # Don't raise: the connection goes back in the queue below, and
+                # a caller still holding it (Pipeline.reset() drops it only
+                # after release() returns) would release it again and queue it
+                # twice. Drop the token and the socket instead, so the next
+                # checkout reconnects with fresh credentials.
+                connection.set_re_auth_token(None)
+                connection.disconnect()
             finally:
                 try:
                     self.pool.put_nowait(connection)

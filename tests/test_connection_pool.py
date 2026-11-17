@@ -73,6 +73,9 @@ class DummyConnection:
     def re_auth(self):
         pass
 
+    def set_re_auth_token(self, token):
+        pass
+
 
 class ConstructionFailure(Exception):
     """Raised by ``failing_connection_class`` instead of building a connection."""
@@ -453,13 +456,65 @@ class TestBlockingConnectionPool:
         connection.re_auth = mock.Mock(
             side_effect=[redis.ConnectionError("broken"), None]
         )
+        connection.set_re_auth_token = mock.Mock()
 
-        with pytest.raises(redis.ConnectionError, match="broken"):
-            pool.release(connection)
+        pool.release(connection)
 
+        # The failed token is dropped with the socket, so the checkout
+        # reconnects instead of retrying it.
+        connection.set_re_auth_token.assert_called_once_with(None)
+        assert connection._sock is None
         assert pool.get_connection() is connection
-        # The token is still pending, so the checkout tries it again.
-        assert connection.re_auth.call_count == 2
+
+    @pytest.mark.fixed_client
+    def test_failed_re_auth_on_release_does_not_queue_twice(self, master_host):
+        with redis.BlockingConnectionPool(
+            max_connections=2, timeout=0.05, host=master_host[0], port=master_host[1]
+        ) as pool:
+            r = redis.Redis(connection_pool=pool)
+            # Keep the other connection out so the queue has room for a duplicate.
+            pool.get_connection()
+            token = mock.Mock()
+            # The server rejects AUTH for a user that doesn't exist.
+            token.try_get.return_value = "re-auth-test-no-such-user"
+            token.get_value.return_value = "token"
+
+            with r.pipeline() as pipe:
+                pipe.watch("key")
+                connection = pipe.connection
+                pool.re_auth_callback(token)
+                # Release runs the deferred AUTH, which fails. __exit__()
+                # then resets the pipeline again.
+                pipe.reset()
+
+            assert pool.get_connection() is connection
+            with pytest.raises(redis.ConnectionError, match="No connection available"):
+                pool.get_connection()
+
+    @pytest.mark.fixed_client
+    def test_idle_re_auth_clears_an_older_pending_token(self, master_host):
+        with redis.BlockingConnectionPool(
+            max_connections=1, host=master_host[0], port=master_host[1]
+        ) as pool:
+            connection = pool.get_connection()
+            pool.release(connection)
+            # Idle with a token pending, as a release during an earlier
+            # rotation leaves it. That token has since expired.
+            expired = mock.Mock()
+            expired.try_get.return_value = "re-auth-test-no-such-user"
+            expired.get_value.return_value = "expired"
+            connection.set_re_auth_token(expired)
+            token = mock.Mock()
+            token.try_get.return_value = "default"
+            token.get_value.return_value = "token"
+
+            with mock.patch.object(
+                connection, "send_command", wraps=connection.send_command
+            ) as send_command:
+                pool.re_auth_callback(token)
+                assert pool.get_connection() is connection
+
+            send_command.assert_called_once_with("AUTH", "default", "token")
 
     @pytest.mark.fixed_client
     def test_set_retry_updates_pooled_connections(self):
