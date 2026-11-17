@@ -620,6 +620,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             )
 
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
 
         if (cache_config or cache) and not check_protocol_version(
             self.connection_pool.get_protocol(), 3
@@ -663,10 +664,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration of the connection pool."""
-        return getattr(self.connection_pool, "otel_config", None)
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     @property
     def himport_registry(self) -> HImportRegistry:
@@ -1255,6 +1255,7 @@ class PubSub:
         event_dispatcher: Optional["EventDispatcher"] = None,
     ):
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
@@ -1280,10 +1281,9 @@ class PubSub:
             _set_info_logger()
         self.reset()
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration of the connection pool."""
-        return getattr(self.connection_pool, "otel_config", None)
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     def __enter__(self) -> Self:
         return self
@@ -2019,6 +2019,7 @@ class Pipeline(Redis):
         shard_hint,
     ):
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.connection: Optional[Connection] = None
         self.response_callbacks = response_callbacks
         self.transaction = transaction

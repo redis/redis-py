@@ -8,6 +8,7 @@ built-in < global < per-client.
 """
 
 from types import SimpleNamespace
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,7 +18,13 @@ from redis.connection import ConnectionPool
 from redis.multidb.config import DatabaseConfig, MultiDbConfig
 from redis.observability import recorder
 from redis.observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_GEOFAILOVER_FAIL_FROM,
     DB_SYSTEM,
+    ERROR_TYPE,
+    REDIS_CLIENT_PUBSUB_CHANNEL,
+    REDIS_CLIENT_STREAM_NAME,
+    SERVER_ADDRESS,
     ConnectionState,
     CSCReason,
     CSCResult,
@@ -33,6 +40,14 @@ GLOBAL_ATTRIBUTES = {"env": "prod", "shared": "global"}
 CLIENT_ATTRIBUTES = {"tenant": "a", "shared": "client", DB_SYSTEM: "other"}
 
 
+MARKER = "custom-attributes-test"
+MARKER_VALUE = 987654321
+
+
+class _MarkerError(Exception):
+    pass
+
+
 def _database(host):
     database = MagicMock()
     database.client.get_connection_kwargs.return_value = {"host": host, "port": 6379}
@@ -40,54 +55,136 @@ def _database(host):
     return database
 
 
-_POOL = SimpleNamespace(connection_kwargs={"host": "localhost", "port": 6379})
+_POOL = SimpleNamespace(connection_kwargs={"host": MARKER, "port": 6379})
 
-# Every recorder function that records a metric, with the arguments to call it with
+
+class RecordCall(NamedTuple):
+    """
+    A recorder function call and how to find the data point it records.
+
+    The collector under test is installed process-wide, so anything still
+    running from earlier tests records to it too. A test therefore looks only
+    at the instrument of its metric, and there only at the data points
+    carrying the marker attributes (and the marker value, for metrics with no
+    attribute a test can set).
+    """
+
+    metric: str
+    kwargs: dict
+    marker: dict
+    value: Any = None
+
+
+# Every recorder function that records a metric
 RECORD_CALLS = {
-    "record_operation_duration": dict(
-        command_name="GET",
-        duration_seconds=0.1,
-        server_address="localhost",
-        server_port=6379,
+    "record_operation_duration": RecordCall(
+        "db.client.operation.duration",
+        dict(
+            command_name="GET",
+            duration_seconds=0.1,
+            server_address=MARKER,
+            server_port=6379,
+        ),
+        {SERVER_ADDRESS: MARKER},
     ),
-    "record_connection_create_time": dict(connection_pool=_POOL, duration_seconds=0.1),
-    "record_connection_count": dict(
-        pool_name="pool", connection_state=ConnectionState.IDLE
+    "record_connection_create_time": RecordCall(
+        "db.client.connection.create_time",
+        dict(connection_pool=_POOL, duration_seconds=0.1),
+        {DB_CLIENT_CONNECTION_POOL_NAME: f"{MARKER}:6379"},
     ),
-    "record_connection_timeout": dict(pool_name="pool"),
-    "record_connection_wait_time": dict(pool_name="pool", duration_seconds=0.1),
-    "record_connection_closed": dict(close_reason=CloseReason.ERROR),
-    "record_connection_relaxed_timeout": dict(
-        connection_name="pool", maint_notification="MIGRATING", relaxed=True
+    "record_connection_count": RecordCall(
+        "db.client.connection.count",
+        dict(pool_name=MARKER, connection_state=ConnectionState.IDLE),
+        {DB_CLIENT_CONNECTION_POOL_NAME: MARKER},
     ),
-    "record_connection_handoff": dict(pool_name="pool"),
-    "record_error_count": dict(
-        server_address="localhost",
-        server_port=6379,
-        network_peer_address="localhost",
-        network_peer_port=6379,
-        error_type=ValueError("boom"),
-        retry_attempts=0,
+    "record_connection_timeout": RecordCall(
+        "db.client.connection.timeouts",
+        dict(pool_name=MARKER),
+        {DB_CLIENT_CONNECTION_POOL_NAME: MARKER},
     ),
-    "record_pubsub_message": dict(direction=PubSubDirection.PUBLISH, channel="ch"),
-    "record_streaming_lag": dict(lag_seconds=0.1, stream_name="stream"),
-    "record_streaming_lag_from_response": dict(
-        response={"stream": [[("1-0", {"field": "value"})]]}
+    "record_connection_wait_time": RecordCall(
+        "db.client.connection.wait_time",
+        dict(pool_name=MARKER, duration_seconds=0.1),
+        {DB_CLIENT_CONNECTION_POOL_NAME: MARKER},
     ),
-    "record_maint_notification_count": dict(
-        server_address="localhost",
-        server_port=6379,
-        network_peer_address="localhost",
-        network_peer_port=6379,
-        maint_notification="MIGRATING",
+    "record_connection_closed": RecordCall(
+        "redis.client.connection.closed",
+        dict(close_reason=CloseReason.ERROR, error_type=_MarkerError("boom")),
+        {ERROR_TYPE: "_MarkerError"},
     ),
-    "record_csc_request": dict(result=CSCResult.HIT),
-    "record_csc_eviction": dict(count=1, reason=CSCReason.FULL),
-    "record_csc_network_saved": dict(bytes_saved=10),
-    "record_geo_failover": dict(
-        fail_from=_database("primary"),
-        fail_to=_database("secondary"),
-        reason=GeoFailoverReason.AUTOMATIC,
+    "record_connection_relaxed_timeout": RecordCall(
+        "redis.client.connection.relaxed_timeout",
+        dict(connection_name=MARKER, maint_notification="MIGRATING", relaxed=True),
+        {DB_CLIENT_CONNECTION_POOL_NAME: MARKER},
+    ),
+    "record_connection_handoff": RecordCall(
+        "redis.client.connection.handoff",
+        dict(pool_name=MARKER),
+        {DB_CLIENT_CONNECTION_POOL_NAME: MARKER},
+    ),
+    "record_error_count": RecordCall(
+        "redis.client.errors",
+        dict(
+            server_address=MARKER,
+            server_port=6379,
+            network_peer_address=MARKER,
+            network_peer_port=6379,
+            error_type=_MarkerError("boom"),
+            retry_attempts=0,
+        ),
+        {SERVER_ADDRESS: MARKER},
+    ),
+    "record_pubsub_message": RecordCall(
+        "redis.client.pubsub.messages",
+        dict(direction=PubSubDirection.PUBLISH, channel=MARKER),
+        {REDIS_CLIENT_PUBSUB_CHANNEL: MARKER},
+    ),
+    "record_streaming_lag": RecordCall(
+        "redis.client.stream.lag",
+        dict(lag_seconds=0.1, stream_name=MARKER),
+        {REDIS_CLIENT_STREAM_NAME: MARKER},
+    ),
+    "record_streaming_lag_from_response": RecordCall(
+        "redis.client.stream.lag",
+        dict(response={MARKER: [[("1-0", {"field": "value"})]]}),
+        {REDIS_CLIENT_STREAM_NAME: MARKER},
+    ),
+    "record_maint_notification_count": RecordCall(
+        "redis.client.maintenance.notifications",
+        dict(
+            server_address=MARKER,
+            server_port=6379,
+            network_peer_address=MARKER,
+            network_peer_port=6379,
+            maint_notification="MIGRATING",
+        ),
+        {SERVER_ADDRESS: MARKER},
+    ),
+    # The CSC metrics have no attribute a test can set. The counters that take
+    # a value are found by it; a request is found by its instrument alone.
+    "record_csc_request": RecordCall(
+        "redis.client.csc.requests", dict(result=CSCResult.HIT), {}
+    ),
+    "record_csc_eviction": RecordCall(
+        "redis.client.csc.evictions",
+        dict(count=MARKER_VALUE, reason=CSCReason.FULL),
+        {},
+        MARKER_VALUE,
+    ),
+    "record_csc_network_saved": RecordCall(
+        "redis.client.csc.network_saved",
+        dict(bytes_saved=MARKER_VALUE),
+        {},
+        MARKER_VALUE,
+    ),
+    "record_geo_failover": RecordCall(
+        "redis.client.geofailover.failovers",
+        dict(
+            fail_from=_database(MARKER),
+            fail_to=_database("secondary"),
+            reason=GeoFailoverReason.AUTOMATIC,
+        ),
+        {DB_CLIENT_GEOFAILOVER_FAIL_FROM: f"{MARKER}:6379/1.0"},
     ),
 }
 
@@ -113,12 +210,14 @@ def _install_collector(config):
         return RedisMetricsCollector(meter, config), instruments
 
 
-def _recorded_attributes(instruments):
-    """The attributes of every data point recorded on the mocked instruments."""
+def _recorded_attributes(instruments, record_call):
+    """The attributes of the data points the given call recorded."""
+    instrument = instruments[record_call.metric]
     return [
         call.kwargs["attributes"]
-        for instrument in instruments.values()
         for call in instrument.add.call_args_list + instrument.record.call_args_list
+        if record_call.marker.items() <= call.kwargs["attributes"].items()
+        and (record_call.value is None or call.args[0] == record_call.value)
     ]
 
 
@@ -188,9 +287,9 @@ class TestCustomAttributesOnMetrics:
             )
         )
 
-        getattr(recorder, name)(**RECORD_CALLS[name])
+        getattr(recorder, name)(**RECORD_CALLS[name].kwargs)
 
-        recorded = _recorded_attributes(instruments)
+        recorded = _recorded_attributes(instruments, RECORD_CALLS[name])
         assert len(recorded) == 1
         assert recorded[0]["env"] == "prod"
         assert recorded[0]["shared"] == "global"
@@ -208,11 +307,11 @@ class TestCustomAttributesOnMetrics:
         )
 
         getattr(recorder, name)(
-            **RECORD_CALLS[name],
+            **RECORD_CALLS[name].kwargs,
             otel_config=OTelConfig(custom_attributes=CLIENT_ATTRIBUTES),
         )
 
-        recorded = _recorded_attributes(instruments)
+        recorded = _recorded_attributes(instruments, RECORD_CALLS[name])
         assert len(recorded) == 1
         assert recorded[0]["env"] == "prod"
         assert recorded[0]["tenant"] == "a"
@@ -224,11 +323,11 @@ class TestCustomAttributesOnMetrics:
         instruments = install_collector(OTelConfig(metric_groups=list(MetricGroup)))
 
         getattr(recorder, name)(
-            **RECORD_CALLS[name],
+            **RECORD_CALLS[name].kwargs,
             otel_config=OTelConfig(custom_attributes={"tenant": "a"}),
         )
 
-        recorded = _recorded_attributes(instruments)
+        recorded = _recorded_attributes(instruments, RECORD_CALLS[name])
         assert len(recorded) == 1
         assert recorded[0]["tenant"] == "a"
         assert recorded[0][DB_SYSTEM] == "redis"
@@ -241,13 +340,13 @@ class TestCustomAttributesOnMetrics:
         self, install_collector, name, otel_config
     ):
         instruments = install_collector(OTelConfig(metric_groups=list(MetricGroup)))
-        getattr(recorder, name)(**RECORD_CALLS[name])
-        expected = _recorded_attributes(instruments)
+        getattr(recorder, name)(**RECORD_CALLS[name].kwargs)
+        expected = _recorded_attributes(instruments, RECORD_CALLS[name])
 
         instruments = install_collector(OTelConfig(metric_groups=list(MetricGroup)))
-        getattr(recorder, name)(**RECORD_CALLS[name], otel_config=otel_config)
+        getattr(recorder, name)(**RECORD_CALLS[name].kwargs, otel_config=otel_config)
 
-        assert _recorded_attributes(instruments) == expected
+        assert _recorded_attributes(instruments, RECORD_CALLS[name]) == expected
 
     def test_a_config_of_another_type_is_ignored(self, install_collector):
         instruments = install_collector(
@@ -256,9 +355,11 @@ class TestCustomAttributesOnMetrics:
             )
         )
 
-        recorder.record_connection_handoff(pool_name="pool", otel_config=object())
+        recorder.record_connection_handoff(pool_name=MARKER, otel_config=object())
 
-        recorded = _recorded_attributes(instruments)
+        recorded = _recorded_attributes(
+            instruments, RECORD_CALLS["record_connection_handoff"]
+        )
         assert len(recorded) == 1
         assert recorded[0]["env"] == "prod"
 
@@ -375,6 +476,9 @@ class TestOTelConfigPropagation:
 
         for client in (with_config, without_config):
             connection = MagicMock()
+            connection.host = MARKER
+            connection.port = 6379
+            connection.db = 0
             connection.should_reconnect.return_value = False
             connection.retry.call_with_retry = lambda do, fail, **kwargs: do()
             with (
@@ -386,7 +490,9 @@ class TestOTelConfigPropagation:
             ):
                 client.execute_command("SET", "key", "value")
 
-        first, second = _recorded_attributes(instruments)
+        first, second = _recorded_attributes(
+            instruments, RECORD_CALLS["record_operation_duration"]
+        )
         assert first["tenant"] == "a"
         assert first["shared"] == "client"
         assert second["shared"] == "global"

@@ -756,6 +756,7 @@ class RedisCluster(
         self._himport_registry = HImportRegistry()
         kwargs["himport_registry"] = self._himport_registry
 
+        self.otel_config = otel_config
         if otel_config is not None:
             # A connection kwarg, so it reaches every node's connections
             kwargs["otel_config"] = otel_config
@@ -1675,10 +1676,8 @@ class RedisCluster(
             )
         return nodes
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration shared with every node."""
-        return self.nodes_manager.connection_kwargs.get("otel_config")
+    #: The per-client OpenTelemetry configuration shared with every node.
+    otel_config: OTelConfig | None = None
 
     async def _record_error_metric(
         self,
@@ -3652,6 +3651,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self, client: RedisCluster, transaction: Optional[bool] = None
     ) -> None:
         self.cluster_client = client
+        self.otel_config = client.otel_config
         self._transaction = transaction
         self._execution_strategy: ExecutionStrategy = (
             PipelineStrategy(self)
@@ -3664,10 +3664,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """Get the nodes manager from the cluster client."""
         return self.cluster_client.nodes_manager
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration of the cluster client."""
-        return self.cluster_client.otel_config
+    #: The per-client OpenTelemetry configuration of the cluster client.
+    otel_config: OTelConfig | None = None
 
     def get_connection_kwargs(self) -> Dict[str, Optional[Any]]:
         """Get the connection kwargs from the cluster client."""
@@ -4340,7 +4338,7 @@ class PipelineStrategy(AbstractStrategy):
                 server_port=node.port,
                 db_namespace=str(db) if db is not None else None,
                 error=node_error,
-                otel_config=self._pipe.cluster_client.otel_config,
+                otel_config=self._pipe.otel_config,
             )
 
         if any(errors):
@@ -4820,7 +4818,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_address=connection.host,
                 server_port=connection.port,
                 db_namespace=str(connection.db),
-                otel_config=self._pipe.cluster_client.otel_config,
+                otel_config=self._pipe.otel_config,
             )
 
             return response
@@ -4833,7 +4831,7 @@ class TransactionStrategy(AbstractStrategy):
                 server_port=connection.port,
                 db_namespace=str(connection.db),
                 error=e,
-                otel_config=self._pipe.cluster_client.otel_config,
+                otel_config=self._pipe.otel_config,
             )
             raise
 
@@ -4893,7 +4891,7 @@ class TransactionStrategy(AbstractStrategy):
                 error_type=error,
                 retry_attempts=failure_count,
                 is_internal=True,
-                otel_config=self._pipe.cluster_client.otel_config,
+                otel_config=self._pipe.otel_config,
             )
 
         # WATCH is requested before the first attempt, but only a reply
@@ -4968,7 +4966,7 @@ class TransactionStrategy(AbstractStrategy):
                     server_port=self._transaction_connection.port,
                     db_namespace=str(self._transaction_connection.db),
                     error=r,
-                    otel_config=self._pipe.cluster_client.otel_config,
+                    otel_config=self._pipe.otel_config,
                 )
 
                 raise r
@@ -5152,7 +5150,7 @@ class TransactionStrategy(AbstractStrategy):
             server_address=connection.host,
             server_port=connection.port,
             db_namespace=str(connection.db),
-            otel_config=self._pipe.cluster_client.otel_config,
+            otel_config=self._pipe.otel_config,
         )
 
         return data
@@ -6612,6 +6610,7 @@ class ClusterPubSub(PubSub):
                     node = self.cluster.get_random_node()
                 self.node = node
                 self.connection_pool = _ClusterNodePoolAdapter(node)
+                self.otel_config = self.connection_pool.otel_config
 
         # Now we have a connection_pool, use parent's execute_command
         return await super().execute_command(*args, **kwargs)

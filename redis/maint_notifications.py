@@ -1440,7 +1440,7 @@ class OSSMaintNotificationsHandler:
                                 pool_name=get_pool_name(
                                     current_node.redis_connection.connection_pool
                                 ),
-                                otel_config=current_node.redis_connection.connection_pool.otel_config,
+                                otel_config=self.cluster_client.otel_config,
                             )
                             handoff_recorded = True
                         else:
@@ -1465,7 +1465,7 @@ class OSSMaintNotificationsHandler:
                                     pool_name=get_pool_name(
                                         current_node.redis_connection.connection_pool
                                     ),
-                                    otel_config=current_node.redis_connection.connection_pool.otel_config,
+                                    otel_config=self.cluster_client.otel_config,
                                 )
 
                 # mark the notification as processed

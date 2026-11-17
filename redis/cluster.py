@@ -1432,6 +1432,7 @@ class RedisCluster(
         self.user_on_connect_func = kwargs.pop("redis_connect_func", None)
         kwargs.update({"redis_connect_func": self.on_connect})
         kwargs = cleanup_kwargs(**kwargs)
+        self.otel_config = otel_config
         if otel_config is not None:
             # A connection kwarg, so it reaches every node's pool and connections
             kwargs["otel_config"] = otel_config
@@ -2993,10 +2994,8 @@ class RedisCluster(
         )
         raise e
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration shared with every node."""
-        return self.nodes_manager.connection_kwargs.get("otel_config")
+    #: The per-client OpenTelemetry configuration shared with every node.
+    otel_config: OTelConfig | None = None
 
     def _record_command_metric(
         self,
@@ -4574,6 +4573,7 @@ class ClusterPubSub(PubSub):
                 self.node = node
                 redis_connection = self.cluster.get_redis_connection(node)
                 self.connection_pool = redis_connection.connection_pool
+                self.otel_config = getattr(self.connection_pool, "otel_config", None)
             self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
@@ -5681,6 +5681,7 @@ class ClusterPipeline(RedisCluster):
         """ """
         self.command_stack = []
         self.nodes_manager = nodes_manager
+        self.otel_config = nodes_manager.connection_kwargs.get("otel_config")
         # Share the parent cluster's HIMPORT registry (held on the NodesManager and
         # referenced by every node pool). The inherited himport_prepare/discard/
         # discard_all mutate this one object, so a fieldset declared on the pipeline is

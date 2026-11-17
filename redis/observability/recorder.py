@@ -30,7 +30,6 @@ from redis.observability.attributes import (
     GeoFailoverReason,
     PubSubDirection,
 )
-from redis.observability.config import OTelConfig
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import (
     _register_reset_hook,
@@ -42,6 +41,7 @@ from redis.utils import deprecated_args, deprecated_function, str_if_bytes
 if TYPE_CHECKING:
     from redis.connection import ConnectionPoolInterface
     from redis.multidb.database import SyncDatabase
+    from redis.observability.config import OTelConfig
 
 # Global metrics collector instance (lazy-initialized)
 _metrics_collector: Optional[RedisMetricsCollector] = None
@@ -810,12 +810,7 @@ def register_csc_items_callback(
 
     def csc_items_callback():
         attributes = AttributeBuilder.build_csc_attributes(pool_name=pool_name)
-        # Same precedence as RedisMetricsCollector._add_custom_attributes()
-        config = _get_config()
-        if config is not None and config.custom_attributes:
-            attributes.update(config.custom_attributes)
-        if isinstance(otel_config, OTelConfig) and otel_config.custom_attributes:
-            attributes.update(otel_config.custom_attributes)
+        collector._add_custom_attributes(attributes, otel_config)
         return [Observation(callback(), attributes=attributes)]
 
     try:

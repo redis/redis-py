@@ -543,6 +543,7 @@ class Redis(
             )
 
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -603,10 +604,9 @@ class Redis(
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration of the connection pool."""
-        return getattr(self.connection_pool, "otel_config", None)
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     @property
     def himport_registry(self) -> HImportRegistry:
@@ -1269,6 +1269,7 @@ class PubSub:
         else:
             self._event_dispatcher = event_dispatcher
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
@@ -1298,10 +1299,9 @@ class PubSub:
         self.pending_unsubscribe_shard_channels = set()
         self._lock = asyncio.Lock()
 
-    @property
-    def otel_config(self) -> OTelConfig | None:
-        """The per-client OpenTelemetry configuration of the connection pool."""
-        return getattr(self.connection_pool, "otel_config", None)
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -2043,6 +2043,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         shard_hint: Optional[str],
     ):
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.connection = None
         self.response_callbacks = response_callbacks
         self.is_transaction = transaction
