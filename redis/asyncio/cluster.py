@@ -2550,6 +2550,24 @@ class ClusterNode:
                 )
             await connection.disconnect()
 
+    async def re_auth_pending(self, connection: Connection) -> None:
+        """
+        Send the AUTH a token rotation left pending on an in-use connection.
+
+        Called before the connection is used, only when a token is pending. A
+        connection that is not connected authenticates with the current
+        credentials when it connects, so it is not sent AUTH. The pending token
+        is cleared only if a newer rotation has not replaced it meanwhile.
+        """
+        token = connection._re_auth_token
+        if connection.is_connected:
+            await connection.send_command(
+                "AUTH", token.try_get("oid"), token.get_value()
+            )
+            await connection.read_response()
+        if connection._re_auth_token is token:
+            connection._re_auth_token = None
+
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
@@ -2700,6 +2718,8 @@ class ClusterNode:
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
+            if connection._re_auth_token is not None:
+                await self.re_auth_pending(connection)
 
             # HIMPORT SET is the one command whose wire form depends on
             # per-connection state: the fieldset must be PREPAREd on this
@@ -2782,6 +2802,8 @@ class ClusterNode:
         try:
             # Handle lazy disconnect for connections marked for reconnect
             await self.disconnect_if_needed(connection)
+            if connection._re_auth_token is not None:
+                await self.re_auth_pending(connection)
 
             try:
                 # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
@@ -2864,9 +2886,12 @@ class ClusterNode:
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
         # A connection in use now, including one taken from the free queue while
-        # another was re-authenticated, still holds the old credentials. It
-        # reconnects with the new ones once its current operation completes.
-        self.update_active_connections_for_reconnect()
+        # another was re-authenticated, still holds the old credentials. It is
+        # sent AUTH with the new token before its next use.
+        free_set = set(self._free)
+        for connection in self._connections:
+            if connection not in free_set:
+                connection.set_re_auth_token(token)
         if first_error is not None:
             raise first_error
 
@@ -4783,6 +4808,8 @@ class TransactionStrategy(AbstractStrategy):
         # reconnected if an earlier connection error marked it.
         if not self._watching or connection is not held_connection:
             await redis_node.disconnect_if_needed(connection)
+        if connection._re_auth_token is not None:
+            await redis_node.re_auth_pending(connection)
 
         # Start timing for observability
         start_time = time.monotonic()
@@ -5003,6 +5030,8 @@ class TransactionStrategy(AbstractStrategy):
         # reconnected if an earlier connection error marked it.
         if not self._watching or connection is not held_connection:
             await redis_node.disconnect_if_needed(connection)
+        if connection._re_auth_token is not None:
+            await redis_node.re_auth_pending(connection)
 
         # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
         # node's connection before the MULTI/EXEC block (session state, not
@@ -5244,6 +5273,8 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
     ) -> AbstractConnection:
         connection = self._node.acquire_connection()
         try:
+            if connection._re_auth_token is not None:
+                await self._node.re_auth_pending(connection)
             await connection.connect()
         except BaseException:
             # connect() may fail mid-handshake (e.g. after the TCP socket

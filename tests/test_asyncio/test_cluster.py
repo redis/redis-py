@@ -292,6 +292,7 @@ async def get_mocked_redis_client(
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection._resp2_fallback = False
+    connection._re_auth_token = None
     connection.is_connected = True
     connection.should_reconnect.return_value = False
     connection.read_response.return_value = response
@@ -304,6 +305,7 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
 def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection._resp2_fallback = False
+    connection._re_auth_token = None
     connection.is_connected = True
     connection.should_reconnect.return_value = False
     connection.read_response.side_effect = exc
@@ -2183,6 +2185,7 @@ class TestTopologyRefreshKeepsConnections:
         # No socket to leak: keeps ClusterNode.__del__ quiet
         is_connected = False
         _resp2_fallback = False
+        _re_auth_token = None
 
         def __init__(self) -> None:
             self.closed_by_server = True
@@ -7633,6 +7636,7 @@ class TestNodesManager:
                 self.response_ready = asyncio.Event()
                 self.send_called = asyncio.Event()
                 self._resp2_fallback = False
+                self._re_auth_token = None
 
             def pack_command(self, *args):
                 return b"packed"
@@ -7910,6 +7914,10 @@ class TestNodesManager:
         connection.retry = Retry(NoBackoff(), 0)
         connection.should_reconnect = mock.Mock(return_value=marked)
         connection.is_connected = connected
+        connection._re_auth_token = None
+        connection.set_re_auth_token.side_effect = lambda token: setattr(
+            connection, "_re_auth_token", token
+        )
         if error is not None:
             connection.send_command.side_effect = error
         return connection
@@ -7984,14 +7992,30 @@ class TestNodesManager:
         other.send_command.assert_not_awaited()
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
+    @staticmethod
+    def _re_auth_token(value: str):
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = value
+        return token
+
+    @staticmethod
+    def _auth_then_command_calls(connection) -> List[Any]:
+        return [
+            call
+            for call in connection.mock_calls
+            if call[0] in ("send_command", "read_response", "send_packed_command")
+        ]
+
     @pytest.mark.fixed_client
-    async def test_re_auth_marks_in_use_connections_for_reconnect(self) -> None:
+    async def test_re_auth_sends_auth_to_in_use_connections_on_next_use(
+        self,
+    ) -> None:
         """
         A connection that is in use while the token rotates, including one
         taken from the free queue while another is re-authenticated, is not
-        sent AUTH. It is marked for reconnect, so it authenticates with the
-        new credentials once its current operation completes instead of
-        staying on the old ones.
+        sent AUTH then and is not marked for reconnect. It is sent AUTH with
+        the new token before its next command.
         """
         node = ClusterNode(default_host, 7000)
         busy = self._re_auth_connection(False)
@@ -8005,19 +8029,68 @@ class TestNodesManager:
             assert node.acquire_connection() is taken
 
         idle.send_command.side_effect = take_free_connection
-        token = mock.Mock()
-        token.try_get.return_value = "oid"
-        token.get_value.return_value = "value"
+        token = self._re_auth_token("value")
 
         await node.re_auth_callback(token)
 
         idle.send_command.assert_awaited_once_with("AUTH", "oid", "value")
-        idle.mark_for_reconnect.assert_not_called()
-        busy.send_command.assert_not_called()
-        busy.mark_for_reconnect.assert_called_once()
-        taken.send_command.assert_not_called()
-        taken.mark_for_reconnect.assert_called_once()
-        assert list(node._free) == [idle]
+        assert idle._re_auth_token is None
+        for connection in (busy, taken):
+            connection.send_command.assert_not_called()
+            assert connection._re_auth_token is token
+
+        node.release(busy)
+        node.release(taken)
+        with mock.patch.object(
+            ClusterNode, "parse_response", new=mock.AsyncMock(return_value=b"v")
+        ):
+            for _ in range(3):
+                assert await node.execute_command("GET", "key") == b"v"
+
+        for connection in (busy, taken):
+            assert self._auth_then_command_calls(connection) == [
+                mock.call.send_command("AUTH", "oid", "value"),
+                mock.call.read_response(),
+                mock.call.send_packed_command(mock.ANY),
+            ]
+            assert connection._re_auth_token is None
+        idle.send_command.assert_awaited_once()
+        for connection in (busy, idle, taken):
+            connection.mark_for_reconnect.assert_not_called()
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_keeps_token_of_rotation_during_pending_auth(
+        self,
+    ) -> None:
+        """
+        A rotation that happens while a pending AUTH is in flight leaves its
+        newer token pending, so the next use sends AUTH with it.
+        """
+        node = ClusterNode(default_host, 7000)
+        busy = self._re_auth_connection(False)
+        node._connections.append(busy)
+        first = self._re_auth_token("first")
+        second = self._re_auth_token("second")
+        await node.re_auth_callback(first)
+
+        async def rotate_during_auth(*args):
+            if args[-1] == "first":
+                await node.re_auth_callback(second)
+
+        busy.send_command.side_effect = rotate_during_auth
+        node.release(busy)
+        with mock.patch.object(
+            ClusterNode, "parse_response", new=mock.AsyncMock(return_value=b"v")
+        ):
+            await node.execute_command("GET", "key")
+            assert busy._re_auth_token is second
+            await node.execute_command("GET", "key")
+
+        assert busy.send_command.await_args_list == [
+            mock.call("AUTH", "oid", "first"),
+            mock.call("AUTH", "oid", "second"),
+        ]
+        assert busy._re_auth_token is None
 
     @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(
@@ -8277,6 +8350,7 @@ class TestClusterNodeConnectionHandling:
             self.db = kwargs.get("db", 0)
             self.is_connected = False
             self.send_count = 0
+            self._re_auth_token = None
 
         def should_reconnect(self) -> bool:
             return False
@@ -8352,6 +8426,7 @@ class TestClusterNodeConnectionHandling:
         """
         node = ClusterNode(default_host, 7000)
         connection = mock.MagicMock(spec=Connection)
+        connection._re_auth_token = None
         connection.is_connected = False
         connection.should_reconnect.return_value = False
         connection.pack_commands.return_value = [b"packed"]
@@ -8390,6 +8465,7 @@ class TestClusterNodeConnectionHandling:
     def _mock_node_for_pipeline(count):
         node = ClusterNode(default_host, 7000)
         connection = mock.MagicMock(spec=Connection)
+        connection._re_auth_token = None
         connection.is_connected = False
         connection.should_reconnect.return_value = False
         connection.pack_commands.return_value = [b"packed"]
@@ -8650,6 +8726,7 @@ class TestClusterNodeConnectionHandling:
                 self.allow_disconnect = asyncio.Event()
                 self.disconnect_calls = 0
                 self._resp2_fallback = False
+                self._re_auth_token = None
 
             def pack_command(self, *args: Any) -> bytes:
                 return b"packed-command"
@@ -9531,6 +9608,7 @@ class TestClusterPipelineMocked:
             connection.should_reconnect.return_value = False
             connection.pack_command.return_value = [b"COMMAND GETKEYS"]
             connection._resp2_fallback = False
+            connection._re_auth_token = None
             connection.read_response.return_value = ["{tag}a", "{tag}b"]
 
             async def disconnect_caller(connection=connection):
@@ -9547,6 +9625,7 @@ class TestClusterPipelineMocked:
         def make_private_connection(**kwargs):
             connection = mock.AsyncMock(spec=Connection)
             connection._resp2_fallback = False
+            connection._re_auth_token = None
             connection.is_connected = False
             connection.should_reconnect.return_value = False
 
@@ -9889,6 +9968,7 @@ class TestClusterPipelineMocked:
         try:
             node = r.get_node(host=default_host, port=7000)
             connection = mock.MagicMock(spec=Connection)
+            connection._re_auth_token = None
             connection.should_reconnect.return_value = False
             connection.pack_commands.return_value = [b"packed"]
             # Stop the attempt right after the batch is packed
@@ -9938,6 +10018,7 @@ class TestClusterPipelineMocked:
         connection = mock.MagicMock(spec=Connection)
         connection.should_reconnect.return_value = False
         connection._resp2_fallback = False
+        connection._re_auth_token = None
         connection.host, connection.port, connection.db = default_host, 7000, 0
         stack = [PipelineCommand(i, "GET", "key") for i in range(count)]
         strategy = r.pipeline(transaction=True)._execution_strategy
