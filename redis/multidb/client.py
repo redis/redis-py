@@ -93,8 +93,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             auto_fallback_interval=self._auto_fallback_interval,
         )
         self.initialized = False
+        # One in-flight initialize(); concurrent callers wait for that run.
+        self._initialize_lock = threading.Lock()
         self._bg_scheduler = BackgroundScheduler()
         self._hc_lock = threading.Lock()
+        self._hc_tasks = []
         self._config = config
 
     def __del__(self):
@@ -109,45 +112,57 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
     def initialize(self):
         """
         Perform initialization of databases to define their initial state.
+
+        Concurrent callers share one in-flight run and wait for it. Once
+        initialization has finished, later calls return without repeating it.
         """
+        if self.initialized:
+            return
 
-        # Initial databases check to define initial state.
-        # Uses run_coro_sync to run in the shared background loop - this ensures
-        # connection pools created during initial health check remain valid for
-        # subsequent recurring health checks (they use the same event loop).
-        self._bg_scheduler.run_coro_sync(
-            self._perform_initial_health_check,
-            timeout=self._sync_health_check_timeout(
-                database for database, _ in self._databases
-            ),
-        )
+        with self._initialize_lock:
+            # The run we waited for may have finished already.
+            if self.initialized:
+                return
 
-        # Starts recurring health checks on the background.
-        # Uses run_recurring_coro which shares the same event loop as run_coro_sync
-        self._bg_scheduler.run_recurring_coro(
-            self._health_check_interval,
-            self._check_databases_health,
-        )
-
-        is_active_db_found = False
-
-        for database, weight in self._databases:
-            # Set on state changed callback for each circuit.
-            database.circuit.on_state_changed(self._on_circuit_state_change_callback)
-
-            # Set states according to a weights and circuit state
-            if database.circuit.state == CBState.CLOSED and not is_active_db_found:
-                # Directly set the active database during initialization
-                # without recording a geo failover metric
-                self.command_executor._active_database = database
-                is_active_db_found = True
-
-        if not is_active_db_found:
-            raise NoValidDatabaseException(
-                "Initial connection failed - no active database found"
+            # Initial databases check to define initial state.
+            # Uses run_coro_sync to run in the shared background loop - this ensures
+            # connection pools created during initial health check remain valid for
+            # subsequent recurring health checks (they use the same event loop).
+            self._bg_scheduler.run_coro_sync(
+                self._perform_initial_health_check,
+                timeout=self._sync_health_check_timeout(
+                    database for database, _ in self._databases
+                ),
             )
 
-        self.initialized = True
+            # Starts recurring health checks on the background.
+            # Uses run_recurring_coro which shares the same event loop as run_coro_sync
+            self._bg_scheduler.run_recurring_coro(
+                self._health_check_interval,
+                self._check_databases_health,
+            )
+
+            is_active_db_found = False
+
+            for database, weight in self._databases:
+                # Set on state changed callback for each circuit.
+                database.circuit.on_state_changed(
+                    self._on_circuit_state_change_callback
+                )
+
+                # Set states according to a weights and circuit state
+                if database.circuit.state == CBState.CLOSED and not is_active_db_found:
+                    # Directly set the active database during initialization
+                    # without recording a geo failover metric
+                    self.command_executor._active_database = database
+                    is_active_db_found = True
+
+            if not is_active_db_found:
+                raise NoValidDatabaseException(
+                    "Initial connection failed - no active database found"
+                )
+
+            self.initialized = True
 
     def get_connection_kwargs(self) -> Dict[str, Any]:
         """
@@ -469,18 +484,25 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Runs health checks against all databases.
         """
         task_to_db: dict[asyncio.Task, Database] = {}
+        # Map this round from hc_tasks. Another round can replace
+        # self._hc_tasks while this one is awaiting.
+        hc_tasks: list[asyncio.Task] = []
 
-        self._hc_tasks = []
         for database, _ in self._databases:
             task = asyncio.create_task(self._check_db_health(database))
             task_to_db[task] = database
-            self._hc_tasks.append(task)
+            hc_tasks.append(task)
 
-        results = await asyncio.gather(*self._hc_tasks, return_exceptions=True)
+        # Keep unfinished tasks from another round, and record this round
+        # without dropping those tasks.
+        self._hc_tasks = [task for task in self._hc_tasks if not task.done()]
+        self._hc_tasks.extend(hc_tasks)
+
+        results = await asyncio.gather(*hc_tasks, return_exceptions=True)
 
         # Map end results to databases
         db_results = {
-            task_to_db[task]: result for task, result in zip(self._hc_tasks, results)
+            task_to_db[task]: result for task, result in zip(hc_tasks, results)
         }
 
         for database, result in db_results.items():
