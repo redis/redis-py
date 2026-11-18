@@ -2166,6 +2166,35 @@ def _clone_cache_value(value: Any) -> Any:
     return copy.deepcopy(value)
 
 
+# Pools can share a cache index, so a finalizer in one pool's invalidation
+# callback must also defer joins for another pool on the same thread.
+_cached_disconnect_state = threading.local()
+
+
+def _reset_cached_disconnects_after_fork():
+    global _cached_disconnect_state
+    _cached_disconnect_state = threading.local()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_cached_disconnects_after_fork)
+
+
+@contextmanager
+def _defer_cached_disconnects(state):
+    if state is None or getattr(state, "pending", None) is not None:
+        yield
+        return
+    pending = []
+    state.pending = pending
+    try:
+        yield
+    finally:
+        del state.pending
+        for connection, inuse_connections in pending:
+            connection._disconnect_from_pool(inuse_connections)
+
+
 class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
@@ -2191,6 +2220,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
+        # The pool shares its thread-local shutdown queue without a reference
+        # back to the pool, including when maintenance notifications are off.
+        self._cache_disconnects = None
         # Checkout and peer invalidation drains share this connection's lock.
         # Release keeps _in_use set through the last socket access.
         self._in_use_lock = threading.Lock()
@@ -3050,7 +3082,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         # SLOTS. Run it only after the drain releases the socket, like event
         # listeners that can close the pool. Keep connection-local maintenance
         # and invalidations inline while the parser is exclusively owned.
-        with _defer_maintenance_events():
+        with (
+            _defer_maintenance_events(),
+            _defer_cached_disconnects(owner._cache_disconnects),
+        ):
             pending = None
             try:
                 with owner._in_use_lock:
@@ -4369,7 +4404,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         self._fork_lock = threading.RLock()
         self._lock = threading.RLock()
-        self._cache_disconnects = threading.local()
+        self._cache_disconnects = _cached_disconnect_state
 
         # Generate unique pool ID for observability (matches go-redis behavior)
         self._pool_id = secrets.token_hex(4)
@@ -4433,7 +4468,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             # A parent thread may have held the lock at fork time, and the
             # handler reset below takes it to revert an active MOVING.
             self._lock = threading.RLock()
-            self._cache_disconnects = threading.local()
+            self._cache_disconnects = _cached_disconnect_state
             # The cached entries were filled on the parent's connections: their
             # invalidations go to the parent, and a hit would read the
             # parent's socket.
@@ -4694,6 +4729,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             connection = CacheProxyConnection(
                 self.connection_class(**kwargs), self.cache, self._lock
             )
+            connection._cache_disconnects = self._cache_disconnects
         else:
             connection = self.connection_class(**kwargs)
 
@@ -4887,23 +4923,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         for connection in connections:
             connection._disconnect_from_pool(inuse_connections)
 
-    @contextmanager
     def _defer_cached_disconnects(self):
         # Finalizers and Sentinel discovery may close this pool inside an
         # ownership or pool lock. Join drains only after the caller releases
         # those locks and any idle claim; a drain's cleanup needs them too.
-        state = self._cache_disconnects
-        if getattr(state, "pending", None) is not None:
-            yield
-            return
-        pending = []
-        state.pending = pending
-        try:
-            yield
-        finally:
-            del state.pending
-            for connection, inuse_connections in pending:
-                connection._disconnect_from_pool(inuse_connections)
+        return _defer_cached_disconnects(self._cache_disconnects)
 
     @contextmanager
     def _auth_lock(self):
@@ -5126,7 +5150,7 @@ class BlockingConnectionPool(ConnectionPool):
             # A parent thread may have held the lock at fork time, and the
             # handler reset below takes it to revert an active MOVING.
             self._lock = threading.RLock()
-            self._cache_disconnects = threading.local()
+            self._cache_disconnects = _cached_disconnect_state
             # The thread applying a MOVING in the parent does not exist here
             # to clear these, and a stale flag makes a checkout nest on the
             # lock and leak it.
@@ -5246,6 +5270,7 @@ class BlockingConnectionPool(ConnectionPool):
                     self.cache,
                     self._lock,
                 )
+                connection._cache_disconnects = self._cache_disconnects
             else:
                 connection = self.connection_class(**self.connection_kwargs)
             self._connections.append(connection)

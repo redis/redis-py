@@ -17,9 +17,12 @@ from redis.connection import BlockingConnectionPool, ConnectionPool
 from redis.event import AfterConnectionReleasedEvent
 from redis.exceptions import AuthenticationError
 from redis.maint_notifications import (
+    MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
+    NodeMigratedNotification,
+    NodeMigratingNotification,
     NodeMovingNotification,
     OSSMaintNotificationsHandler,
     OSSNodeMigratedNotification,
@@ -488,6 +491,8 @@ def _finalizer_during_pool_lock(
         "moving_reconnect",
         "scheduled_reconnect",
         "cancel_moving",
+        "maintenance_start",
+        "maintenance_completed",
     )
     kwargs = dict(
         protocol=3,
@@ -533,6 +538,10 @@ def _finalizer_during_pool_lock(
                 NodeMovingNotification(2, None, port, 60)
             )
         assert reconnect_handler._pending_handoffs
+    local_handler = released._maint_notifications_connection_handler
+    if operation == "maintenance_completed":
+        local_handler.handle_notification(NodeMigratingNotification(3, 60))
+        assert released.maintenance_state == MaintenanceState.MAINTENANCE
     draining, finalizing = threading.Event(), threading.Event()
     errors = []
     original_poll = owner._conn.can_read
@@ -544,6 +553,7 @@ def _finalizer_during_pool_lock(
     connection_class = pool.connection_class
     original_free = pool._get_free_connections
     original_used = pool._get_in_use_connections
+    original_timeout = released.update_current_socket_timeout
     enabled, thresholds = gc.isenabled(), gc.get_threshold()
     gc.disable()
     victim = Redis.from_pool(pool)
@@ -618,6 +628,11 @@ def _finalizer_during_pool_lock(
             collect()
         return MaintNotificationsConnectionHandler(*args, **kwargs)
 
+    def update_timeout(*args, **kwargs):
+        if operation in ("maintenance_start", "maintenance_completed"):
+            collect()
+        return original_timeout(*args, **kwargs)
+
     def create(*args, **kwargs):
         if operation == "checkout":
             collect()
@@ -645,6 +660,7 @@ def _finalizer_during_pool_lock(
             patch.object(pool, "connection_class", create),
             patch.object(pool, "_get_free_connections", free_connections),
             patch.object(pool, "_get_in_use_connections", used_connections),
+            patch.object(released, "update_current_socket_timeout", update_timeout),
         ):
             reader.start()
             assert draining.wait(3), "peer did not start draining the idle owner"
@@ -666,6 +682,16 @@ def _finalizer_during_pool_lock(
                 assert not reconnect_handler._scheduled_timers
                 assert pool.connection_kwargs["host"] == host
                 assert pool.connection_kwargs["socket_timeout"] == 1
+            elif operation in ("maintenance_start", "maintenance_completed"):
+                notification = (
+                    NodeMigratingNotification(3, 60)
+                    if operation == "maintenance_start"
+                    else NodeMigratedNotification(3)
+                )
+                local_handler.handle_notification(notification)
+                assert released.maintenance_state == MaintenanceState.NONE
+                assert released.socket_timeout == 1
+                pool.release(released)
             elif operation == "topology_cleanup":
                 NodesManager._free_pool_connections(pool)
             elif operation in ("blocking_snapshot", "blocking_maintenance_snapshot"):
@@ -819,6 +845,206 @@ def test_finalizer_during_metrics_and_moving_cancellation(
             operation,
             pool_class,
         ),
+    )
+
+
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@pytest.mark.parametrize("parser_class", PARSERS)
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize("operation", ["maintenance_start", "maintenance_completed"])
+def test_finalizer_during_connection_maintenance(
+    request, pool_class, parser_class, automatic, operation
+):
+    _run_bounded(
+        _finalizer_during_pool_lock,
+        (
+            request.config.getoption("--redis-url"),
+            parser_class,
+            automatic,
+            operation,
+            pool_class,
+        ),
+    )
+
+
+def _finalizer_during_concurrent_invalidations(
+    url, pool_class, parser_class, automatic, separate_pools=False
+):
+    kwargs = dict(
+        protocol=3,
+        parser_class=parser_class,
+        cache_config=CacheConfig(),
+        max_connections=2,
+        socket_timeout=1,
+        maint_notifications_config=MaintNotificationsConfig(enabled=False),
+    )
+    pool = pool_class.from_url(url, **kwargs)
+    second_pool = (
+        pool_class.from_url(url, cache=pool.cache, **kwargs) if separate_pools else pool
+    )
+    owner_pools = [pool, second_pool]
+    owners = [owner_pool.get_connection() for owner_pool in owner_pools]
+    peers = ConnectionPool.from_url(url, cache=pool.cache, **kwargs)
+    borrowers = [peers.get_connection() for _ in range(2)]
+    writer = Redis.from_url(url)
+    keys = [str(uuid.uuid4()) for _ in owners]
+    for owner, owner_pool, key in zip(owners, owner_pools, keys):
+        writer.set(key, "old")
+        owner.send_command("GET", key, keys=[key])
+        assert owner.read_response() == b"old"
+        owner_pool.release(owner)
+        writer.set(key, "new")
+
+    cache = pool.cache._cache
+    entries = cache.collection
+    original_holders = entries.holders_of
+    original_delete = cache.delete_by_redis_keys
+    first_locked, second_draining = threading.Event(), threading.Event()
+    errors = []
+    collected = False
+    enabled, thresholds = gc.isenabled(), gc.get_threshold()
+    gc.disable()
+    victim = Redis.from_pool(second_pool)
+    victim.reference_cycle = victim
+    abandoned = weakref.ref(victim)
+    del victim
+
+    def holders(key):
+        nonlocal collected
+        if threading.current_thread() is first and not collected:
+            collected = True
+            first_locked.set()
+            assert second_draining.wait(3), "second owner did not start invalidating"
+            # The first invalidation owns the shared index lock, while the
+            # second owns its parser and waits for that same index lock.
+            if automatic:
+                gc.set_threshold(1, 1, 1)
+                gc.enable()
+                allocations = [[] for _ in range(100)]
+                assert allocations
+            else:
+                gc.collect()
+            assert abandoned() is None, "pool-owning client was not finalized"
+        return original_holders(key)
+
+    def delete(keys):
+        if threading.current_thread() is second:
+            second_draining.set()
+        return original_delete(keys)
+
+    def read(index):
+        try:
+            borrowers[index].send_command("GET", keys[index], keys=[keys[index]])
+            assert borrowers[index].read_response() == b"new"
+        except BaseException as error:
+            errors.append(error)
+
+    first = threading.Thread(target=read, args=(0,), daemon=True)
+    second = threading.Thread(target=read, args=(1,), daemon=True)
+    try:
+        with (
+            patch.object(entries, "holders_of", holders),
+            patch.object(cache, "delete_by_redis_keys", delete),
+        ):
+            first.start()
+            assert first_locked.wait(3)
+            second.start()
+            first.join(3)
+            second.join(3)
+            assert not first.is_alive() and not second.is_alive(), errors
+            assert collected and not errors, errors
+        assert all(not owner._in_use_lock.locked() for owner in owners)
+        assert all(
+            not owner.is_connected
+            for owner, owner_pool in zip(owners, owner_pools)
+            if owner_pool is second_pool
+        )
+        reused = second_pool.get_connection()
+        reused.send_command("PING")
+        assert reused.read_response() == b"PONG"
+        second_pool.release(reused)
+    finally:
+        gc.set_threshold(*thresholds)
+        if enabled:
+            gc.enable()
+        else:
+            gc.disable()
+        for borrower in borrowers:
+            peers.release(borrower)
+        peers.close()
+        pool.close()
+        if separate_pools:
+            second_pool.close()
+        writer.delete(*keys)
+        writer.close()
+
+
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+@pytest.mark.parametrize("parser_class", PARSERS)
+@pytest.mark.parametrize("automatic", [False, True])
+@pytest.mark.parametrize(
+    "separate_pools", [False, True], ids=["same_pool", "shared_cache_pools"]
+)
+def test_finalizer_during_concurrent_invalidations(
+    request, pool_class, parser_class, automatic, separate_pools
+):
+    _run_bounded(
+        _finalizer_during_concurrent_invalidations,
+        (
+            request.config.getoption("--redis-url"),
+            pool_class,
+            parser_class,
+            automatic,
+            separate_pools,
+        ),
+    )
+
+
+def _fork_with_pending_cached_disconnects(url, pool_class):
+    pool = pool_class.from_url(
+        url,
+        protocol=3,
+        cache_config=CacheConfig(),
+        max_connections=1,
+        socket_timeout=1,
+        maint_notifications_config=MaintNotificationsConfig(enabled=False),
+    )
+    owner = pool.get_connection()
+    pool.release(owner)
+
+    def child():
+        connection = pool.get_connection()
+        connection.send_command("PING")
+        assert connection.read_response() == b"PONG"
+        pool.release(connection)
+        pool.close()
+        assert not connection.is_connected, "child inherited queued parent teardown"
+
+    process = multiprocessing.get_context("fork").Process(target=child)
+    try:
+        with pool._defer_cached_disconnects():
+            pool.disconnect()
+            assert owner.is_connected
+            process.start()
+            process.join(3)
+            assert not process.is_alive() and process.exitcode == 0
+            assert owner.is_connected, "child disconnected the parent's connection"
+        assert not owner.is_connected
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(3)
+        pool.close()
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(), reason="requires fork"
+)
+@pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+def test_fork_with_pending_cached_disconnects(request, pool_class):
+    _run_bounded(
+        _fork_with_pending_cached_disconnects,
+        (request.config.getoption("--redis-url"), pool_class),
     )
 
 

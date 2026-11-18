@@ -1308,6 +1308,7 @@ class MaintNotificationsPoolHandler:
             return kwargs is not None
 
 
+@contextmanager
 def _get_maintenance_state_lock(connection):
     # An idle cached owner can process pushes outside the pool lock. Serialize
     # its state/timeout transition with MOVING updates, without holding this
@@ -1316,8 +1317,16 @@ def _get_maintenance_state_lock(connection):
     # Disconnect and garbage collection can run in a child before _checkpid()
     # resets the pool. Its inherited lock may belong to a vanished thread.
     if handler is None or handler.pool.pid != os.getpid():
-        return nullcontext()
-    return handler.pool._lock
+        yield
+        return
+    pool = handler.pool
+    # GC can close the pool from an allocation during a state transition.
+    # Let peer drains finish after this lock releases, as for MOVING.
+    with (
+        pool._defer_cached_disconnects() if pool.cache is not None else nullcontext(),
+        pool._lock,
+    ):
+        yield
 
 
 class MaintNotificationsConnectionHandler:
