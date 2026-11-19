@@ -2093,6 +2093,8 @@ class TestClusterRedisCommands:
             is True
         )
 
+    # Redis Enterprise's SLOWLOG GET does not include the SLOWLOG RESET entry.
+    @skip_if_redis_enterprise()
     def test_slowlog_get(self, r, slowlog):
         unicode_string = chr(3456) + "abcd" + chr(3421)
         node = r.get_node_from_key(unicode_string)

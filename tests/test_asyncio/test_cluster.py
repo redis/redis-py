@@ -4307,6 +4307,8 @@ class TestClusterRedisCommands:
             is True
         )
 
+    # Redis Enterprise's SLOWLOG GET does not include the SLOWLOG RESET entry.
+    @skip_if_redis_enterprise()
     async def test_slowlog_get(
         self, r: RedisCluster, slowlog: Optional[List[Dict[str, Union[int, bytes]]]]
     ) -> None:
