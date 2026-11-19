@@ -345,7 +345,6 @@ def r_multi_db(
         client_kwargs=multi_db_client_kwargs(
             username, password, maint_notifications_config
         ),
-        health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][0]),
     )
     db_configs.append(db_config)
 
@@ -355,7 +354,6 @@ def r_multi_db(
         client_kwargs=multi_db_client_kwargs(
             username, password, maint_notifications_config
         ),
-        health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][1]),
     )
     db_configs.append(db_config1)
 

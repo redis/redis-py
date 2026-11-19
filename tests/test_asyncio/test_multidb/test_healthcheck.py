@@ -896,7 +896,7 @@ class TestPingHealthCheck:
 class TestLagAwareHealthCheck:
     @pytest.mark.asyncio
     async def test_close_shuts_down_http_client(self):
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = AsyncMock()
         await hc.close()
         hc._http_client.aclose.assert_awaited_once()
@@ -928,19 +928,22 @@ class TestLagAwareHealthCheck:
             None,
         ]
 
-        hc = LagAwareHealthCheck(rest_api_port=1234, lag_aware_tolerance=150)
+        hc = LagAwareHealthCheck(
+            "https://healthcheck.example.com",
+            rest_api_port=1234,
+            lag_aware_tolerance=150,
+        )
         # Inject our mocked http client
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(mock_client, mock_cb, 1.0)
         mock_hc_client = (
             AsyncMock()
         )  # Not used by LagAwareHealthCheck but required by signature
 
         assert await hc.check_health(db, mock_hc_client) is True
-        # Calls: first to list bdbs, then to availability. Both carry the database's
-        # own base URL, so a concurrent check on another database cannot redirect
-        # them at the wrong cluster.
+        # Calls: first to list bdbs, then to availability. Both carry the REST API
+        # URL and port the health check was configured with.
         assert mock_http.get.call_count == 2
         first_call = mock_http.get.call_args_list[0]
         second_call = mock_http.get.call_args_list[1]
@@ -975,10 +978,10 @@ class TestLagAwareHealthCheck:
             None,
         ]
 
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(mock_client, mock_cb, 1.0)
         mock_hc_client = (
             AsyncMock()
         )  # Not used by LagAwareHealthCheck but required by signature
@@ -1014,10 +1017,10 @@ class TestLagAwareHealthCheck:
             },
         ]
 
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(mock_client, mock_cb, 1.0)
         mock_hc_client = (
             AsyncMock()
         )  # Not used by LagAwareHealthCheck but required by signature
@@ -1051,10 +1054,10 @@ class TestLagAwareHealthCheck:
             ),
         ]
 
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(mock_client, mock_cb, 1.0)
         mock_hc_client = (
             AsyncMock()
         )  # Not used by LagAwareHealthCheck but required by signature
@@ -1092,10 +1095,10 @@ class TestLagAwareHealthCheck:
             None,
         ]
 
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = mock_http
 
-        db = Database(client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(client, mock_cb, 1.0)
 
         assert await hc.check_health(db, AsyncMock()) is True
         assert (
@@ -1132,10 +1135,10 @@ class TestLagAwareHealthCheck:
             None,
         ]
 
-        hc = LagAwareHealthCheck()
+        hc = LagAwareHealthCheck("https://healthcheck.example.com")
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
+        db = Database(mock_client, mock_cb, 1.0)
 
         assert await hc.check_health(db, AsyncMock()) is True
         assert (
@@ -1145,18 +1148,15 @@ class TestLagAwareHealthCheck:
         )
 
     @pytest.mark.asyncio
-    async def test_concurrent_checks_do_not_share_one_base_url(self, mock_cb):
+    async def test_concurrent_checks_target_their_own_cluster(self, mock_cb):
         """
-        Ensures two databases checked concurrently by the same health check instance each
-        talk to their own cluster's REST API. MultiDBClient checks every database at once
-        through a single shared LagAwareHealthCheck, so the target must travel with the
-        request instead of being stashed on the shared HTTP client - otherwise one
-        database's check overwrites the other's while it awaits a response, and the bdb
-        listing comes back from the wrong cluster.
+        Ensures two databases checked concurrently each talk to the REST API of their
+        own cluster. Every database owns its LagAwareHealthCheck, so the clusters may
+        expose the REST API on different URLs and on different ports.
         """
         clusters = {
-            "https://cluster-a.example.com": ("db-a.example.com", "bdb-a"),
-            "https://cluster-b.example.com": ("db-b.example.com", "bdb-b"),
+            "https://cluster-a.example.com:9443": ("db-a.example.com", "bdb-a"),
+            "https://cluster-b.example.com:8443": ("db-b.example.com", "bdb-b"),
         }
         requested = []
 
@@ -1165,27 +1165,26 @@ class TestLagAwareHealthCheck:
             # Hand control back mid-check so the two checks interleave, the way the
             # thread-pool-backed HTTP client does on every request.
             await asyncio.sleep(0)
-            base_url = path.rsplit("/v1/bdbs", 1)[0]
-            dns_name, uid = clusters[base_url.rsplit(":", 1)[0]]
+            dns_name, uid = clusters[path.rsplit("/v1/bdbs", 1)[0]]
             if path.endswith("/v1/bdbs"):
                 # A cluster's REST API only lists the bdbs that cluster hosts.
                 return [{"uid": uid, "endpoints": [{"dns_name": dns_name, "addr": []}]}]
             return None
 
-        mock_http = AsyncMock()
-        mock_http.get = fake_get
-
-        hc = LagAwareHealthCheck()
-        hc._http_client = mock_http
-
-        databases = []
+        checks = []
         for base_url, (dns_name, _) in clusters.items():
+            rest_api_url, rest_api_port = base_url.rsplit(":", 1)
+            hc = LagAwareHealthCheck(
+                rest_api_url=rest_api_url, rest_api_port=int(rest_api_port)
+            )
+            hc._http_client = AsyncMock()
+            hc._http_client.get = fake_get
             client = Mock(spec=Redis)
             client.get_connection_kwargs.return_value = {"host": dns_name}
-            databases.append(Database(client, mock_cb, 1.0, base_url))
+            checks.append((hc, Database(client, mock_cb, 1.0, [hc])))
 
         results = await asyncio.gather(
-            *(hc.check_health(db, AsyncMock()) for db in databases)
+            *(hc.check_health(db, AsyncMock()) for hc, db in checks)
         )
 
         assert results == [True, True]
@@ -1193,8 +1192,8 @@ class TestLagAwareHealthCheck:
             "https://cluster-a.example.com:9443/v1/bdbs",
             "https://cluster-a.example.com:9443/v1/bdbs/bdb-a/availability"
             "?extend_check=lag&availability_lag_tolerance_ms=5000",
-            "https://cluster-b.example.com:9443/v1/bdbs",
-            "https://cluster-b.example.com:9443/v1/bdbs/bdb-b/availability"
+            "https://cluster-b.example.com:8443/v1/bdbs",
+            "https://cluster-b.example.com:8443/v1/bdbs/bdb-b/availability"
             "?extend_check=lag&availability_lag_tolerance_ms=5000",
         ]
 

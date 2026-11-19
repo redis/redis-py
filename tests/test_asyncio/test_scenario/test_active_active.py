@@ -20,7 +20,11 @@ from redis.maint_notifications import MaintenanceState, MaintNotificationsConfig
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import TemporaryUnavailableException
 from redis.utils import dummy_fail_async
-from tests.test_scenario.conftest import RELAXED_TIMEOUT, use_mock_proxy
+from tests.test_scenario.conftest import (
+    RELAXED_TIMEOUT,
+    extract_cluster_fqdn,
+    use_mock_proxy,
+)
 from tests.test_scenario.fault_injector_client import (
     ActionRequest,
     ActionType,
@@ -416,16 +420,22 @@ class TestActiveActive:
             backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
         )
 
-        # Adding additional health check to the client. Passing it as the only
-        # entry of "health_checks" would replace the default ping health check.
-        await client.add_health_check(
-            LagAwareHealthCheck(
-                verify_tls=False,
-                auth_basic=lag_aware_auth_basic(),
-                lag_aware_tolerance=10000,
-                health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
+        # Adding a lag aware health check to each database, on top of its default
+        # ping health check. Each one targets the REST API of the cluster that
+        # hosts its database. Databases are listed by descending weight, which
+        # is the order of the endpoints they were configured from.
+        for (database, _), endpoint in zip(
+            client.get_databases(), endpoint_config["endpoints"]
+        ):
+            database.add_health_check(
+                LagAwareHealthCheck(
+                    rest_api_url=extract_cluster_fqdn(endpoint),
+                    verify_tls=False,
+                    auth_basic=lag_aware_auth_basic(),
+                    lag_aware_tolerance=10000,
+                    health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
+                )
             )
-        )
 
         # Client initialized on entering the context manager.
         async with client as r_multi_db:

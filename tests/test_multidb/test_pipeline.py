@@ -42,12 +42,7 @@ class TestPipeline:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             pipe = mock_pipe()
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
@@ -87,12 +82,7 @@ class TestPipeline:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             pipe = mock_pipe()
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
@@ -209,14 +199,7 @@ class TestPipeline:
 
         mock_hc.check_health.side_effect = mock_check_health
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config,
-                "default_health_checks",
-                return_value=[mock_hc],
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             pipe = mock_pipe()
             pipe.execute.return_value = ["OK", "value"]
             mock_db.client.pipeline.return_value = pipe
@@ -314,12 +297,7 @@ class TestPipeline:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             pipe = mock_pipe()
             pipe.execute.return_value = [[]]
             mock_db1.client.pipeline.return_value = pipe
@@ -361,12 +339,7 @@ class TestTransaction:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
             mock_hc.check_health.return_value = True
@@ -404,12 +377,7 @@ class TestTransaction:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
             mock_hc.check_health.return_value = True
@@ -455,12 +423,7 @@ class TestTransaction:
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
             async def mock_check_health(database, connection=None):
@@ -577,14 +540,7 @@ class TestTransaction:
 
         mock_hc.check_health.side_effect = mock_check_health
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config,
-                "default_health_checks",
-                return_value=[mock_hc],
-            ),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.transaction.return_value = ["OK", "value"]
             mock_db1.client.transaction.return_value = ["OK1", "value"]
             mock_db2.client.transaction.return_value = ["OK2", "value"]

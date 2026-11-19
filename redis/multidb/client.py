@@ -1,11 +1,9 @@
 import asyncio
 import logging
-import threading
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional
 
 from redis._parsers import Encoder
 from redis.asyncio.multidb.healthcheck import (
-    HealthCheck,
     HealthCheckPolicy,
     database_maint_notifications_config,
     relaxed_health_check_budget,
@@ -55,11 +53,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self._databases = config.databases()
         # Removed databases, kept so that close() still closes their clients
         self._removed_databases: List[SyncDatabase] = []
-        self._health_checks = (
-            config.default_health_checks()
-            if not config.health_checks
-            else config.health_checks
-        )
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = (
             config.health_check_policy.value()
@@ -94,7 +87,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         )
         self.initialized = False
         self._bg_scheduler = BackgroundScheduler()
-        self._hc_lock = threading.Lock()
         self._config = config
 
     def __del__(self):
@@ -256,7 +248,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             client=client,
             circuit=circuit,
             weight=config.weight,
-            health_check_url=config.health_check_url,
+            health_checks=self._config.database_health_checks(config),
         )
 
         try:
@@ -328,13 +320,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Adds a new failure detector to the database.
         """
         self._failure_detectors.append(failure_detector)
-
-    def add_health_check(self, healthcheck: HealthCheck):
-        """
-        Adds a new health check to the database.
-        """
-        with self._hc_lock:
-            self._health_checks.append(healthcheck)
 
     def execute_command(self, *args, **options):
         """
@@ -411,9 +396,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         time-to-live, which is not known here: the wait is then unbounded, and
         the check itself ends when that window does.
         """
-        with self._hc_lock:
-            health_checks = list(self._health_checks)
-
         timeout = DEFAULT_SYNC_HEALTH_CHECK_TIMEOUT
         for database in databases:
             config = database_maint_notifications_config(database.client)
@@ -430,7 +412,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 if relaxed_timeout is None:
                     return None
 
-            for health_check in health_checks:
+            for health_check in list(database.health_checks):
                 budget = health_check.health_check_timeout
                 if relaxed:
                     budget = max(
@@ -445,11 +427,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Runs health checks on the given database until first failure.
         """
-        with self._hc_lock:
-            health_checks = list(self._health_checks)
-
-        # Health check will setup circuit state
-        is_healthy = await self._health_check_policy.execute(health_checks, database)
+        # Health check will setup circuit state. A copy is executed, so a check
+        # added from another thread does not change the list while it is run.
+        is_healthy = await self._health_check_policy.execute(
+            list(database.health_checks), database
+        )
 
         if not is_healthy:
             # The exception path is logged by the caller; a check that reports
@@ -586,11 +568,17 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         # Keep closing the remaining checks when one of them raises, the way the
         # async client does with gather(..., return_exceptions=True): a single
         # failing check must not strand the resources of the others.
-        for health_check in self._health_checks:
-            try:
-                await health_check.close()
-            except Exception:
-                pass
+        # Removed databases are included: their checks are no longer run, but
+        # still hold their resources.
+        for database in (
+            *(database for database, _ in self._databases),
+            *self._removed_databases,
+        ):
+            for health_check in database.health_checks:
+                try:
+                    await health_check.close()
+                except Exception:
+                    pass
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

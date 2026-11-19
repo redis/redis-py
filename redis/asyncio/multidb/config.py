@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Type, Union
+from typing import Callable, List, Optional, Type, Union
 
 import pybreaker
 
@@ -75,8 +75,9 @@ class DatabaseConfig:
         from_pool (Optional[ConnectionPool]): A pre-configured connection pool to use.
         circuit (Optional[CircuitBreaker]): Custom circuit breaker implementation.
         grace_period (float): Grace period after which we need to check if the circuit could be closed again.
-        health_check_url (Optional[str]): URL for health checks. Cluster FQDN is typically used
-            on public Redis Enterprise endpoints.
+        health_checks (Optional[list[HealthCheck]]): Health checks owned by this database.
+            Replaces the ones built from the ``MultiDbConfig`` defaults. An instance
+            must not be shared between databases.
 
     Methods:
         default_circuit_breaker:
@@ -89,7 +90,7 @@ class DatabaseConfig:
     from_pool: Optional[ConnectionPool] = None
     circuit: Optional[CircuitBreaker] = None
     grace_period: float = DEFAULT_GRACE_PERIOD
-    health_check_url: Optional[str] = None
+    health_checks: list[HealthCheck] | None = None
 
     def default_circuit_breaker(self) -> CircuitBreaker:
         circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=self.grace_period)
@@ -110,11 +111,16 @@ class MultiDbConfig:
         min_num_failures: Minimal count of failures required for failover
         failure_rate_threshold: Percentage of failures required for failover
         failures_detection_window: Time interval for tracking database failures.
-        health_checks: Optional list of additional health checks performed on databases.
+        health_checks_factory: Optional callable that builds the health checks of a database
+            that has none of its own in its ``DatabaseConfig``. Called once per database with
+            its ``DatabaseConfig`` and has to return new instances on every call.
+            Defaults to a single ``PingHealthCheck``.
         health_check_interval: Time interval for executing health checks.
-        health_check_probes: Number of attempts to evaluate the health of a database.
-        health_check_delay: Delay between health check attempts.
-        health_check_timeout: Timeout for the full health check operation (including all probes).
+        health_check_probes: Number of attempts of the default ``PingHealthCheck``
+            to evaluate the health of a database.
+        health_check_delay: Delay between attempts of the default ``PingHealthCheck``.
+        health_check_timeout: Timeout for the full default ``PingHealthCheck``
+            operation (including all probes).
         health_check_policy: Policy for determining database health based on health checks.
         failover_strategy: Optional strategy for handling database failover scenarios.
         failover_attempts: Number of retries allowed for failover operations.
@@ -133,9 +139,9 @@ class MultiDbConfig:
         default_failure_detectors:
             Returns the default list of failure detectors used to monitor database failures.
 
-        default_health_checks:
-            Returns the default list of health checks used to monitor database health
-            with specific retry and backoff strategies.
+        database_health_checks:
+            Returns the health checks of the database built from the given
+            configuration.
 
         default_failover_strategy:
             Provides the default failover strategy used for handling failover scenarios
@@ -156,7 +162,7 @@ class MultiDbConfig:
     min_num_failures: int = DEFAULT_MIN_NUM_FAILURES
     failure_rate_threshold: float = DEFAULT_FAILURE_RATE_THRESHOLD
     failures_detection_window: float = DEFAULT_FAILURES_DETECTION_WINDOW
-    health_checks: Optional[List[HealthCheck]] = None
+    health_checks_factory: Callable[[DatabaseConfig], list[HealthCheck]] | None = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
     health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
@@ -216,7 +222,7 @@ class MultiDbConfig:
                     client=client,
                     circuit=circuit,
                     weight=database_config.weight,
-                    health_check_url=database_config.health_check_url,
+                    health_checks=self.database_health_checks(database_config),
                 ),
                 database_config.weight,
             )
@@ -234,7 +240,23 @@ class MultiDbConfig:
             ),
         ]
 
-    def default_health_checks(self) -> List[HealthCheck]:
+    def database_health_checks(
+        self, database_config: DatabaseConfig
+    ) -> list[HealthCheck]:
+        """
+        The health checks of the database built from the given configuration.
+
+        The database's own ``health_checks`` win; otherwise the
+        ``health_checks_factory`` builds them; otherwise it is a single
+        ``PingHealthCheck`` with the global probes, delay and timeout. The
+        sources are never combined.
+        """
+        if database_config.health_checks:
+            return database_config.health_checks
+
+        if self.health_checks_factory is not None:
+            return self.health_checks_factory(database_config)
+
         return [
             PingHealthCheck(
                 health_check_probes=self.health_check_probes,
