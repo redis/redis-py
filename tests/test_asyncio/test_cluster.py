@@ -2516,9 +2516,8 @@ class TestTopologyRefreshKeepsConnections:
         self,
     ) -> None:
         """
-        A due refresh that reaches no node (e.g. only seeds are queried, with
-        dynamic_startup_nodes=False) is logged and asked for again, and the
-        command that ran it still goes to its node of the current topology.
+        A due refresh that reaches no node is logged and asked for again, and
+        the command that ran it still goes to its node of the current topology.
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         owner = r.get_node_from_key("foo")
@@ -7707,6 +7706,189 @@ class TestNodesManager:
             assert sorted(startup_nodes) == sorted(discovered_nodes)
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
+
+    @staticmethod
+    async def _seed_only_nodes_manager(require_full_coverage=True) -> NodesManager:
+        """
+        A NodesManager with dynamic_startup_nodes=False that knows the topology
+        of default_cluster_slots through a seed that is not part of it.
+        """
+        nodes_manager = NodesManager(
+            startup_nodes=[ClusterNode("10.0.0.1", 10000)],
+            require_full_coverage=require_full_coverage,
+            connection_kwargs={},
+            dynamic_startup_nodes=False,
+        )
+
+        async def execute_command(node, *args, **kwargs):
+            return default_cluster_slots
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            await nodes_manager.initialize()
+        return nodes_manager
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _topology_cluster_slots(answers):
+        """
+        Answer CLUSTER SLOTS on the nodes whose port is a key of :answers:, with
+        its value, and fail on the others. Yields the ports of the topology
+        nodes queried, in order.
+        """
+        queried = []
+
+        async def execute_command(node, *args, **kwargs):
+            if node.port != 10000:
+                queried.append(node.port)
+            if node.port in answers:
+                return answers[node.port]
+            raise ConnectionError("down")
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            yield queried
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _with_open_connection(node):
+        """
+        Give :node: a connection that counts as open, and take it away on exit,
+        so the node is not reported as unclosed once it is collected.
+        """
+        connection = Mock(is_connected=True)
+        node._connections.append(connection)
+        try:
+            yield
+        finally:
+            node._connections.remove(connection)
+
+    @pytest.mark.fixed_client
+    async def test_refresh_asks_the_current_topology_when_the_seeds_fail(
+        self,
+    ) -> None:
+        """
+        With dynamic_startup_nodes=False, a refresh whose seeds fail asks the
+        nodes of the current topology, a node with connections open first.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        epoch = nodes_manager._epoch
+
+        with (
+            self._with_open_connection(node),
+            self._topology_cluster_slots(
+                answers={7002: default_cluster_slots}
+            ) as queried,
+        ):
+            await nodes_manager.initialize()
+
+        assert queried == [7002]
+        assert nodes_manager._epoch == epoch + 1
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
+
+    @pytest.mark.fixed_client
+    async def test_refresh_asks_a_moved_target_of_the_topology_through_its_node(
+        self,
+    ) -> None:
+        """
+        An additional startup node (the target of a MOVED) that is a node of
+        the current topology is asked once, through that node: no temporary
+        node is built for it, and it is not closed after the refresh.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        queried_nodes = []
+
+        async def execute_command(target, *args, **kwargs):
+            if target.port == 10000:
+                raise ConnectionError("down")
+            queried_nodes.append(target)
+            return default_cluster_slots
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(ClusterNode, "disconnect", autospec=True) as disconnect,
+        ):
+            await nodes_manager.initialize(
+                additional_startup_nodes_info=[("127.0.0.1", 7002)]
+            )
+
+        assert queried_nodes == [node]
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
+        assert node not in [call.args[0] for call in disconnect.call_args_list]
+
+    @pytest.mark.fixed_client
+    async def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(
+        self,
+    ) -> None:
+        """
+        A refresh whose seeds fail raises RedisClusterUnreachableError only
+        after every node of the current topology failed too: the nodes with a
+        connection open first, and the last failed node last. A node whose
+        connections were closed is not counted as connected.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        nodes_cache = nodes_manager.nodes_cache
+        nodes_cache["127.0.0.1:7000"]._connections.append(Mock(is_connected=False))
+
+        # Keep the cache order (7000, 7003, 7001, 7002) before the ranking
+        with (
+            self._with_open_connection(nodes_cache["127.0.0.1:7003"]),
+            patch("redis.asyncio.cluster.random.shuffle"),
+            self._topology_cluster_slots(answers={}) as queried,
+            pytest.raises(RedisClusterUnreachableError),
+        ):
+            await nodes_manager.initialize(last_failed_node_name="127.0.0.1:7001")
+
+        assert queried == [7003, 7000, 7002, 7001]
+        assert nodes_manager._last_refresh_unreachable_args is not None
+
+    @pytest.mark.fixed_client
+    async def test_refresh_answered_by_a_seed_asks_no_topology_node(self) -> None:
+        nodes_manager = await self._seed_only_nodes_manager()
+
+        with self._topology_cluster_slots(
+            answers={10000: default_cluster_slots}
+        ) as queried:
+            await nodes_manager.initialize()
+
+        assert queried == []
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("require_full_coverage", [True, False])
+    async def test_refresh_completes_a_partial_seed_answer_from_the_current_topology(
+        self, require_full_coverage
+    ) -> None:
+        """
+        A refresh whose seeds answer for only part of the slots asks the nodes
+        of the current topology for the others, until all slots are covered.
+        """
+        nodes_manager = await self._seed_only_nodes_manager(
+            require_full_coverage=require_full_coverage
+        )
+        with (
+            self._with_open_connection(nodes_manager.nodes_cache["127.0.0.1:7001"]),
+            self._topology_cluster_slots(
+                answers={
+                    10000: default_cluster_slots[:1],
+                    7001: default_cluster_slots[1:],
+                }
+            ) as queried,
+        ):
+            await nodes_manager.initialize()
+
+        assert queried == [7001]
+        assert len(nodes_manager.slots_cache) == REDIS_CLUSTER_HASH_SLOTS
 
     @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes(self) -> None:
