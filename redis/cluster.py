@@ -3516,35 +3516,12 @@ class NodesManager:
     def create_redis_connections(self, nodes):
         """
         This function will create a redis connection to all nodes in :nodes:
-        that have none. Two threads (a command and a topology refresh) never
-        install two clients on the same node.
         """
         nodes = list(nodes)
-        for node in nodes:
-            self._install_redis_connection(node)
+        self._create_redis_connections(nodes)
         with self._lock:
             current_nodes = list(self.nodes_cache.values())
         self._dispatch_pools_instantiated(chain(current_nodes, nodes))
-
-    def _install_redis_connection(self, node: "ClusterNode") -> None:
-        """
-        Give :node:, which other threads can reach, a client if it has none,
-        without registering it for re-authentication. The client is built
-        outside the lock and installed under it only if the node still has
-        none. If another thread installed one meanwhile, that one is kept and
-        the one built here, which never opened a connection, is dropped.
-        """
-        if node.redis_connection is not None:
-            return
-        r = self.create_redis_node(
-            host=node.host,
-            port=node.port,
-            maint_notifications_config=self.maint_notifications_config,
-            **self.connection_kwargs,
-        )
-        with self._lock:
-            if node.redis_connection is None:
-                node.redis_connection = r
 
     def _create_redis_connections(self, nodes) -> None:
         """
@@ -3919,9 +3896,12 @@ class NodesManager:
         order is random, so clients don't all ask the same node, with the
         nodes that have a connection open first, as they served commands
         lately and no error closed it, and :last_failed_node_name: last. A
-        node with no client gets one before it is yielded, so the refresh
-        queries it through the client the node keeps. A generator: nothing is
-        computed unless the refresh reaches it.
+        node with no client is skipped: only a node that move_slot added
+        before its command built one has none, and any other node answers
+        with the same slot map. So the refresh queries every node through the
+        client the node keeps, and never installs one on a node that command
+        threads can reach. A generator: nothing is computed unless the
+        refresh reaches it.
         """
         queried_names = {node.name for node in queried_nodes}
         with self._lock:
@@ -3936,27 +3916,24 @@ class NodesManager:
         last_failed_node = None
         for node in nodes:
             r = node.redis_connection
+            if r is None:
+                continue
             if node.name == last_failed_node_name:
                 last_failed_node = node
-            elif r is not None and any(
+            elif any(
                 connection.is_connected
-                for connection in chain(
-                    r.connection_pool._get_in_use_connections(),
-                    r.connection_pool._get_free_connections(),
-                )
+                for connection in r.connection_pool._get_free_connections()
+            ) or any(
+                connection.is_connected
+                for connection in r.connection_pool._get_in_use_connections()
             ):
                 connected_nodes.append(node)
             else:
                 other_nodes.append(node)
-        if last_failed_node is not None:
-            other_nodes.append(last_failed_node)
         yield from connected_nodes
-        for node in other_nodes:
-            # A node that move_slot added before a command built its client.
-            # Installed like get_redis_connection installs one, so a client a
-            # command thread builds is never replaced.
-            self._install_redis_connection(node)
-            yield node
+        yield from other_nodes
+        if last_failed_node is not None:
+            yield last_failed_node
 
     def initialize(
         self,
@@ -4281,44 +4258,12 @@ class NodesManager:
                     f"covered..."
                 )
 
-            # Create Redis connections to all new nodes, outside the lock. They
-            # are registered for re-authentication once they replace the
-            # current nodes below. A node of the current topology that had no
-            # client when CLUSTER SLOTS listed it shares the one its current
-            # node has: the one a command or this refresh's query built since,
-            # or one installed now. So that client is neither built twice nor
-            # left unreleased.
-            with self._lock:
-                current_nodes = {
-                    name: self.nodes_cache.get(name)
-                    for name, node in tmp_nodes_cache.items()
-                    if node.redis_connection is None
-                }
-            new_nodes_built = []
-            for name, current_node in current_nodes.items():
-                node = tmp_nodes_cache[name]
-                if current_node is None:
-                    new_nodes_built.append(node)
-                else:
-                    self._install_redis_connection(current_node)
-                    node.redis_connection = current_node.redis_connection
-            self._create_redis_connections(new_nodes_built)
+            # Create Redis connections to all new nodes. They are registered for
+            # re-authentication once they replace the current nodes below.
+            self._create_redis_connections(tmp_nodes_cache.values())
 
             # Set the tmp variables to the real variables
             with self._lock:
-                # A node that move_slot added since may have got a client from
-                # a command: that one is kept, and the one built above, which
-                # never opened a connection, is dropped. If it has none yet, it
-                # shares the one built above, so a command that still holds it
-                # does not build another one.
-                for node in new_nodes_built:
-                    current_node = self.nodes_cache.get(node.name)
-                    if current_node is None:
-                        continue
-                    if current_node.redis_connection is not None:
-                        node.redis_connection = current_node.redis_connection
-                    else:
-                        current_node.redis_connection = node.redis_connection
                 old_nodes_cache = self.nodes_cache
                 self.nodes_cache = tmp_nodes_cache
                 self.slots_cache = tmp_slots
