@@ -1130,7 +1130,10 @@ class Monitor:
     """
 
     monitor_re = re.compile(r"\[(\d+) (.*?)\] (.*)")
-    command_re = re.compile(r'"(.*?)(?<!\\)"')
+    # Each argument is quoted with its backslashes and quotes escaped, so an
+    # argument ending in a backslash ends in an escaped backslash, not an
+    # escaped quote.
+    command_re = re.compile(r'"([^"\\]*+(?:\\.[^"\\]*+)*+)"')
 
     def __init__(self, connection_pool: ConnectionPool):
         self.connection_pool = connection_pool

@@ -125,11 +125,14 @@ Refreshes asked for by errors, including the one every ``reinitialize_steps``
 MOVED errors, run at most once per ``topology_refresh_min_interval`` seconds
 per client (one second by default); requests in between are collapsed into one
 refresh, run by the next command once the interval has passed.
+A refresh asks the startup nodes first. While no slot map it got covers all
+slots, it then asks the other nodes of the current topology, so it reaches no
+node only when all of them fail. This holds with ``dynamic_startup_nodes=False``
+too, where the startup nodes are only the ones passed to the client.
 A refresh asked for this way that fails (no node reachable, or no usable
 topology) is logged and asked for again, and the command that ran it goes on
 with the slot map the client already has: the nodes it routes to may still
-answer, for example when ``dynamic_startup_nodes=False`` and only the startup
-nodes are unreachable. A command that failed with a connection error or a
+answer. A command that failed with a connection error or a
 timeout gives up its retries as soon as a refresh that ended since reached no
 node, because the slot map it would retry on is the one it failed on, and
 raises ``RedisClusterUnreachableError`` with its own error as the cause; so
