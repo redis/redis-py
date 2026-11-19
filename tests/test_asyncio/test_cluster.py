@@ -2475,6 +2475,9 @@ class TestTopologyRefreshKeepsConnections:
 
         disconnects = case not in ("healthy", "push_notifications", "not_connected")
         assert connection.disconnect.await_count == int(disconnects)
+        if disconnects and case != "marked":
+            # A dead or dirty socket is closed without waiting for the close
+            connection.disconnect.assert_awaited_once_with(nowait=True)
         assert connection.can_read.await_count == int(
             case not in ("marked", "not_connected")
         )
@@ -8120,11 +8123,39 @@ class TestNodesManager:
 
         await node.re_auth_callback(token)
 
-        closed.disconnect.assert_awaited_once()
+        closed.disconnect.assert_awaited_once_with(nowait=True)
         closed.send_command.assert_not_called()
         healthy.disconnect.assert_not_called()
         healthy.send_command.assert_awaited_once_with("AUTH", "oid", "value")
         assert list(node._free) == [closed, healthy]
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_continues_when_disconnecting_a_closed_connection_fails(
+        self,
+    ) -> None:
+        """
+        A failure while disconnecting a connection the server has closed does
+        not stop the token renewal: the next free connection is still
+        re-authenticated, every connection stays in the free queue, and the
+        error is raised once the sweep is done.
+        """
+        node = ClusterNode(default_host, 7000)
+        closed = self._re_auth_connection(False, closed_by_server=True)
+        closed.disconnect.side_effect = TimeoutError("Timed out closing connection")
+        healthy = self._re_auth_connection(False)
+        node._free.extend([closed, healthy])
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(TimeoutError, match="Timed out closing connection"):
+            await node.re_auth_callback(token)
+
+        closed.send_command.assert_not_called()
+        healthy.send_command.assert_awaited_once_with("AUTH", "oid", "value")
+        assert list(node._free) == [closed, healthy]
+        # Not connected, so the node is not reported unclosed when collected
+        closed.is_connected = False
 
     @pytest.mark.fixed_client
     async def test_failed_re_auth_returns_connections_to_the_free_queue(
@@ -11470,7 +11501,7 @@ class TestClusterPubSubWithMocks:
 
         expected = [mock.call.connect()]
         if closed_by_server:
-            expected.insert(0, mock.call.disconnect())
+            expected.insert(0, mock.call.disconnect(nowait=True))
         assert calls.mock_calls == expected
         # Not connected, so the node is not reported unclosed when collected
         connection.is_connected = False

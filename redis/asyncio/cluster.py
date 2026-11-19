@@ -2581,7 +2581,9 @@ class ClusterNode:
                 connection,
                 e,
             )
-            await connection.disconnect()
+            # The socket is dead or dirty, so there is no clean close to wait
+            # for, and a close that times out must not fail the caller
+            await connection.disconnect(nowait=True)
 
     def release(self, connection: Connection) -> None:
         """
@@ -2840,13 +2842,13 @@ class ClusterNode:
                     # and opening a socket here only to authenticate could
                     # raise and stop the token renewal
                     continue
-                # A connection the server has closed, or a dirty one, is
-                # disconnected here instead of failing the AUTH, for the same
-                # reason
-                await self._prepare_acquired_connection(conn)
-                if not conn.is_connected:
-                    continue
                 try:
+                    # A connection the server has closed, or a dirty one, is
+                    # disconnected here instead of failing the AUTH, for the
+                    # same reason
+                    await self._prepare_acquired_connection(conn)
+                    if not conn.is_connected:
+                        continue
                     await conn.retry.call_with_retry(
                         lambda: conn.send_command(
                             "AUTH", token.try_get("oid"), token.get_value()
