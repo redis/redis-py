@@ -83,6 +83,12 @@ class TestMonitor:
             response = wait_for_command(r, m, "GET foo\\\\x92")
             assert response["command"] == "GET foo\\\\x92"
 
+    def test_command_with_trailing_backslash(self, r):
+        with r.monitor() as m:
+            r.set("foo\\", "bar")
+            response = wait_for_command(r, m, "SET foo\\\\ bar")
+            assert response["command"] == "SET foo\\\\ bar"
+
     @skip_if_redis_enterprise()
     def test_lua_script(self, r):
         with r.monitor() as m:
