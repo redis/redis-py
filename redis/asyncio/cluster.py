@@ -23,6 +23,7 @@ from typing import (
     Dict,
     Generator,
     Iterable,
+    Iterator,
     List,
     Literal,
     Mapping,
@@ -3216,7 +3217,7 @@ class NodesManager:
         self,
         queried_nodes: Iterable["ClusterNode"],
         last_failed_node_name: str | None,
-    ) -> Iterable["ClusterNode"]:
+    ) -> Iterator["ClusterNode"]:
         """
         The nodes of the current topology that are not in :queried_nodes:, for
         a refresh that got no slot map covering all slots from them. With
