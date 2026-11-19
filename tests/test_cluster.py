@@ -6496,6 +6496,37 @@ class TestNodesManager:
         assert published.redis_connection is command_client
 
     @pytest.mark.fixed_client
+    def test_refresh_shares_its_client_with_a_node_move_slot_added_while_it_built(
+        self,
+    ):
+        """
+        The clients of the nodes new to the topology are built outside the
+        lock. If move_slot adds one of them meanwhile and no command installed
+        a client on it yet, that node shares the published node's client, so a
+        command that still holds it does not build another one.
+        """
+        nodes_manager, _ = self._seed_only_nodes_manager()
+        del nodes_manager.nodes_cache["127.0.0.1:7003"]
+        moved_node = ClusterNode("127.0.0.1", 7003)
+        create_redis_connections = nodes_manager._create_redis_connections
+
+        def move_slot_while_building(nodes):
+            create_redis_connections(nodes)
+            # move_slot adds the node, before any command installs its client
+            nodes_manager.nodes_cache["127.0.0.1:7003"] = moved_node
+
+        with patch.object(
+            nodes_manager,
+            "_create_redis_connections",
+            side_effect=move_slot_while_building,
+        ):
+            nodes_manager.initialize()
+
+        published = nodes_manager.nodes_cache["127.0.0.1:7003"]
+        assert published.redis_connection is not None
+        assert moved_node.redis_connection is published.redis_connection
+
+    @pytest.mark.fixed_client
     def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(self):
         """
         A refresh whose seeds fail raises RedisClusterUnreachableError only

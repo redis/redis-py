@@ -4308,14 +4308,17 @@ class NodesManager:
             with self._lock:
                 # A node that move_slot added since may have got a client from
                 # a command: that one is kept, and the one built above, which
-                # never opened a connection, is dropped
+                # never opened a connection, is dropped. If it has none yet, it
+                # shares the one built above, so a command that still holds it
+                # does not build another one.
                 for node in new_nodes_built:
                     current_node = self.nodes_cache.get(node.name)
-                    if (
-                        current_node is not None
-                        and current_node.redis_connection is not None
-                    ):
+                    if current_node is None:
+                        continue
+                    if current_node.redis_connection is not None:
                         node.redis_connection = current_node.redis_connection
+                    else:
+                        current_node.redis_connection = node.redis_connection
                 old_nodes_cache = self.nodes_cache
                 self.nodes_cache = tmp_nodes_cache
                 self.slots_cache = tmp_slots
