@@ -278,6 +278,10 @@ Use `Maintainer decision` for a concluded review. Use `Preliminary assessment` w
 - <decisive code-path or test-inspection evidence>
 - <what remains uncertain at runtime>
 
+## Passes run
+
+<For a PR, the same entries as in the Pull Request report below.>
+
 ## Proposed runtime probe
 
 - Concern: <the uncertainty that could change the decision>
@@ -331,6 +335,13 @@ Use `Maintainer decision` for a concluded review. Use `Preliminary assessment` w
 
 - <runtime/code-path result>
 - <test/compatibility result>
+
+## Passes run
+
+- Sync/async parity: <mirrored files and tests checked, or "not triggered">
+- Shared-helper contract: <each changed helper -> callers listed, including what each does when the helper raises; or "not triggered">
+- Interleaving and ownership: <orderings traced, for example "release during idle AUTH", "two rotations T1 -> T2"; or "not triggered">
+- Scope: <"whole patch at <head sha>"; on a re-review, also the head it was compared against>
 
 ## Existing capability and alternatives
 

@@ -21,6 +21,7 @@ from typing import (
     Callable,
     Dict,
     Iterable,
+    Iterator,
     List,
     Literal,
     Optional,
@@ -1230,6 +1231,9 @@ class RedisCluster(
             listed in the CLUSTER SLOTS output.
             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
             specific IP addresses, it is best to set it to false.
+            Either way, a topology refresh that gets no slot map covering all
+            slots from the startup nodes also asks the nodes of the current
+            topology.
         :param cluster_error_retry_attempts:
             @deprecated - Please configure the 'retry' object instead
             In case 'retry' object is set - this argument is ignored!
@@ -3867,9 +3871,7 @@ class NodesManager:
             # replace the current one (slots not covered, or nodes that
             # disagree on them). The current topology keeps serving until a
             # refresh succeeds: this may be a command for a healthy shard, which
-            # must not fail for a refresh another error asked for, and the
-            # nodes queried may be only seeds (dynamic_startup_nodes=False)
-            # while the nodes of the current topology still answer.
+            # must not fail for a refresh another error asked for.
             logger.error(f"Topology refresh failed, keeping the current one: {e}")
         except BaseException:
             # Any other error is raised, but the request is kept: the flag was
@@ -3881,6 +3883,58 @@ class NodesManager:
             )
             raise
 
+    def _current_topology_nodes(
+        self,
+        queried_nodes: Iterable["ClusterNode"],
+        last_failed_node_name: str | None,
+    ) -> Iterator["ClusterNode"]:
+        """
+        The nodes of the current topology that are not in :queried_nodes:, for
+        a refresh that got no slot map covering all slots from them. With
+        dynamic_startup_nodes=False the startup nodes are only the seeds, which
+        may fail while the nodes of the current topology still answer. The
+        order is random, so clients don't all ask the same node, with the
+        nodes that have a connection open first, as they served commands
+        lately and no error closed it, and :last_failed_node_name: last. A
+        node with no client is skipped: only a node that move_slot added
+        before its command built one has none, and any other node answers
+        with the same slot map. So the refresh queries every node through the
+        client the node keeps, and never installs one on a node that command
+        threads can reach. A generator: nothing is computed unless the
+        refresh reaches it.
+        """
+        queried_names = {node.name for node in queried_nodes}
+        with self._lock:
+            nodes = [
+                node
+                for name, node in self.nodes_cache.items()
+                if name not in queried_names
+            ]
+        random.shuffle(nodes)
+        connected_nodes = []
+        other_nodes = []
+        last_failed_node = None
+        for node in nodes:
+            r = node.redis_connection
+            if r is None:
+                continue
+            if node.name == last_failed_node_name:
+                last_failed_node = node
+            elif any(
+                connection.is_connected
+                for connection in r.connection_pool._get_free_connections()
+            ) or any(
+                connection.is_connected
+                for connection in r.connection_pool._get_in_use_connections()
+            ):
+                connected_nodes.append(node)
+            else:
+                other_nodes.append(node)
+        yield from connected_nodes
+        yield from other_nodes
+        if last_failed_node is not None:
+            yield last_failed_node
+
     def initialize(
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
@@ -3889,6 +3943,9 @@ class NodesManager:
     ):
         """
         Initializes the nodes cache, slots cache and redis connections.
+        CLUSTER SLOTS is asked of the startup nodes, the additional startup
+        nodes and the last failed node, then, while no slot map covers all
+        slots, of the other nodes of the current topology.
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
         :disconnect_startup_nodes_pools:
@@ -3977,16 +4034,23 @@ class NodesManager:
 
             # An address that is already a startup node is queried through that
             # node's client, so a second client never replaces a live node's one.
+            # One that is a node of the current topology with a client (e.g. the
+            # target of the MOVED that asked for this refresh) is queried through
+            # that node, over the connections it already has, and keeps them.
             # Startup nodes are named after the resolved localhost, like
             # ClusterNode names them.
-            additional_startup_nodes = [
-                ClusterNode(host, port)
-                for host, port in additional_startup_nodes_info
-                if get_node_name(
+            additional_startup_nodes = []
+            for host, port in additional_startup_nodes_info:
+                name = get_node_name(
                     _resolve_localhost() if host == "localhost" else host, port
                 )
-                not in startup_node_names
-            ]
+                if name in startup_node_names:
+                    continue
+                with self._lock:
+                    node = self.nodes_cache.get(name)
+                if node is None or node.redis_connection is None:
+                    node = ClusterNode(host, port)
+                additional_startup_nodes.append(node)
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
                     if node.name == last_failed_node_name:
@@ -4004,12 +4068,21 @@ class NodesManager:
                 startup_nodes,
                 additional_startup_nodes,
                 deferred_failed_nodes,
+                # Only reached while no node gave a slot map covering all slots
+                self._current_topology_nodes(
+                    chain(
+                        startup_nodes, additional_startup_nodes, deferred_failed_nodes
+                    ),
+                    last_failed_node_name,
+                ),
             ):
                 try:
+                    created_client = False
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
 
                     else:
+                        created_client = True
                         # Create a new Redis connection
                         if is_debug_log_enabled():
                             socket_timeout = kwargs.get("socket_timeout", "not set")
@@ -4040,10 +4113,13 @@ class NodesManager:
                         else:
                             startup_node.redis_connection = r
                     # Collected before the query, so a client is released also
-                    # when its CLUSTER SLOTS raises
+                    # when its CLUSTER SLOTS raises. A node of the current
+                    # topology is queried through its own client, which stays
+                    # with the node: _release_removed_nodes releases it if the
+                    # node leaves the topology.
                     if startup_node.name in self.startup_nodes:
                         queried_startup_nodes.append((startup_node.name, r))
-                    else:
+                    elif created_client:
                         queried_additional_clients.append(r)
                     try:
                         if is_debug_log_enabled():
@@ -4723,8 +4799,8 @@ class ClusterPubSub(PubSub):
                     break
                 pubsub, message = self._sharded_pass(deadline - start)
                 if not self.node_pubsub_mapping:
-                    # Polls wait out their share, and a pass with every node in
-                    # cool-off sleeps; only an emptied mapping returns at once.
+                    # A pass over an emptied mapping has only waited, so
+                    # passing again before the deadline would read nothing.
                     break
             if message is None:
                 # A message can reach a node after its slice ran out.
@@ -4844,7 +4920,17 @@ class ClusterPubSub(PubSub):
                 return pubsub, message
         if first_error is not None and failed == polled:
             raise first_error
-        if polled == 0 and next_ready is not None:
+        if polled == 0:
+            if next_ready is None:
+                # No node to read and none cooling off: node_pubsub_mapping is
+                # empty. A reconciliation pass whose every attach failed leaves
+                # it that way - the GC drops the per-node pubsubs that hold
+                # nothing - and its shard channels only retry on the next
+                # slots-cache change, which a settled topology never sends. Ask
+                # for one, and wait as for a cool-off: returning at once would
+                # spin a reader loop on get_sharded_message.
+                self._schedule_topology_repair()
+                next_ready = time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
             self._wait_out_cool_off(next_ready, timeout)
         return None, None
 

@@ -850,6 +850,22 @@ def test_mrange_exclude_empty_with_groupby_raises(client):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
+def test_mrange_groupby_requires_reduce(client):
+    # GROUPBY and REDUCE are all-or-nothing. This is validated client-side,
+    # so it does not require server support.
+    for cmd in (client.ts().mrange, client.ts().mrevrange):
+        with pytest.raises(
+            redis.DataError, match="groupby and reduce must be set together"
+        ):
+            cmd("-", 500, filters=["sensor=1"], groupby="type")
+        with pytest.raises(
+            redis.DataError, match="groupby and reduce must be set together"
+        ):
+            cmd("-", 500, filters=["sensor=1"], reduce="max")
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -1358,16 +1374,68 @@ def test_mrange_unified_metadata_bytes_keys():
         }
 
 
+@pytest.mark.onlynoncluster
+@pytest.mark.redismod
+def test_mrange_groupby_unified_metadata_matches_on_both_protocols(request, stack_url):
+    results = {}
+    for protocol in (2, 3):
+        with _get_client(
+            redis.Redis,
+            request,
+            decode_responses=True,
+            from_url=stack_url,
+            protocol=protocol,
+            legacy_responses=False,
+        ) as r:
+            r.flushdb()
+            r.ts().create("t1", labels={"team": "ny"})
+            r.ts().create("t2", labels={"team": "ny"})
+            for i in range(4):
+                r.ts().add("t1", 1000 + i, i)
+                r.ts().add("t2", 1000 + i, i * 2)
+            results[protocol] = [
+                r.ts().mrange("-", "+", ["team=ny"], groupby="team", reduce="SUM"),
+                r.ts().mrevrange(
+                    "-",
+                    "+",
+                    ["team=ny"],
+                    aggregation_type="avg",
+                    bucket_size_msec=2,
+                    groupby="team",
+                    reduce="max",
+                ),
+            ]
+
+    assert results[2] == results[3]
+    mrange, mrevrange = results[2]
+    assert mrange["team=ny"][1] == {"reducers": ["sum"]}
+    assert mrevrange["team=ny"][1] == {"reducers": ["max"]}
+
+
 @pytest.mark.redismod
 @pytest.mark.fixed_client
 @pytest.mark.parametrize(
     "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
 )
 def test_info_without_decode_responses(request, stack_url, protocol):
-    kwargs = {"decode_responses": False, "from_url": stack_url}
-    if protocol is not SENTINEL:
-        kwargs["protocol"] = protocol
-    client = _get_client(redis.Redis, request, **kwargs)
+    if protocol is SENTINEL:
+        # Built directly, because _get_client applies --protocol. An explicit
+        # protocol=3 returns the native RESP3 dict, not the default TSInfo.
+        client = redis.Redis.from_url(stack_url, decode_responses=False)
+
+        def teardown():
+            client.flushdb()
+            client.close()
+
+        request.addfinalizer(teardown)
+    else:
+        client = _get_client(
+            redis.Redis,
+            request,
+            decode_responses=False,
+            from_url=stack_url,
+            protocol=protocol,
+        )
     client.flushdb()
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     client.ts().add(1, 1, 1.5)

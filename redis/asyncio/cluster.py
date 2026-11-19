@@ -23,6 +23,7 @@ from typing import (
     Dict,
     Generator,
     Iterable,
+    Iterator,
     List,
     Literal,
     Mapping,
@@ -418,6 +419,9 @@ class RedisCluster(
           listed in the CLUSTER SLOTS output.
           If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
           specific IP addresses, it is best to set it to false.
+          Either way, a topology refresh that gets no slot map covering all
+          slots from the startup nodes also asks the nodes of the current
+          topology.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -965,11 +969,8 @@ class RedisCluster(
                             # current topology keeps serving until a refresh
                             # succeeds: this may be a command for a healthy
                             # shard, which must not fail for a refresh another
-                            # error asked for, and the nodes queried may be only
-                            # seeds (dynamic_startup_nodes=False) while the
-                            # nodes of the current topology still answer. The
-                            # failure is counted, so the next refresh runs once
-                            # the backoff allows.
+                            # error asked for. The failure is counted, so the
+                            # next refresh runs once the backoff allows.
                             logger.error(
                                 f"Topology refresh failed, keeping the current one: {e}"
                             )
@@ -2061,12 +2062,11 @@ class RedisCluster(
                     )
                 # Connection retries are being handled in the node's
                 # Retry object. The failed connection has disconnected itself;
-                # the node's in-use connections are kept, and a timeout keeps the
-                # free ones too: closing them all would reconnect every caller of
-                # a node that may be healthy. After a connection error the free
-                # ones are reconnected lazily on acquire, since the server may
-                # have closed them all and the retries would take them one by one.
-                target_node._mark_free_connections_for_reconnect_on_error(e)
+                # the node's other connections are kept: one error, such as a
+                # refused connect, does not mean they are broken, and closing
+                # them all would reconnect every caller of a node that may be
+                # healthy. A free connection the server has closed is found and
+                # reconnected when it is acquired.
 
                 # Move the failed node to the end of the cached nodes. The
                 # refresh keeps that order, so it does not pick this node as the
@@ -2550,6 +2550,42 @@ class ClusterNode:
                 )
             await connection.disconnect()
 
+    async def _prepare_acquired_connection(self, connection: Connection) -> None:
+        """
+        Ensure a connection just taken from the free queue is ready for the send command flow.
+
+        A connection marked for reconnect is disconnected. A connected one is
+        checked the way ``ConnectionPool.ensure_connection`` checks it:
+        ``can_read`` reports a stream the server has closed or reset from
+        ``at_eof()`` / ``exception()``, with no I/O, and pending data on an idle
+        connection means it is dirty, unless it is push notifications to apply.
+        A dead or dirty connection is disconnected and connects again lazily on
+        the send, so only the connections that are broken get reconnected.
+        """
+        if connection.should_reconnect():
+            await self.disconnect_if_needed(connection)
+            return
+        if not connection.is_connected:
+            return
+        try:
+            if await connection.can_read():
+                maint_notifications_config = self.connection_kwargs.get(
+                    "maint_notifications_config"
+                )
+                if maint_notifications_config and maint_notifications_config.enabled:
+                    await connection.handle_pending_push_notifications()
+                else:
+                    raise ConnectionError("Connection has data")
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.debug(
+                "Disconnecting acquired connection that is not ready: %s, %r",
+                connection,
+                e,
+            )
+            # The socket is dead or dirty, so there is no clean close to wait
+            # for, and a close that times out must not fail the caller
+            await connection.disconnect(nowait=True)
+
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
@@ -2634,30 +2670,6 @@ class ClusterNode:
             finally:
                 self._free.extend(connections)
 
-    def _mark_free_connections_for_reconnect_on_error(self, error: Exception) -> bool:
-        """
-        Mark the free connections for reconnect after a connection error.
-
-        A connection error (not a timeout) on one connection means the server
-        may have closed the others too: a restart, an idle ``timeout``, a
-        ``CLIENT KILL``. Unlike the sync pool, ``acquire_connection`` does not
-        check whether a free connection is still alive, so without this each
-        retry would take another dead one. Marking is lazy: a connection is
-        reconnected by ``disconnect_if_needed`` only when it is acquired, so the
-        connections that are in use, and the idle ones never used again, are
-        left alone. Errors that are not node failures (``MaxClientsReachedError``,
-        ``AuthenticationError``) mark nothing.
-
-        Returns whether the error was one that marks them.
-        """
-        if isinstance(error, ConnectionError) and not isinstance(
-            error, RedisCluster.NOT_NODE_FAILURE_ERRORS
-        ):
-            for connection in self._free:
-                connection.mark_for_reconnect()
-            return True
-        return False
-
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
     ) -> Any:
@@ -2698,8 +2710,9 @@ class ClusterNode:
         # Acquire connection
         connection = self.acquire_connection()
         try:
-            # Handle lazy disconnect for connections marked for reconnect
-            await self.disconnect_if_needed(connection)
+            # Disconnect a connection that is marked, dead or dirty; the send
+            # connects it again
+            await self._prepare_acquired_connection(connection)
 
             # HIMPORT SET is the one command whose wire form depends on
             # per-connection state: the fieldset must be PREPAREd on this
@@ -2780,27 +2793,23 @@ class ClusterNode:
         # Acquire connection
         connection = self.acquire_connection()
         try:
-            # Handle lazy disconnect for connections marked for reconnect
-            await self.disconnect_if_needed(connection)
+            # Disconnect a connection that is marked, dead or dirty; the send
+            # connects it again
+            await self._prepare_acquired_connection(connection)
 
-            try:
-                # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
-                # batched write (it bypasses the per-command lazy prepare path).
-                await self._himport_prepare_pipeline(connection, commands)
+            # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
+            # batched write (it bypasses the per-command lazy prepare path).
+            await self._himport_prepare_pipeline(connection, commands)
 
-                # Execute command
-                await connection.send_packed_command(
-                    await _pack_pipeline_commands(
-                        connection, [cmd.args for cmd in commands]
-                    )
+            # Execute command
+            await connection.send_packed_command(
+                await _pack_pipeline_commands(
+                    connection, [cmd.args for cmd in commands]
                 )
-            except Exception as e:
-                self._mark_free_connections_for_reconnect_on_error(e)
-                raise
+            )
 
             # Read responses
             ret = False
-            marked = False
             may_yield = len(commands) >= _PIPELINE_YIELD_MIN_COMMANDS
             for i, cmd in enumerate(commands):
                 if may_yield and i and not i % _PIPELINE_YIELD_MIN_COMMANDS:
@@ -2810,10 +2819,6 @@ class ClusterNode:
                         connection, cmd.args[0], **cmd.kwargs
                     )
                 except Exception as e:
-                    if not marked:
-                        # Once per pipeline: after a connection error every
-                        # later read fails on the same closed connection
-                        marked = self._mark_free_connections_for_reconnect_on_error(e)
                     cmd.result = e
                     ret = True
 
@@ -2833,13 +2838,18 @@ class ClusterNode:
                 conn = self._free.popleft()
                 tmp_queue.append(conn)
                 if conn.should_reconnect() or not conn.is_connected:
-                    # Not connected, or marked after a connection error so its
-                    # socket may be dead: it authenticates with fresh
-                    # credentials when it (re)connects on acquire, and opening
-                    # a socket here only to authenticate could raise and stop
-                    # the token renewal
+                    # Not connected, or marked for reconnect: it authenticates
+                    # with fresh credentials when it (re)connects on acquire,
+                    # and opening a socket here only to authenticate could
+                    # raise and stop the token renewal
                     continue
                 try:
+                    # A connection the server has closed, or a dirty one, is
+                    # disconnected here instead of failing the AUTH, for the
+                    # same reason
+                    await self._prepare_acquired_connection(conn)
+                    if not conn.is_connected:
+                        continue
                     await conn.retry.call_with_retry(
                         lambda: conn.send_command(
                             "AUTH", token.try_get("oid"), token.get_value()
@@ -3203,11 +3213,52 @@ class NodesManager:
         outage_error = _error_to_raise(self._last_refresh_unreachable_args, error)
         return None if outage_error is error else outage_error
 
+    def _current_topology_nodes(
+        self,
+        queried_nodes: Iterable["ClusterNode"],
+        last_failed_node_name: str | None,
+    ) -> Iterator["ClusterNode"]:
+        """
+        The nodes of the current topology that are not in :queried_nodes:, for
+        a refresh that got no slot map covering all slots from them. With
+        dynamic_startup_nodes=False the startup nodes are only the seeds, which
+        may fail while the nodes of the current topology still answer. The
+        order is random, so clients don't all ask the same node, with the
+        nodes that have a connection open first, as they served commands
+        lately and no error closed it, and :last_failed_node_name: last. A
+        generator: nothing is computed unless the refresh reaches it.
+        """
+        queried_names = {node.name for node in queried_nodes}
+        nodes = [
+            node for name, node in self.nodes_cache.items() if name not in queried_names
+        ]
+        random.shuffle(nodes)
+        connected_nodes = []
+        other_nodes = []
+        last_failed_node = None
+        for node in nodes:
+            if node.name == last_failed_node_name:
+                last_failed_node = node
+            elif any(connection.is_connected for connection in node._connections):
+                connected_nodes.append(node)
+            else:
+                other_nodes.append(node)
+        yield from connected_nodes
+        yield from other_nodes
+        if last_failed_node is not None:
+            yield last_failed_node
+
     async def initialize(
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
         last_failed_node_name: Optional[str] = None,
     ) -> None:
+        """
+        Initializes the nodes cache and slots cache. CLUSTER SLOTS is asked of
+        the startup nodes, the additional startup nodes and the last failed
+        node, then, while no slot map covers all slots, of the other nodes of
+        the current topology.
+        """
         self.read_load_balancer.reset()
         tmp_nodes_cache: Dict[str, "ClusterNode"] = {}
         tmp_slots: Dict[int, List["ClusterNode"]] = {}
@@ -3272,17 +3323,23 @@ class NodesManager:
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
             # An address that is already a startup node is queried through that
-            # node, so no temporary node is built for it. Startup nodes are
-            # named after the resolved localhost, like ClusterNode names them.
-            additional_startup_nodes = [
-                ClusterNode(host, port, **self.connection_kwargs)
-                for host, port in additional_startup_nodes_info
-                if get_node_name(
+            # node, so no temporary node is built for it. One that is a node of
+            # the current topology (e.g. the target of the MOVED that asked for
+            # this refresh) is queried through that node, over the connections
+            # it already has, and keeps them. Startup nodes are named after the
+            # resolved localhost, like ClusterNode names them.
+            additional_startup_nodes = []
+            for host, port in additional_startup_nodes_info:
+                name = get_node_name(
                     _resolve_localhost() if host == "localhost" else host, port
                 )
-                not in self.startup_nodes
-            ]
-            temporary_nodes.extend(additional_startup_nodes)
+                if name in self.startup_nodes:
+                    continue
+                node = self.nodes_cache.get(name)
+                if node is None:
+                    node = ClusterNode(host, port, **self.connection_kwargs)
+                    temporary_nodes.append(node)
+                additional_startup_nodes.append(node)
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
                     if node.name == last_failed_node_name:
@@ -3294,6 +3351,13 @@ class NodesManager:
                 startup_nodes,
                 additional_startup_nodes,
                 deferred_failed_nodes,
+                # Only reached while no node gave a slot map covering all slots
+                self._current_topology_nodes(
+                    chain(
+                        startup_nodes, additional_startup_nodes, deferred_failed_nodes
+                    ),
+                    last_failed_node_name,
+                ),
             ):
                 try:
                     # Make sure cluster mode is enabled on this node
@@ -4774,10 +4838,12 @@ class TransactionStrategy(AbstractStrategy):
         self._raise_instead_of_retry()
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state.
         # A connection acquired just now holds no WATCH state yet, so it is
-        # reconnected if an earlier connection error marked it.
-        if not self._watching or connection is not held_connection:
+        # reconnected if it is marked, dead or dirty. A held one is only
+        # disconnected if not watching - disconnecting would lose WATCH state.
+        if connection is not held_connection:
+            await redis_node._prepare_acquired_connection(connection)
+        elif not self._watching:
             await redis_node.disconnect_if_needed(connection)
 
         # Start timing for observability
@@ -4872,13 +4938,6 @@ class TransactionStrategy(AbstractStrategy):
         if self._watch_acknowledged or isinstance(
             error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
-            if self._transaction_node is not None:
-                # As on the command path: after a connection error the server
-                # may have closed the node's free connections too, and the
-                # retries would take them one by one
-                self._transaction_node._mark_free_connections_for_reconnect_on_error(
-                    error
-                )
             if self._transaction_connection and self._transaction_node:
                 # Disconnect and release back to pool
                 await self._transaction_connection.disconnect()
@@ -4994,10 +5053,12 @@ class TransactionStrategy(AbstractStrategy):
 
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state.
         # A connection acquired just now holds no WATCH state yet, so it is
-        # reconnected if an earlier connection error marked it.
-        if not self._watching or connection is not held_connection:
+        # reconnected if it is marked, dead or dirty. A held one is only
+        # disconnected if not watching - disconnecting would lose WATCH state.
+        if connection is not held_connection:
+            await redis_node._prepare_acquired_connection(connection)
+        elif not self._watching:
             await redis_node.disconnect_if_needed(connection)
 
         # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
@@ -5240,6 +5301,7 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
     ) -> AbstractConnection:
         connection = self._node.acquire_connection()
         try:
+            await self._node._prepare_acquired_connection(connection)
             await connection.connect()
         except BaseException:
             # connect() may fail mid-handshake (e.g. after the TCP socket
@@ -5656,8 +5718,8 @@ class ClusterPubSub(PubSub):
                     break
                 pubsub, message = await self._sharded_pass(deadline - start)
                 if not any(ps.connection for ps in self.node_pubsub_mapping.values()):
-                    # A pass with no connection to read returns without
-                    # suspending; looping on it would hold the event loop.
+                    # A pass with no connection to read has only waited, so
+                    # passing again before the deadline would read nothing.
                     break
             if message is None:
                 # A message can reach a node after its slice ran out.
@@ -5784,7 +5846,18 @@ class ClusterPubSub(PubSub):
         # An unconnected node is not down, so it keeps the error from surfacing.
         if first_error is not None and failed == polled + unconnected:
             raise first_error
-        if polled == 0 and next_ready is not None:
+        if polled == 0:
+            if next_ready is None:
+                # No node to read and none cooling off: node_pubsub_mapping is
+                # empty or no per-node pubsub has a connection. A reconciliation
+                # pass whose every attach failed leaves it that way - the GC
+                # drops the per-node pubsubs that hold nothing - and its shard
+                # channels only retry on the next slots-cache change, which a
+                # settled topology never sends. Ask for one, and wait as for a
+                # cool-off: a pass without a single await never suspends, so a
+                # reader loop on get_sharded_message would hold the event loop.
+                self._schedule_topology_repair()
+                next_ready = time.monotonic() + SHARD_POLL_COOL_OFF_SECONDS
             await self._wait_out_cool_off(next_ready, timeout)
         return None, None
 
