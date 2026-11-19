@@ -3516,10 +3516,12 @@ class NodesManager:
     def create_redis_connections(self, nodes):
         """
         This function will create a redis connection to all nodes in :nodes:
+        that have none. A client is built under the lock, so two threads (a
+        command and a topology refresh) never build one for the same node.
         """
         nodes = list(nodes)
-        self._create_redis_connections(nodes)
         with self._lock:
+            self._create_redis_connections(nodes)
             current_nodes = list(self.nodes_cache.values())
         self._dispatch_pools_instantiated(chain(current_nodes, nodes))
 
@@ -3931,8 +3933,9 @@ class NodesManager:
         for node in other_nodes:
             if node.redis_connection is None:
                 # A node that move_slot added before a command built its
-                # client. Built under the lock, like get_redis_connection does,
-                # so a client a command thread builds is never replaced.
+                # client. Built under the lock that create_redis_connections
+                # holds for get_redis_connection, so a client a command thread
+                # builds is never replaced.
                 with self._lock:
                     if node.redis_connection is None:
                         self._create_redis_connections([node])

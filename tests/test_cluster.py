@@ -6378,6 +6378,55 @@ class TestNodesManager:
         ]
 
     @pytest.mark.fixed_client
+    def test_refresh_and_a_command_build_one_client_for_a_topology_node(self):
+        """
+        A command thread (create_redis_connections, as get_redis_connection
+        calls it) and a refresh that both reach a node with no client build
+        one client for it: the refresh waits while the command builds it.
+        """
+        nodes_manager, _ = self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        node.redis_connection = None
+        create_redis_node = nodes_manager.create_redis_node
+        building = threading.Event()
+        release = threading.Event()
+        built = []
+
+        def slow_create_redis_node(*args, **kwargs):
+            r = create_redis_node(*args, **kwargs)
+            built.append(r)
+            if len(built) == 1:
+                building.set()
+                assert release.wait(5)
+            return r
+
+        with patch.object(
+            nodes_manager, "create_redis_node", side_effect=slow_create_redis_node
+        ):
+            command = threading.Thread(
+                target=nodes_manager.create_redis_connections, args=([node],)
+            )
+            command.start()
+            assert building.wait(5)
+            refresh_nodes = []
+            refresh = threading.Thread(
+                target=lambda: refresh_nodes.extend(
+                    nodes_manager._current_topology_nodes([], None)
+                )
+            )
+            refresh.start()
+            # The refresh is blocked on the lock while the command builds
+            refresh.join(0.2)
+            release.set()
+            command.join(5)
+            refresh.join(5)
+
+        assert not command.is_alive() and not refresh.is_alive()
+        assert len(built) == 1
+        assert node.redis_connection is built[0]
+        assert node in refresh_nodes
+
+    @pytest.mark.fixed_client
     def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(self):
         """
         A refresh whose seeds fail raises RedisClusterUnreachableError only
