@@ -3895,7 +3895,9 @@ class NodesManager:
         order is random, so clients don't all ask the same node, with the
         nodes that have a connection open first, as they served commands
         lately and no error closed it, and :last_failed_node_name: last. A
-        generator: nothing is computed unless the refresh reaches it.
+        node with no client gets one before it is yielded, so the refresh
+        queries it through the client the node keeps. A generator: nothing is
+        computed unless the refresh reaches it.
         """
         queried_names = {node.name for node in queried_nodes}
         with self._lock:
@@ -3922,10 +3924,18 @@ class NodesManager:
                 connected_nodes.append(node)
             else:
                 other_nodes.append(node)
-        yield from connected_nodes
-        yield from other_nodes
         if last_failed_node is not None:
-            yield last_failed_node
+            other_nodes.append(last_failed_node)
+        yield from connected_nodes
+        for node in other_nodes:
+            if node.redis_connection is None:
+                # A node that move_slot added before a command built its
+                # client. Built under the lock, like get_redis_connection does,
+                # so a client a command thread builds is never replaced.
+                with self._lock:
+                    if node.redis_connection is None:
+                        self._create_redis_connections([node])
+            yield node
 
     def initialize(
         self,

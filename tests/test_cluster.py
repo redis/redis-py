@@ -6349,6 +6349,35 @@ class TestNodesManager:
         free_connection.disconnect.assert_not_called()
 
     @pytest.mark.fixed_client
+    def test_refresh_keeps_the_client_it_builds_for_a_topology_node(self):
+        """
+        A node of the current topology with no client yet (one that move_slot
+        added) gets one when the refresh reaches it. The node keeps that
+        client, and the refresh does not release it.
+        """
+        nodes_manager, seed_connection = self._seed_only_nodes_manager()
+        seed_connection.execute_command.side_effect = ConnectionError("down")
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        node.redis_connection = None
+
+        with (
+            patch.object(NodesManager, "_free_pool_connections") as free_pool,
+            self._topology_cluster_slots(
+                answers={7002: default_cluster_slots}
+            ) as queried,
+        ):
+            nodes_manager.initialize()
+
+        client = node.redis_connection
+        assert client is not None
+        assert queried[-1] == 7002
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"].redis_connection is client
+        assert client.connection_pool not in [
+            call.args[0] for call in free_pool.call_args_list
+        ]
+
+    @pytest.mark.fixed_client
     def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(self):
         """
         A refresh whose seeds fail raises RedisClusterUnreachableError only
