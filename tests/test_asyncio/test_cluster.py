@@ -2371,7 +2371,6 @@ class TestTopologyRefreshKeepsConnections:
             connection.is_connected = False
 
     @pytest.mark.onlycluster
-    @pytest.mark.fixed_client
     @pytest.mark.parametrize(
         "parser_class",
         [
