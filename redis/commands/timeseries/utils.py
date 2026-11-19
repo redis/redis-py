@@ -198,10 +198,21 @@ def parse_m_range_unified(response, **kwargs):
             res[key] = [item[0], metadata, parse_range_unified(item[-1])]
         return res
     res = {}
-    metadata = _m_range_metadata(kwargs.get("aggregation_type"), kwargs.get("reduce"))
+    reduce = kwargs.get("reduce")
+    metadata = _m_range_metadata(kwargs.get("aggregation_type"), reduce)
     for item in response:
+        labels = _pairs_to_dict(item[1])
+        if reduce is not None:
+            # With GROUPBY and WITHLABELS, RESP2 adds the reducer and the
+            # sources as __reducer__ and __source__ labels. RESP3 reports them
+            # outside the labels, so drop them to match.
+            labels = {
+                k: v
+                for k, v in labels.items()
+                if nativestr(k) not in ("__reducer__", "__source__")
+            }
         res[item[0]] = [
-            _pairs_to_dict(item[1]),
+            labels,
             metadata,
             parse_range_unified(item[2]),
         ]
