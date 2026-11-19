@@ -47,6 +47,7 @@ from redis.utils import str_if_bytes
 from tests.conftest import (
     _get_client,
     assert_resp_response,
+    skip_if_redis_enterprise,
     skip_if_resp_version,
     skip_if_server_version_lt,
 )
@@ -1153,6 +1154,7 @@ class TestCache:
         assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_client_tracking_and_reset_without_a_cache_are_not_refused(self, request):
         # The guard lives on the cache's connections only. A dedicated client, because
         # RESET also drops the connection back to RESP2.
@@ -1284,6 +1286,7 @@ class TestCache:
         indirect=["r"],
     )
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_only_a_stored_read_enters_the_invalidation_table(
         self, r, r2, read_prefix, expected_tracked
     ):
@@ -1773,6 +1776,7 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
+    @skip_if_redis_enterprise()
     def test_an_ask_redirected_read_is_not_paired(self, r):
         """
         The ASK suppression, through the real cluster retry loop.
@@ -2245,6 +2249,7 @@ class TestClusterCache:
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
+@skip_if_redis_enterprise()
 class TestSentinelCache:
     @pytest.mark.parametrize(
         "sentinel_setup",
@@ -2387,6 +2392,7 @@ class TestSentinelCache:
         assert cache.size == 0
 
 
+@pytest.mark.ssl
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")

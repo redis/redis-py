@@ -1042,18 +1042,18 @@ class TestConnection:
             assert _connect.call_count == 1
             self.clear(conn)
 
-    # Client-internal test: builds a default localhost Connection and mocks the
-    # socket to count handshake retries, so it needs a co-located server rather
-    # than a remote managed Redis Enterprise endpoint.
-    @skip_if_redis_enterprise()
-    def test_connect_with_retries(self):
+    def test_connect_with_retries(self, master_connection_kwargs):
         """
         Validate that retries occur for the entire connect+handshake flow when OSError
         happens during the handshake phase.
         """
         with patch.object(socket.socket, "sendall") as sendall:
             sendall.side_effect = OSError(ECONNREFUSED)
-            conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+            conn = Connection(
+                retry_on_timeout=True,
+                retry=Retry(NoBackoff(), 2),
+                **master_connection_kwargs,
+            )
             with pytest.raises(ConnectionError):
                 conn.connect()
             # the handshake commands are the failing ones

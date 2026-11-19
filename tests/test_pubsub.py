@@ -201,6 +201,7 @@ class TestPubSubSubscriberModeProtocol:
         finally:
             p.close()
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     def test_subscriber_mode_rejects_regular_command_after_ssubscribe(self, request):
         r = self._get_resp2_client(request, cluster=True)
@@ -1559,6 +1560,7 @@ class TestPubSubSubcommands:
             assert wait_for_message(p)["type"] == "psubscribe"
         assert r.pubsub_numpat() == 3
 
+    @skip_if_redis_enterprise()
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("7.0.0")
     def test_pubsub_shardnumsub(self, r):
@@ -2096,8 +2098,8 @@ class TestPubSubWorkerThread:
 
 class TestPubSubDeadlock:
     @pytest.mark.timeout(30, method="thread")
-    def test_pubsub_deadlock(self, master_host):
-        pool = redis.ConnectionPool(host=master_host[0], port=master_host[1])
+    def test_pubsub_deadlock(self, master_connection_kwargs):
+        pool = redis.ConnectionPool(**master_connection_kwargs)
         r = redis.Redis(connection_pool=pool)
 
         for i in range(60):

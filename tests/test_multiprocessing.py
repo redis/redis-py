@@ -65,12 +65,12 @@ class TestMultiprocessing:
     def r(self, request):
         return _get_client(redis.Redis, request=request, single_connection_client=False)
 
-    def test_close_connection_in_child(self, master_host):
+    def test_close_connection_in_child(self, master_connection_kwargs):
         """
         A connection owned by a parent and closed by a child doesn't
         destroy the file descriptors so a parent can still use it.
         """
-        conn = Connection(host=master_host[0], port=master_host[1])
+        conn = Connection(**master_connection_kwargs)
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
@@ -91,12 +91,12 @@ class TestMultiprocessing:
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
-    def test_close_connection_in_parent(self, master_host):
+    def test_close_connection_in_parent(self, master_connection_kwargs):
         """
         A connection owned by a parent is unusable by a child if the parent
         (the owning process) closes the connection.
         """
-        conn = Connection(host=master_host[0], port=master_host[1])
+        conn = Connection(**master_connection_kwargs)
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
@@ -120,7 +120,7 @@ class TestMultiprocessing:
 
     @pytest.mark.parametrize("max_connections", [2, None])
     def test_release_parent_connection_from_pool_in_child_process(
-        self, max_connections, master_host
+        self, max_connections, request
     ):
         """
         A connection owned by a parent should not decrease the _created_connections
@@ -129,7 +129,7 @@ class TestMultiprocessing:
         """
 
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -153,13 +153,13 @@ class TestMultiprocessing:
         assert proc.exitcode == 0
 
     @pytest.mark.parametrize("max_connections", [1, 2, None])
-    def test_pool(self, max_connections, master_host):
+    def test_pool(self, max_connections, request):
         """
         A child will create its own connections when using a pool created
         by a parent.
         """
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -190,13 +190,13 @@ class TestMultiprocessing:
             assert conn.read_response() == b"PONG"
 
     @pytest.mark.parametrize("max_connections", [1, 2, None])
-    def test_close_pool_in_main(self, max_connections, master_host):
+    def test_close_pool_in_main(self, max_connections, request):
         """
         A child process that uses the same pool as its parent isn't affected
         when the parent disconnects all connections within the pool.
         """
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -242,16 +242,17 @@ class TestMultiprocessing:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.4.0")
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_child_does_not_serve_parent_cache_entries(self, pool_class, master_host):
+    def test_child_does_not_serve_parent_cache_entries(
+        self, pool_class, master_connection_kwargs
+    ):
         """
         A child does not serve client-side cache entries filled by its parent's
         connections: their invalidations are delivered to the parent.
         """
         key = f"fork-cache-{uuid.uuid4()}"
-        writer = redis.Redis(host=master_host[0], port=master_host[1])
+        writer = redis.Redis(**master_connection_kwargs)
         pool = pool_class(
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             protocol=3,
             cache_config=CacheConfig(),
         )
@@ -285,16 +286,17 @@ class TestMultiprocessing:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.4.0")
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_child_cache_hit_does_not_read_parent_socket(self, pool_class, master_host):
+    def test_child_cache_hit_does_not_read_parent_socket(
+        self, pool_class, master_connection_kwargs
+    ):
         """
         A child's cache lookup does not read a reply pending on a connection
         its parent is using.
         """
         key = f"fork-cache-{uuid.uuid4()}"
-        writer = redis.Redis(host=master_host[0], port=master_host[1])
+        writer = redis.Redis(**master_connection_kwargs)
         pool = pool_class(
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             protocol=3,
             cache_config=CacheConfig(),
             socket_timeout=2,
@@ -332,7 +334,7 @@ class TestMultiprocessing:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     @pytest.mark.parametrize("child_action", ["reuse", "reset", "delete"])
     def test_pool_connection_counts_after_fork(
-        self, pool_class, child_action, master_host, monkeypatch
+        self, pool_class, child_action, master_connection_kwargs, monkeypatch
     ):
         counts = Counter()
 
@@ -348,8 +350,7 @@ class TestMultiprocessing:
 
         monkeypatch.setattr(redis.connection, "record_connection_count", record)
         pool = pool_class(
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             max_connections=2,
             maint_notifications_config=MaintNotificationsConfig(enabled=False),
         )

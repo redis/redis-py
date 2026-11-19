@@ -472,6 +472,7 @@ class TestRedisClusterObj:
             conn = replica.redis_connection.connection
             assert conn.read_response.called is not True
 
+    @skip_if_redis_enterprise()
     def test_execute_command_node_flag_replicas(self, r):
         """
         Test command execution with nodes flag REPLICAS
@@ -954,6 +955,7 @@ class TestRedisClusterObj:
         new_conn = rand_node.redis_connection.connection_pool.get_connection()
         assert new_conn.retry._retries == 0
 
+    @skip_if_redis_enterprise()
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
         # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
@@ -1004,6 +1006,7 @@ class TestRedisClusterObj:
         assert "myself" not in nodes.get(curr_default_node.name).get("flags")
         assert r.get_default_node() != curr_default_node
 
+    @skip_if_redis_enterprise()
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     def test_address_remap(self, request, master_host):
         """Test that we can create a rediscluster object with
@@ -1050,6 +1053,7 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @skip_if_redis_enterprise()
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize(
         "remap_host, offset",
@@ -1548,6 +1552,7 @@ class TestClusterRedisCommands:
             == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -1596,6 +1601,7 @@ class TestClusterRedisCommands:
     def test_config_set(self, r):
         assert r.config_set("slowlog-log-slower-than", 0)
 
+    @skip_if_redis_enterprise()
     def test_cluster_config_resetstat(self, r):
         r.ping(target_nodes="all")
         all_info = r.info(target_nodes="all")
@@ -1641,6 +1647,7 @@ class TestClusterRedisCommands:
         # is reclaimed in the background
         assert r.unlink(*d.keys()) == 0
 
+    @skip_if_redis_enterprise()
     def test_pubsub_channels_merge_results(self, r):
         nodes = r.get_nodes()
         channels = []
@@ -1668,6 +1675,7 @@ class TestClusterRedisCommands:
         result.sort()
         assert result == channels
 
+    @skip_if_redis_enterprise()
     def test_pubsub_numsub_merge_results(self, r):
         nodes = r.get_nodes()
         pubsub_nodes = []
@@ -1720,6 +1728,7 @@ class TestClusterRedisCommands:
             [channel in r.pubsub_channels(target_nodes="all") for channel in expected]
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_pubsub_numsub(self, r):
         p1 = r.pubsub()
@@ -2018,6 +2027,7 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     def test_cluster_links(self, r):
         node = r.get_random_node()
@@ -2053,6 +2063,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.cluster_bumpepoch()
 
+    @skip_if_redis_enterprise()
     def test_info(self, r):
         # Map keys to same slot
         r.set("x{1}", 1)
@@ -2172,6 +2183,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.debug_segfault()
 
+    @skip_if_redis_enterprise()
     def test_config_resetstat(self, r):
         node = r.get_primaries()[0]
         r.ping(target_nodes=node)
@@ -2216,6 +2228,7 @@ class TestClusterRedisCommands:
         with pytest.raises(DataError):
             assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):
         node = r.get_primaries()[0]
@@ -3072,6 +3085,7 @@ class TestClusterRedisCommands:
         assert set(r.keys(pattern="test*", target_nodes="primaries")) == keys
 
     # SCAN COMMANDS
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan(self, r):
         r.set("a", 1)
@@ -3091,6 +3105,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     def test_cluster_scan_type(self, r):
         r.sadd("a-set", 1)
@@ -3112,6 +3127,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan_iter(self, r):
         keys_all = []
@@ -9171,6 +9187,7 @@ class TestClusterPipeline:
             )
 
 
+@skip_if_redis_enterprise()
 @pytest.mark.onlycluster
 class TestReadOnlyPipeline:
     """

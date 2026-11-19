@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import pytest
 import redis
@@ -801,6 +801,23 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     return parts.hostname, (parts.port or 6379)
+
+
+@pytest.fixture(scope="session")
+def master_connection_kwargs(request):
+    """
+    Connection kwargs for the server under test: the host and port of
+    ``master_host`` plus the username and password of ``--redis-url``, if it
+    has them, so a test that builds its own connection can authenticate.
+    """
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    kwargs = {"host": parts.hostname, "port": parts.port or 6379}
+    if parts.username:
+        kwargs["username"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    return kwargs
 
 
 @pytest.fixture()

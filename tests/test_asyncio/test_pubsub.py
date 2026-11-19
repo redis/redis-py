@@ -40,7 +40,12 @@ from redis.exceptions import (
 )
 from redis.typing import EncodableT
 from redis.utils import str_if_bytes
-from tests.conftest import REDIS_INFO, get_protocol_version, skip_if_server_version_lt
+from tests.conftest import (
+    REDIS_INFO,
+    get_protocol_version,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+)
 
 from .compat import aclosing, create_task
 
@@ -226,6 +231,7 @@ class TestPubSubSubscriberModeProtocol:
             await p.aclose()
             await self._close_client(r)
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_subscriber_mode_rejects_regular_command_after_ssubscribe(
         self, request
