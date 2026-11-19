@@ -23,6 +23,7 @@ from typing import (
     Dict,
     Generator,
     Iterable,
+    Iterator,
     List,
     Literal,
     Mapping,
@@ -420,6 +421,9 @@ class RedisCluster(
           listed in the CLUSTER SLOTS output.
           If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
           specific IP addresses, it is best to set it to false.
+          Either way, a topology refresh that gets no slot map covering all
+          slots from the startup nodes also asks the nodes of the current
+          topology.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -968,11 +972,8 @@ class RedisCluster(
                             # current topology keeps serving until a refresh
                             # succeeds: this may be a command for a healthy
                             # shard, which must not fail for a refresh another
-                            # error asked for, and the nodes queried may be only
-                            # seeds (dynamic_startup_nodes=False) while the
-                            # nodes of the current topology still answer. The
-                            # failure is counted, so the next refresh runs once
-                            # the backoff allows.
+                            # error asked for. The failure is counted, so the
+                            # next refresh runs once the backoff allows.
                             logger.error(
                                 f"Topology refresh failed, keeping the current one: {e}"
                             )
@@ -3223,11 +3224,52 @@ class NodesManager:
         outage_error = _error_to_raise(self._last_refresh_unreachable_args, error)
         return None if outage_error is error else outage_error
 
+    def _current_topology_nodes(
+        self,
+        queried_nodes: Iterable["ClusterNode"],
+        last_failed_node_name: str | None,
+    ) -> Iterator["ClusterNode"]:
+        """
+        The nodes of the current topology that are not in :queried_nodes:, for
+        a refresh that got no slot map covering all slots from them. With
+        dynamic_startup_nodes=False the startup nodes are only the seeds, which
+        may fail while the nodes of the current topology still answer. The
+        order is random, so clients don't all ask the same node, with the
+        nodes that have a connection open first, as they served commands
+        lately and no error closed it, and :last_failed_node_name: last. A
+        generator: nothing is computed unless the refresh reaches it.
+        """
+        queried_names = {node.name for node in queried_nodes}
+        nodes = [
+            node for name, node in self.nodes_cache.items() if name not in queried_names
+        ]
+        random.shuffle(nodes)
+        connected_nodes = []
+        other_nodes = []
+        last_failed_node = None
+        for node in nodes:
+            if node.name == last_failed_node_name:
+                last_failed_node = node
+            elif any(connection.is_connected for connection in node._connections):
+                connected_nodes.append(node)
+            else:
+                other_nodes.append(node)
+        yield from connected_nodes
+        yield from other_nodes
+        if last_failed_node is not None:
+            yield last_failed_node
+
     async def initialize(
         self,
         additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
         last_failed_node_name: Optional[str] = None,
     ) -> None:
+        """
+        Initializes the nodes cache and slots cache. CLUSTER SLOTS is asked of
+        the startup nodes, the additional startup nodes and the last failed
+        node, then, while no slot map covers all slots, of the other nodes of
+        the current topology.
+        """
         self.read_load_balancer.reset()
         tmp_nodes_cache: Dict[str, "ClusterNode"] = {}
         tmp_slots: Dict[int, List["ClusterNode"]] = {}
@@ -3292,17 +3334,23 @@ class NodesManager:
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
             # An address that is already a startup node is queried through that
-            # node, so no temporary node is built for it. Startup nodes are
-            # named after the resolved localhost, like ClusterNode names them.
-            additional_startup_nodes = [
-                ClusterNode(host, port, **self.connection_kwargs)
-                for host, port in additional_startup_nodes_info
-                if get_node_name(
+            # node, so no temporary node is built for it. One that is a node of
+            # the current topology (e.g. the target of the MOVED that asked for
+            # this refresh) is queried through that node, over the connections
+            # it already has, and keeps them. Startup nodes are named after the
+            # resolved localhost, like ClusterNode names them.
+            additional_startup_nodes = []
+            for host, port in additional_startup_nodes_info:
+                name = get_node_name(
                     _resolve_localhost() if host == "localhost" else host, port
                 )
-                not in self.startup_nodes
-            ]
-            temporary_nodes.extend(additional_startup_nodes)
+                if name in self.startup_nodes:
+                    continue
+                node = self.nodes_cache.get(name)
+                if node is None:
+                    node = ClusterNode(host, port, **self.connection_kwargs)
+                    temporary_nodes.append(node)
+                additional_startup_nodes.append(node)
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
                     if node.name == last_failed_node_name:
@@ -3314,6 +3362,13 @@ class NodesManager:
                 startup_nodes,
                 additional_startup_nodes,
                 deferred_failed_nodes,
+                # Only reached while no node gave a slot map covering all slots
+                self._current_topology_nodes(
+                    chain(
+                        startup_nodes, additional_startup_nodes, deferred_failed_nodes
+                    ),
+                    last_failed_node_name,
+                ),
             ):
                 try:
                     # Make sure cluster mode is enabled on this node
