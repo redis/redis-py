@@ -1447,6 +1447,9 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
+    # Warms the cache with 2000 sequential reads, so it needs the short round trip
+    # of a co-located server; against a remote endpoint it outlasts the timeout.
+    @skip_if_redis_enterprise()
     def test_invalidation_burst_during_a_blocking_command(self, r, r2):
         """
         The server pushes one invalidation per key, so writes from another client
