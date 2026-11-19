@@ -21,7 +21,10 @@ from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
 from tests.conftest import get_endpoint, skip_if_redis_enterprise
 from tests.entraid_utils import AuthType
-from tests.test_asyncio.conftest import get_credential_provider
+from tests.test_asyncio.conftest import (
+    get_credential_provider,
+    stop_credential_provider,
+)
 
 try:
     from redis_entraid.cred_provider import EntraIdCredentialsProvider
@@ -65,7 +68,10 @@ async def r_credential(request, create_redis, endpoint):
         "credential_provider": credential_provider,
     }
 
-    return await create_redis(url=endpoint, **kwargs)
+    try:
+        yield await create_redis(url=endpoint, **kwargs)
+    finally:
+        stop_credential_provider(credential_provider)
 
 
 @pytest_asyncio.fixture()

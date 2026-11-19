@@ -867,9 +867,24 @@ def get_credential_provider(request) -> CredentialProvider:
     return get_entra_id_credentials_provider(request, cred_provider_kwargs)
 
 
+def stop_credential_provider(credential_provider: CredentialProvider | None) -> None:
+    """
+    Stop the background token renewal of a streaming credential provider.
+
+    The renewal runs on its own event loop thread, so without this it outlives
+    the test, keeps renewing for the rest of the session and reports its
+    errors after the run.
+    """
+    token_mgr = getattr(credential_provider, "_token_mgr", None)
+    if token_mgr is not None:
+        token_mgr.stop()
+
+
 @pytest.fixture()
 def credential_provider(request) -> CredentialProvider:
-    return get_credential_provider(request)
+    provider = get_credential_provider(request)
+    yield provider
+    stop_credential_provider(provider)
 
 
 def get_endpoint(endpoint_name: str):
