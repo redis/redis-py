@@ -6371,6 +6371,35 @@ class TestNodesManager:
         assert node.redis_connection is None
 
     @pytest.mark.fixed_client
+    def test_refresh_asks_a_moved_target_of_the_topology_through_its_client(self):
+        """
+        An additional startup node (the target of a MOVED) that is a node of
+        the current topology is asked once, through the client that node
+        keeps: no client is built for it, and its connections stay open.
+        """
+        nodes_manager, seed_connection = self._seed_only_nodes_manager()
+        seed_connection.execute_command.side_effect = ConnectionError("down")
+        client = nodes_manager.nodes_cache["127.0.0.1:7002"].redis_connection
+        free_connection = MagicMock(is_connected=True)
+        client.connection_pool._available_connections.append(free_connection)
+
+        with (
+            patch.object(nodes_manager, "create_redis_node") as create_redis_node,
+            self._topology_cluster_slots(
+                answers={7002: default_cluster_slots}
+            ) as queried,
+        ):
+            nodes_manager.initialize(
+                additional_startup_nodes_info=[("127.0.0.1", 7002)]
+            )
+
+        assert queried == [7002]
+        create_redis_node.assert_not_called()
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"].redis_connection is client
+        free_connection.disconnect.assert_not_called()
+
+    @pytest.mark.fixed_client
     def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(self):
         """
         A refresh whose seeds fail raises RedisClusterUnreachableError only

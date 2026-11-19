@@ -3323,17 +3323,23 @@ class NodesManager:
                 # all reinitialize through the same node.
                 random.shuffle(startup_nodes)
             # An address that is already a startup node is queried through that
-            # node, so no temporary node is built for it. Startup nodes are
-            # named after the resolved localhost, like ClusterNode names them.
-            additional_startup_nodes = [
-                ClusterNode(host, port, **self.connection_kwargs)
-                for host, port in additional_startup_nodes_info
-                if get_node_name(
+            # node, so no temporary node is built for it. One that is a node of
+            # the current topology (e.g. the target of the MOVED that asked for
+            # this refresh) is queried through that node, over the connections
+            # it already has, and keeps them. Startup nodes are named after the
+            # resolved localhost, like ClusterNode names them.
+            additional_startup_nodes = []
+            for host, port in additional_startup_nodes_info:
+                name = get_node_name(
                     _resolve_localhost() if host == "localhost" else host, port
                 )
-                not in self.startup_nodes
-            ]
-            temporary_nodes.extend(additional_startup_nodes)
+                if name in self.startup_nodes:
+                    continue
+                node = self.nodes_cache.get(name)
+                if node is None:
+                    node = ClusterNode(host, port, **self.connection_kwargs)
+                    temporary_nodes.append(node)
+                additional_startup_nodes.append(node)
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
                     if node.name == last_failed_node_name:

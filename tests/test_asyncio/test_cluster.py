@@ -7791,6 +7791,43 @@ class TestNodesManager:
         assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
 
     @pytest.mark.fixed_client
+    async def test_refresh_asks_a_moved_target_of_the_topology_through_its_node(
+        self,
+    ) -> None:
+        """
+        An additional startup node (the target of a MOVED) that is a node of
+        the current topology is asked once, through that node: no temporary
+        node is built for it, and it is not closed after the refresh.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        queried_nodes = []
+
+        async def execute_command(target, *args, **kwargs):
+            if target.port == 10000:
+                raise ConnectionError("down")
+            queried_nodes.append(target)
+            return default_cluster_slots
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(ClusterNode, "disconnect", autospec=True) as disconnect,
+        ):
+            await nodes_manager.initialize(
+                additional_startup_nodes_info=[("127.0.0.1", 7002)]
+            )
+
+        assert queried_nodes == [node]
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
+        assert node not in [call.args[0] for call in disconnect.call_args_list]
+
+    @pytest.mark.fixed_client
     async def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(
         self,
     ) -> None:

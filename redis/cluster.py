@@ -4034,16 +4034,23 @@ class NodesManager:
 
             # An address that is already a startup node is queried through that
             # node's client, so a second client never replaces a live node's one.
+            # One that is a node of the current topology with a client (e.g. the
+            # target of the MOVED that asked for this refresh) is queried through
+            # that node, over the connections it already has, and keeps them.
             # Startup nodes are named after the resolved localhost, like
             # ClusterNode names them.
-            additional_startup_nodes = [
-                ClusterNode(host, port)
-                for host, port in additional_startup_nodes_info
-                if get_node_name(
+            additional_startup_nodes = []
+            for host, port in additional_startup_nodes_info:
+                name = get_node_name(
                     _resolve_localhost() if host == "localhost" else host, port
                 )
-                not in startup_node_names
-            ]
+                if name in startup_node_names:
+                    continue
+                with self._lock:
+                    node = self.nodes_cache.get(name)
+                if node is None or node.redis_connection is None:
+                    node = ClusterNode(host, port)
+                additional_startup_nodes.append(node)
             if last_failed_node_name is not None:
                 for index, node in enumerate(additional_startup_nodes):
                     if node.name == last_failed_node_name:
