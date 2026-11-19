@@ -2061,12 +2061,11 @@ class RedisCluster(
                     )
                 # Connection retries are being handled in the node's
                 # Retry object. The failed connection has disconnected itself;
-                # the node's in-use connections are kept, and a timeout keeps the
-                # free ones too: closing them all would reconnect every caller of
-                # a node that may be healthy. After a connection error the free
-                # ones are reconnected lazily on acquire, since the server may
-                # have closed them all and the retries would take them one by one.
-                target_node._mark_free_connections_for_reconnect_on_error(e)
+                # the node's other connections are kept: one error, such as a
+                # refused connect, does not mean they are broken, and closing
+                # them all would reconnect every caller of a node that may be
+                # healthy. A free connection the server has closed is found and
+                # reconnected when it is acquired.
 
                 # Move the failed node to the end of the cached nodes. The
                 # refresh keeps that order, so it does not pick this node as the
@@ -2550,6 +2549,42 @@ class ClusterNode:
                 )
             await connection.disconnect()
 
+    async def _prepare_acquired_connection(self, connection: Connection) -> None:
+        """
+        Ensure a connection just taken from the free queue is ready for the send command flow.
+
+        A connection marked for reconnect is disconnected. A connected one is
+        checked the way ``ConnectionPool.ensure_connection`` checks it:
+        ``can_read`` reports a stream the server has closed or reset from
+        ``at_eof()`` / ``exception()``, with no I/O, and pending data on an idle
+        connection means it is dirty, unless it is push notifications to apply.
+        A dead or dirty connection is disconnected and connects again lazily on
+        the send, so only the connections that are broken get reconnected.
+        """
+        if connection.should_reconnect():
+            await self.disconnect_if_needed(connection)
+            return
+        if not connection.is_connected:
+            return
+        try:
+            if await connection.can_read():
+                maint_notifications_config = self.connection_kwargs.get(
+                    "maint_notifications_config"
+                )
+                if maint_notifications_config and maint_notifications_config.enabled:
+                    await connection.handle_pending_push_notifications()
+                else:
+                    raise ConnectionError("Connection has data")
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.debug(
+                "Disconnecting acquired connection that is not ready: %s, %r",
+                connection,
+                e,
+            )
+            # The socket is dead or dirty, so there is no clean close to wait
+            # for, and a close that times out must not fail the caller
+            await connection.disconnect(nowait=True)
+
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
@@ -2634,30 +2669,6 @@ class ClusterNode:
             finally:
                 self._free.extend(connections)
 
-    def _mark_free_connections_for_reconnect_on_error(self, error: Exception) -> bool:
-        """
-        Mark the free connections for reconnect after a connection error.
-
-        A connection error (not a timeout) on one connection means the server
-        may have closed the others too: a restart, an idle ``timeout``, a
-        ``CLIENT KILL``. Unlike the sync pool, ``acquire_connection`` does not
-        check whether a free connection is still alive, so without this each
-        retry would take another dead one. Marking is lazy: a connection is
-        reconnected by ``disconnect_if_needed`` only when it is acquired, so the
-        connections that are in use, and the idle ones never used again, are
-        left alone. Errors that are not node failures (``MaxClientsReachedError``,
-        ``AuthenticationError``) mark nothing.
-
-        Returns whether the error was one that marks them.
-        """
-        if isinstance(error, ConnectionError) and not isinstance(
-            error, RedisCluster.NOT_NODE_FAILURE_ERRORS
-        ):
-            for connection in self._free:
-                connection.mark_for_reconnect()
-            return True
-        return False
-
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
     ) -> Any:
@@ -2698,8 +2709,9 @@ class ClusterNode:
         # Acquire connection
         connection = self.acquire_connection()
         try:
-            # Handle lazy disconnect for connections marked for reconnect
-            await self.disconnect_if_needed(connection)
+            # Disconnect a connection that is marked, dead or dirty; the send
+            # connects it again
+            await self._prepare_acquired_connection(connection)
 
             # HIMPORT SET is the one command whose wire form depends on
             # per-connection state: the fieldset must be PREPAREd on this
@@ -2780,27 +2792,23 @@ class ClusterNode:
         # Acquire connection
         connection = self.acquire_connection()
         try:
-            # Handle lazy disconnect for connections marked for reconnect
-            await self.disconnect_if_needed(connection)
+            # Disconnect a connection that is marked, dead or dirty; the send
+            # connects it again
+            await self._prepare_acquired_connection(connection)
 
-            try:
-                # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
-                # batched write (it bypasses the per-command lazy prepare path).
-                await self._himport_prepare_pipeline(connection, commands)
+            # PREPARE fieldsets referenced by buffered HIMPORT SETs before the
+            # batched write (it bypasses the per-command lazy prepare path).
+            await self._himport_prepare_pipeline(connection, commands)
 
-                # Execute command
-                await connection.send_packed_command(
-                    await _pack_pipeline_commands(
-                        connection, [cmd.args for cmd in commands]
-                    )
+            # Execute command
+            await connection.send_packed_command(
+                await _pack_pipeline_commands(
+                    connection, [cmd.args for cmd in commands]
                 )
-            except Exception as e:
-                self._mark_free_connections_for_reconnect_on_error(e)
-                raise
+            )
 
             # Read responses
             ret = False
-            marked = False
             may_yield = len(commands) >= _PIPELINE_YIELD_MIN_COMMANDS
             for i, cmd in enumerate(commands):
                 if may_yield and i and not i % _PIPELINE_YIELD_MIN_COMMANDS:
@@ -2810,10 +2818,6 @@ class ClusterNode:
                         connection, cmd.args[0], **cmd.kwargs
                     )
                 except Exception as e:
-                    if not marked:
-                        # Once per pipeline: after a connection error every
-                        # later read fails on the same closed connection
-                        marked = self._mark_free_connections_for_reconnect_on_error(e)
                     cmd.result = e
                     ret = True
 
@@ -2833,13 +2837,18 @@ class ClusterNode:
                 conn = self._free.popleft()
                 tmp_queue.append(conn)
                 if conn.should_reconnect() or not conn.is_connected:
-                    # Not connected, or marked after a connection error so its
-                    # socket may be dead: it authenticates with fresh
-                    # credentials when it (re)connects on acquire, and opening
-                    # a socket here only to authenticate could raise and stop
-                    # the token renewal
+                    # Not connected, or marked for reconnect: it authenticates
+                    # with fresh credentials when it (re)connects on acquire,
+                    # and opening a socket here only to authenticate could
+                    # raise and stop the token renewal
                     continue
                 try:
+                    # A connection the server has closed, or a dirty one, is
+                    # disconnected here instead of failing the AUTH, for the
+                    # same reason
+                    await self._prepare_acquired_connection(conn)
+                    if not conn.is_connected:
+                        continue
                     await conn.retry.call_with_retry(
                         lambda: conn.send_command(
                             "AUTH", token.try_get("oid"), token.get_value()
@@ -4774,10 +4783,12 @@ class TransactionStrategy(AbstractStrategy):
         self._raise_instead_of_retry()
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state.
         # A connection acquired just now holds no WATCH state yet, so it is
-        # reconnected if an earlier connection error marked it.
-        if not self._watching or connection is not held_connection:
+        # reconnected if it is marked, dead or dirty. A held one is only
+        # disconnected if not watching - disconnecting would lose WATCH state.
+        if connection is not held_connection:
+            await redis_node._prepare_acquired_connection(connection)
+        elif not self._watching:
             await redis_node.disconnect_if_needed(connection)
 
         # Start timing for observability
@@ -4872,13 +4883,6 @@ class TransactionStrategy(AbstractStrategy):
         if self._watch_acknowledged or isinstance(
             error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
-            if self._transaction_node is not None:
-                # As on the command path: after a connection error the server
-                # may have closed the node's free connections too, and the
-                # retries would take them one by one
-                self._transaction_node._mark_free_connections_for_reconnect_on_error(
-                    error
-                )
             if self._transaction_connection and self._transaction_node:
                 # Disconnect and release back to pool
                 await self._transaction_connection.disconnect()
@@ -4994,10 +4998,12 @@ class TransactionStrategy(AbstractStrategy):
 
         held_connection = self._transaction_connection
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        # Only disconnect if not watching - disconnecting would lose WATCH state.
         # A connection acquired just now holds no WATCH state yet, so it is
-        # reconnected if an earlier connection error marked it.
-        if not self._watching or connection is not held_connection:
+        # reconnected if it is marked, dead or dirty. A held one is only
+        # disconnected if not watching - disconnecting would lose WATCH state.
+        if connection is not held_connection:
+            await redis_node._prepare_acquired_connection(connection)
+        elif not self._watching:
             await redis_node.disconnect_if_needed(connection)
 
         # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
@@ -5240,6 +5246,7 @@ class _ClusterNodePoolAdapter(ConnectionPoolInterface):
     ) -> AbstractConnection:
         connection = self._node.acquire_connection()
         try:
+            await self._node._prepare_acquired_connection(connection)
             await connection.connect()
         except BaseException:
             # connect() may fail mid-handshake (e.g. after the TCP socket
