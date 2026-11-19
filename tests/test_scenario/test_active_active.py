@@ -27,13 +27,14 @@ from tests.test_scenario.fault_injector_client import (
 
 logger = logging.getLogger(__name__)
 
-# The injected network failure is transient - the fault injector restores the link a
-# few seconds after the action is triggered. A database is only taken out of service by
-# a health check probe that runs while the link is down, and on the default interval a
-# probe round is short next to the pause that follows it, so most rounds land after the
-# link is already back and no failover is ever initiated. Probing back to back keeps a
-# round inside the outage.
+# The injected network failure is transient - the fault injector restores the link
+# NETWORK_FAILURE_DELAY seconds after the action is triggered. A database is only taken
+# out of service by a health check probe that runs while the link is down, and on the
+# default interval a probe round is short next to the pause that follows it, so most
+# rounds land after the link is already back and no failover is ever initiated. Probing
+# back to back keeps a round inside the outage.
 FAILOVER_HEALTH_CHECK_INTERVAL = 0.1
+NETWORK_FAILURE_DELAY = 3
 # Bounded here rather than left to pytest-timeout so a failover that never happens is
 # reported as a failover that never happened, instead of as a stack dump of whatever
 # the test was doing when the deadline passed. Kept well inside the per-test timeout so
@@ -54,6 +55,18 @@ LAG_AWARE_CREDENTIAL_ENV_VARS = ("ENV0_USERNAME", "ENV0_PASSWORD")
 # second of it spent in the delay between probes, and running out of it reports the
 # database as unhealthy.
 LAG_AWARE_HEALTH_CHECK_TIMEOUT = 10
+# A probe round ends only when its slowest health check does, and with
+# LagAwareHealthCheck added that can take up to LAG_AWARE_HEALTH_CHECK_TIMEOUT. The PING
+# probes finish early in the round and then wait for it, so a shorter outage can start
+# and end between two of them. Holding the link down for longer than a whole round
+# puts at least one PING probe inside the outage.
+LAG_AWARE_NETWORK_FAILURE_DELAY = 15
+# The client fails over only when a command runs while the active database's circuit is
+# open, and a passing health check closes the circuit again within a probe round of the
+# link coming back. Commands that block on the dead link can miss a short outage
+# entirely, so this outage lasts long enough for a later command to see the open
+# circuit.
+UNPLANNED_FAILURE_NETWORK_FAILURE_DELAY = 10
 
 
 def lag_aware_auth_basic():
@@ -92,6 +105,7 @@ def trigger_network_failure_action(
     config,
     event: Optional[threading.Event] = None,
     failures: Optional[list] = None,
+    delay: int = NETWORK_FAILURE_DELAY,
 ):
     """Inject a network failure on the cluster of the active database and wait for it.
 
@@ -103,7 +117,7 @@ def trigger_network_failure_action(
     """
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": config["bdb_id"], "delay": 3, "cluster_index": 0},
+        parameters={"bdb_id": config["bdb_id"], "delay": delay, "cluster_index": 0},
     )
 
     try:
@@ -400,7 +414,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True,
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(120)
     def test_multi_db_client_uses_lag_aware_health_check(
         self, r_multi_db, fault_injector_client
     ):
@@ -419,6 +433,7 @@ class TestActiveActive:
             target=trigger_network_failure_action,
             daemon=True,
             args=(fault_injector_client, config, event, failures),
+            kwargs={"delay": LAG_AWARE_NETWORK_FAILURE_DELAY},
         )
 
         # Adding additional health check to the client.
@@ -1028,7 +1043,7 @@ class TestActiveActive:
         ids=["standalone"],
         indirect=True,
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(120)
     def test_multi_db_client_failover_on_unplanned_failure_with_maint_notifications(
         self, r_multi_db, fault_injector_client
     ):
@@ -1051,6 +1066,7 @@ class TestActiveActive:
             target=trigger_network_failure_action,
             daemon=True,
             args=(fault_injector_client, config, event, failures),
+            kwargs={"delay": UNPLANNED_FAILURE_NETWORK_FAILURE_DELAY},
         )
 
         # Client initialized on the first command.
