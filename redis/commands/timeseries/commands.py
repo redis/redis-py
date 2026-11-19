@@ -1590,7 +1590,7 @@ class TimeSeriesCommands:
             MRANGE_CMD,
             *params,
             aggregation_type=aggregation_type,
-            reduce=reduce if groupby is not None else None,
+            reduce=reduce,
         )
 
     @overload
@@ -1744,7 +1744,7 @@ class TimeSeriesCommands:
             MREVRANGE_CMD,
             *params,
             aggregation_type=aggregation_type,
-            reduce=reduce if groupby is not None else None,
+            reduce=reduce,
         )
 
     @overload
@@ -1965,6 +1965,13 @@ class TimeSeriesCommands:
         params: list[EncodableT], groupby: str | None, reduce: str | None
     ):
         """Append GROUPBY REDUCE property to params."""
+        # GROUPBY and REDUCE are all-or-nothing: one alone cannot be sent.
+        if (groupby is None) != (reduce is None):
+            raise DataError(
+                "groupby and reduce must be set together; "
+                "the GROUPBY group is all-or-nothing."
+            )
+
         if groupby is not None and reduce is not None:
             params.extend(["GROUPBY", groupby, "REDUCE", reduce.upper()])
 
