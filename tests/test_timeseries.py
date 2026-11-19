@@ -1418,10 +1418,24 @@ def test_mrange_groupby_unified_metadata_matches_on_both_protocols(request, stac
     "protocol", [pytest.param(2, id="resp2"), pytest.param(SENTINEL, id="default")]
 )
 def test_info_without_decode_responses(request, stack_url, protocol):
-    kwargs = {"decode_responses": False, "from_url": stack_url}
-    if protocol is not SENTINEL:
-        kwargs["protocol"] = protocol
-    client = _get_client(redis.Redis, request, **kwargs)
+    if protocol is SENTINEL:
+        # Built directly, because _get_client applies --protocol. An explicit
+        # protocol=3 returns the native RESP3 dict, not the default TSInfo.
+        client = redis.Redis.from_url(stack_url, decode_responses=False)
+
+        def teardown():
+            client.flushdb()
+            client.close()
+
+        request.addfinalizer(teardown)
+    else:
+        client = _get_client(
+            redis.Redis,
+            request,
+            decode_responses=False,
+            from_url=stack_url,
+            protocol=protocol,
+        )
     client.flushdb()
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     client.ts().add(1, 1, 1.5)

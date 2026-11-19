@@ -5072,18 +5072,24 @@ class TestClusterPubSubSlotMigration:
         pubsub.node_pubsub_mapping = {"127.0.0.1:7000": bad}
         self._prime_generator(pubsub)
 
-        # Anchor the deadline to ``start``: _wait_out_cool_off sleeps up to the
-        # absolute deadline, so a deadline taken before ``start`` shortens the
-        # measured wait by the setup's own cost and makes the lower bound below
-        # unreachable.
-        start = time.monotonic()
-        # A stall longer than the window between here and the generator's
-        # deadline check lets it poll the failing node; keep the window wide.
-        pubsub._poll_cool_off[bad] = start + 0.5
-        assert pubsub._sharded_message_generator(timeout=30) == (None, None)
-        elapsed = time.monotonic() - start
+        # A fake clock keeps the window open until the wait itself: on the real
+        # one, a runner stall longer than the window lets the pass poll the
+        # failing node instead.
+        clock = [time.monotonic()]
+        pubsub._poll_cool_off[bad] = clock[0] + 0.5
+        sleeps = []
 
-        assert 0.5 <= elapsed < 5
+        def sleep(delay):
+            sleeps.append(delay)
+            clock[0] += delay
+
+        with mock.patch("redis.cluster.time") as fake_time:
+            fake_time.monotonic.side_effect = lambda: clock[0]
+            fake_time.sleep.side_effect = sleep
+            assert pubsub._sharded_message_generator(timeout=30) == (None, None)
+
+        assert bad.get_message.call_count == 0
+        assert sleeps == [pytest.approx(0.5)]
 
     def test_sharded_message_generator_cool_off_does_not_block_zero_timeout(self):
         """A non-blocking poll must stay non-blocking while nodes cool off."""

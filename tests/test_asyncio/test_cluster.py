@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
-from redis._parsers import AsyncCommandsParser
+from redis._parsers import AsyncCommandsParser, _AsyncHiredisParser, _AsyncRESP3Parser
 from redis.asyncio.client import (
     _PIPELINE_PACK_OFFLOAD_MIN_COMMANDS,
     _PIPELINE_YIELD_MIN_COMMANDS,
@@ -100,9 +100,9 @@ from redis.exceptions import (
     SlotNotCoveredError,
     TryAgainError,
 )
-from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.himport import HIMPORT_SET
-from redis.utils import str_if_bytes
+from redis.maint_notifications import MaintNotificationsConfig
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 from tests.test_cluster import _SPIN_LIBRARY, _busy_node, _keys_on_every_shard
 from tests.test_command_metadata import (
     CACHEABLE_KEYED,
@@ -2176,18 +2176,20 @@ class TestTopologyRefreshKeepsConnections:
     class _ServerClosedConnection:
         """
         A free connection the server closed (a restart, an idle ``timeout``):
-        its next read fails, after which it has disconnected itself, as a real
-        connection does. Once disconnected, its next use reconnects and works.
+        ``can_read`` reports the closed stream, and a read fails, after which it
+        has disconnected itself, as a real connection does. A disconnected one
+        connects again on its next send, and works.
         """
 
-        # No socket to leak: keeps ClusterNode.__del__ quiet
-        is_connected = False
         _resp2_fallback = False
 
-        def __init__(self) -> None:
-            self.closed_by_server = True
+        def __init__(self, closed_by_server: bool = True) -> None:
+            self.is_connected = True
+            self.closed_by_server = closed_by_server
             self.reconnect = False
             self.failed_reads = 0
+            self.disconnects = 0
+            self.marks = 0
 
         def pack_command(self, *args):
             return b"packed"
@@ -2196,80 +2198,152 @@ class TestTopologyRefreshKeepsConnections:
             return b"packed"
 
         async def send_packed_command(self, *args, **kwargs) -> None:
-            pass
+            self.is_connected = True
+
+        async def can_read(self) -> bool:
+            if self.closed_by_server:
+                raise ConnectionError("Connection closed by server.")
+            return False
 
         async def read_response(self, *args, **kwargs):
             if self.closed_by_server:
                 self.failed_reads += 1
-                self.closed_by_server = False
+                await self.disconnect()
                 raise ConnectionError("Connection closed by server.")
             return b"value"
 
         async def disconnect(self, *args, **kwargs) -> None:
+            self.disconnects += 1
+            self.is_connected = False
             self.closed_by_server = False
             self.reconnect = False
 
         def mark_for_reconnect(self) -> None:
+            self.marks += 1
             self.reconnect = True
 
         def should_reconnect(self) -> bool:
             return self.reconnect
 
+    class _RefusedConnection(_ServerClosedConnection):
+        """A fresh connection whose connect the server refuses or throttles."""
+
+        def __init__(self) -> None:
+            super().__init__(closed_by_server=False)
+            self.is_connected = False
+
+        async def send_packed_command(self, *args, **kwargs) -> None:
+            raise ConnectionError("Error connecting to the node: throttled")
+
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
-    async def test_connection_error_reconnects_free_connections_the_server_closed(
+    async def test_acquire_reconnects_a_free_connection_the_server_closed(
         self, pipeline
     ) -> None:
         """
-        After a node restart every free connection is closed by the server, and
-        an async node does not check a free connection before handing it out.
-        The first connection error marks them for reconnect, so the retry gets
-        a working connection instead of the next dead one, even when the node
-        holds more dead connections than there are retries.
+        After a node restart every free connection is closed by the server. The
+        connection taken for a command is checked on acquire and reconnected,
+        so the command works without a failed read. The connections not used
+        yet are left alone: they are checked when they are acquired.
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         node = r.get_node_from_key("foo")
-        connections = [
-            self._ServerClosedConnection() for _ in range(r.retry.get_retries() + 3)
-        ]
+        connections = [self._ServerClosedConnection() for _ in range(3)]
         node._connections = list(connections)
         node._free.extend(connections)
 
-        with mock.patch.object(NodesManager, "initialize", new=mock.AsyncMock()):
+        initialize = mock.AsyncMock()
+        with mock.patch.object(NodesManager, "initialize", new=initialize):
             if pipeline:
                 async with r.pipeline() as pipe:
                     assert await pipe.get("foo").execute() == [b"value"]
             else:
                 assert await r.get("foo") == b"value"
 
-        # One command failed on a dead connection; the retry reconnected the
-        # next one instead of failing on it
-        assert sum(c.failed_reads for c in connections) == 1
-        assert connections[1].closed_by_server is False
-        assert connections[1].reconnect is False
-        # The ones not used yet stay marked: they reconnect when acquired
-        assert all(c.reconnect for c in connections[2:])
+        assert sum(c.failed_reads for c in connections) == 0
+        initialize.assert_not_awaited()
+        assert connections[0].disconnects == 1
+        for connection in connections[1:]:
+            assert connection.disconnects == 0
+            assert connection.marks == 0
+            assert connection.closed_by_server is True
+            # No socket to leak: keeps ClusterNode.__del__ quiet
+            connection.is_connected = False
+        connections[0].is_connected = False
 
     @pytest.mark.fixed_client
-    async def test_watch_reconnects_free_connections_the_server_closed(self) -> None:
+    async def test_watch_reconnects_a_free_connection_the_server_closed(
+        self,
+    ) -> None:
         """
-        A transaction's connection error marks the free connections for
-        reconnect too, and WATCH reconnects a marked connection it has just
-        acquired: only a connection already holding WATCH state is kept as is.
+        WATCH checks the connection it has just acquired, so a connection the
+        server closed is reconnected before WATCH is sent. Only a connection
+        already holding WATCH state is kept as is.
         """
 
         class Connection(self._ServerClosedConnection):
             host, port, db = default_host, default_port, 0
 
             async def send_command(self, *args, **kwargs) -> None:
-                pass
+                self.is_connected = True
 
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         node = r.get_node_from_key("foo")
-        connections = [Connection() for _ in range(r.retry.get_retries() + 3)]
+        connections = [Connection() for _ in range(3)]
         node._connections = list(connections)
         node._free.extend(connections)
+
+        with (
+            mock.patch.object(NodesManager, "initialize", new=mock.AsyncMock()),
+            mock.patch.object(
+                r, "_determine_slot", new=mock.AsyncMock(return_value=r.keyslot("foo"))
+            ),
+        ):
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch("foo")
+
+        assert sum(c.failed_reads for c in connections) == 0
+        assert connections[0].disconnects >= 1
+        for connection in connections[1:]:
+            assert connection.disconnects == 0
+            assert connection.marks == 0
+            assert connection.closed_by_server is True
+            # No socket to leak: keeps ClusterNode.__del__ quiet
+            connection.is_connected = False
+        connections[0].is_connected = False
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize(
+        "path", ["command", "pipeline", "watch"], ids=["command", "pipeline", "watch"]
+    )
+    async def test_refused_connect_keeps_the_other_free_connections(self, path) -> None:
+        """
+        A refused or throttled connect of a fresh connection says nothing about
+        the node's other connections. They stay connected and unmarked, so the
+        retry uses one of them instead of opening more connections the server
+        is throttling.
+        """
+
+        class Healthy(self._ServerClosedConnection):
+            host, port, db = default_host, default_port, 0
+
+            async def send_command(self, *args, **kwargs) -> None:
+                pass
+
+        class Refused(self._RefusedConnection):
+            host, port, db = default_host, default_port, 0
+
+            async def send_command(self, *args, **kwargs) -> None:
+                await self.send_packed_command()
+
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        node = r.get_node_from_key("foo")
+        refused = Refused()
+        healthy = [Healthy(closed_by_server=False) for _ in range(2)]
+        node._connections = [refused, *healthy]
+        node._free.extend(node._connections)
 
         with (
             mock.patch.object(NodesManager, "initialize", new=mock.AsyncMock()),
@@ -2278,72 +2352,138 @@ class TestTopologyRefreshKeepsConnections:
                 r, "_determine_slot", new=mock.AsyncMock(return_value=r.keyslot("foo"))
             ),
         ):
-            async with r.pipeline(transaction=True) as pipe:
-                await pipe.watch("foo")
+            if path == "command":
+                assert await r.get("foo") == b"value"
+            elif path == "pipeline":
+                async with r.pipeline() as pipe:
+                    assert await pipe.get("foo").execute() == [b"value"]
+            else:
+                async with r.pipeline(transaction=True) as pipe:
+                    await pipe.watch("foo")
 
-        # WATCH failed on one dead connection; the retry reconnected the next
-        assert sum(c.failed_reads for c in connections) == 1
-        assert sum(c.reconnect for c in connections) == len(connections) - 2
+        assert refused.is_connected is False
+        assert sum(c.marks for c in node._connections) == 0
+        for connection in healthy:
+            assert connection.disconnects == 0
+            assert connection.is_connected is True
+        for connection in node._connections:
+            # No socket to leak: keeps ClusterNode.__del__ quiet
+            connection.is_connected = False
 
+    @pytest.mark.onlycluster
     @pytest.mark.parametrize(
-        "error, marks",
+        "parser_class",
         [
-            (ConnectionError("Connection closed by server."), True),
-            (RedisTimeoutError("Timeout reading from socket"), False),
-            (MaxClientsReachedError("max number of clients reached"), False),
-            (AuthenticationError("invalid password"), False),
+            _AsyncRESP3Parser,
+            pytest.param(
+                _AsyncHiredisParser,
+                marks=pytest.mark.skipif(
+                    not HIREDIS_AVAILABLE, reason="hiredis not installed"
+                ),
+            ),
         ],
-        ids=["connection_error", "timeout", "max_clients_reached", "authentication"],
     )
-    def test_only_a_connection_error_marks_free_connections(self, error, marks) -> None:
-        """
-        A connection error marks the free connections for a lazy reconnect and
-        leaves the in-use ones alone. A timeout does not mean the others are
-        broken, and capacity or auth errors are not node failures, so those
-        mark nothing.
-        """
-        node = ClusterNode(default_host, 7000)
-        # Not connected, so the node is not reported unclosed when collected
-        in_use, free = mock.Mock(is_connected=False), mock.Mock(is_connected=False)
-        node._connections = [in_use, free]
-        node._free.append(free)
-
-        assert node._mark_free_connections_for_reconnect_on_error(error) is marks
-
-        assert free.mark_for_reconnect.call_count == int(marks)
-        in_use.mark_for_reconnect.assert_not_called()
-        free.disconnect.assert_not_called()
-
-    async def test_himport_prepare_connection_error_marks_free_connections(
-        self,
+    async def test_acquire_reconnects_a_connection_the_server_killed(
+        self, create_redis, parser_class
     ) -> None:
         """
-        The HIMPORT PREPARE pre-flight of a pipeline is the first I/O on the
-        connection, so a connection error there marks the free connections for
-        reconnect like one on the batched write.
+        On a real socket, a free connection the server has killed is found on
+        acquire, so the next command reconnects it instead of failing on it
+        and requesting a topology refresh.
         """
-        node = ClusterNode(default_host, 7000)
-        # Not connected, so the node is not reported unclosed when collected
-        in_use, free = mock.Mock(is_connected=False), mock.Mock(is_connected=False)
-        node._connections = [in_use, free]
-        node._free.append(free)
+        r = await create_redis(
+            cls=RedisCluster, flushdb=False, protocol=3, max_connections=1
+        )
+        killer = await create_redis(cls=RedisCluster, flushdb=False)
+        node = r.get_node_from_key("foo")
+        # The cluster client takes no parser_class: build the node's only
+        # connection with the parser under test
+        await node.disconnect()
+        node._connections.clear()
+        node._free.clear()
+        node.connection_kwargs["parser_class"] = parser_class
+        killed_id = await r.execute_command("CLIENT ID", target_nodes=node)
+        connection = node._free[0]
 
-        with (
-            mock.patch.object(ClusterNode, "acquire_connection", return_value=in_use),
-            mock.patch.object(
-                ClusterNode, "disconnect_if_needed", new=mock.AsyncMock()
-            ),
-            mock.patch.object(
-                ClusterNode,
-                "_himport_prepare_pipeline",
-                new=mock.AsyncMock(side_effect=ConnectionError("closed")),
-            ),
+        assert (
+            await killer.client_kill_filter(
+                _id=killed_id,
+                target_nodes=killer.get_node(node.host, node.port),
+            )
+            == 1
+        )
+        # The event loop reads the server's FIN while the connection is idle
+        async with async_timeout(5):
+            while True:
+                try:
+                    await connection.can_read()
+                except ConnectionError:
+                    break
+                await asyncio.sleep(0.01)
+
+        with mock.patch.object(r, "_request_refresh", wraps=r._request_refresh) as (
+            refresh
         ):
-            with pytest.raises(ConnectionError, match="closed"):
-                await node.execute_pipeline([PipelineCommand(0, "GET", "key")])
+            new_id = await r.execute_command("CLIENT ID", target_nodes=node)
 
-        free.mark_for_reconnect.assert_called_once()
-        in_use.mark_for_reconnect.assert_not_called()
+        assert node._free[0] is connection
+        assert isinstance(connection._parser, parser_class)
+        assert new_id != killed_id
+        refresh.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "healthy",
+            "server_closed",
+            "os_error",
+            "dirty",
+            "push_notifications",
+            "push_notifications_on_closed",
+            "marked",
+            "not_connected",
+        ],
+    )
+    async def test_acquired_connection_is_checked(self, case) -> None:
+        """
+        An acquired connection is reconnected only when it is marked for
+        reconnect, closed by the server or dirty. Push notifications pending
+        on an idle connection are applied when maintenance notifications are
+        enabled, which also shows whether the socket is still alive.
+        """
+        maint = case.startswith("push_notifications")
+        node = ClusterNode(
+            default_host,
+            7000,
+            maint_notifications_config=MaintNotificationsConfig(enabled=maint),
+        )
+        connection = mock.AsyncMock(spec=Connection)
+        connection.is_connected = case != "not_connected"
+        connection.should_reconnect.return_value = case == "marked"
+        connection.can_read.return_value = case in ("dirty",) or maint
+        if case == "server_closed":
+            connection.can_read.side_effect = ConnectionError("closed by server")
+        elif case == "os_error":
+            connection.can_read.side_effect = OSError("reset")
+        elif case == "push_notifications_on_closed":
+            connection.handle_pending_push_notifications.side_effect = ConnectionError(
+                "closed by server"
+            )
+
+        await node._prepare_acquired_connection(connection)
+
+        disconnects = case not in ("healthy", "push_notifications", "not_connected")
+        assert connection.disconnect.await_count == int(disconnects)
+        if disconnects and case != "marked":
+            # A dead or dirty socket is closed without waiting for the close
+            connection.disconnect.assert_awaited_once_with(nowait=True)
+        assert connection.can_read.await_count == int(
+            case not in ("marked", "not_connected")
+        )
+        assert connection.handle_pending_push_notifications.await_count == int(maint)
+        connection.mark_for_reconnect.assert_not_called()
+        # Not connected, so the node is not reported unclosed when collected
+        connection.is_connected = False
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize(
@@ -2376,9 +2516,8 @@ class TestTopologyRefreshKeepsConnections:
         self,
     ) -> None:
         """
-        A due refresh that reaches no node (e.g. only seeds are queried, with
-        dynamic_startup_nodes=False) is logged and asked for again, and the
-        command that ran it still goes to its node of the current topology.
+        A due refresh that reaches no node is logged and asked for again, and
+        the command that ran it still goes to its node of the current topology.
         """
         r = await get_mocked_redis_client(host=default_host, port=default_port)
         owner = r.get_node_from_key("foo")
@@ -7568,6 +7707,189 @@ class TestNodesManager:
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
+    @staticmethod
+    async def _seed_only_nodes_manager(require_full_coverage=True) -> NodesManager:
+        """
+        A NodesManager with dynamic_startup_nodes=False that knows the topology
+        of default_cluster_slots through a seed that is not part of it.
+        """
+        nodes_manager = NodesManager(
+            startup_nodes=[ClusterNode("10.0.0.1", 10000)],
+            require_full_coverage=require_full_coverage,
+            connection_kwargs={},
+            dynamic_startup_nodes=False,
+        )
+
+        async def execute_command(node, *args, **kwargs):
+            return default_cluster_slots
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            await nodes_manager.initialize()
+        return nodes_manager
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _topology_cluster_slots(answers):
+        """
+        Answer CLUSTER SLOTS on the nodes whose port is a key of :answers:, with
+        its value, and fail on the others. Yields the ports of the topology
+        nodes queried, in order.
+        """
+        queried = []
+
+        async def execute_command(node, *args, **kwargs):
+            if node.port != 10000:
+                queried.append(node.port)
+            if node.port in answers:
+                return answers[node.port]
+            raise ConnectionError("down")
+
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            yield queried
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _with_open_connection(node):
+        """
+        Give :node: a connection that counts as open, and take it away on exit,
+        so the node is not reported as unclosed once it is collected.
+        """
+        connection = Mock(is_connected=True)
+        node._connections.append(connection)
+        try:
+            yield
+        finally:
+            node._connections.remove(connection)
+
+    @pytest.mark.fixed_client
+    async def test_refresh_asks_the_current_topology_when_the_seeds_fail(
+        self,
+    ) -> None:
+        """
+        With dynamic_startup_nodes=False, a refresh whose seeds fail asks the
+        nodes of the current topology, a node with connections open first.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        epoch = nodes_manager._epoch
+
+        with (
+            self._with_open_connection(node),
+            self._topology_cluster_slots(
+                answers={7002: default_cluster_slots}
+            ) as queried,
+        ):
+            await nodes_manager.initialize()
+
+        assert queried == [7002]
+        assert nodes_manager._epoch == epoch + 1
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
+
+    @pytest.mark.fixed_client
+    async def test_refresh_asks_a_moved_target_of_the_topology_through_its_node(
+        self,
+    ) -> None:
+        """
+        An additional startup node (the target of a MOVED) that is a node of
+        the current topology is asked once, through that node: no temporary
+        node is built for it, and it is not closed after the refresh.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        node = nodes_manager.nodes_cache["127.0.0.1:7002"]
+        queried_nodes = []
+
+        async def execute_command(target, *args, **kwargs):
+            if target.port == 10000:
+                raise ConnectionError("down")
+            queried_nodes.append(target)
+            return default_cluster_slots
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(ClusterNode, "disconnect", autospec=True) as disconnect,
+        ):
+            await nodes_manager.initialize(
+                additional_startup_nodes_info=[("127.0.0.1", 7002)]
+            )
+
+        assert queried_nodes == [node]
+        assert nodes_manager._last_refresh_unreachable_args is None
+        assert nodes_manager.nodes_cache["127.0.0.1:7002"] is node
+        assert node not in [call.args[0] for call in disconnect.call_args_list]
+
+    @pytest.mark.fixed_client
+    async def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(
+        self,
+    ) -> None:
+        """
+        A refresh whose seeds fail raises RedisClusterUnreachableError only
+        after every node of the current topology failed too: the nodes with a
+        connection open first, and the last failed node last. A node whose
+        connections were closed is not counted as connected.
+        """
+        nodes_manager = await self._seed_only_nodes_manager()
+        nodes_cache = nodes_manager.nodes_cache
+        nodes_cache["127.0.0.1:7000"]._connections.append(Mock(is_connected=False))
+
+        # Keep the cache order (7000, 7003, 7001, 7002) before the ranking
+        with (
+            self._with_open_connection(nodes_cache["127.0.0.1:7003"]),
+            patch("redis.asyncio.cluster.random.shuffle"),
+            self._topology_cluster_slots(answers={}) as queried,
+            pytest.raises(RedisClusterUnreachableError),
+        ):
+            await nodes_manager.initialize(last_failed_node_name="127.0.0.1:7001")
+
+        assert queried == [7003, 7000, 7002, 7001]
+        assert nodes_manager._last_refresh_unreachable_args is not None
+
+    @pytest.mark.fixed_client
+    async def test_refresh_answered_by_a_seed_asks_no_topology_node(self) -> None:
+        nodes_manager = await self._seed_only_nodes_manager()
+
+        with self._topology_cluster_slots(
+            answers={10000: default_cluster_slots}
+        ) as queried:
+            await nodes_manager.initialize()
+
+        assert queried == []
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("require_full_coverage", [True, False])
+    async def test_refresh_completes_a_partial_seed_answer_from_the_current_topology(
+        self, require_full_coverage
+    ) -> None:
+        """
+        A refresh whose seeds answer for only part of the slots asks the nodes
+        of the current topology for the others, until all slots are covered.
+        """
+        nodes_manager = await self._seed_only_nodes_manager(
+            require_full_coverage=require_full_coverage
+        )
+        with (
+            self._with_open_connection(nodes_manager.nodes_cache["127.0.0.1:7001"]),
+            self._topology_cluster_slots(
+                answers={
+                    10000: default_cluster_slots[:1],
+                    7001: default_cluster_slots[1:],
+                }
+            ) as queried,
+        ):
+            await nodes_manager.initialize()
+
+        assert queried == [7001]
+        assert len(nodes_manager.slots_cache) == REDIS_CLUSTER_HASH_SLOTS
+
     @pytest.mark.fixed_client
     async def test_move_node_to_end_of_cached_nodes(self) -> None:
         """
@@ -7639,6 +7961,9 @@ class TestNodesManager:
 
             async def send_packed_command(self, *args) -> None:
                 self.send_called.set()
+
+            async def can_read(self) -> bool:
+                return False
 
             async def read_response(self, *args, **kwargs):
                 await self.response_ready.wait()
@@ -7904,12 +8229,23 @@ class TestNodesManager:
 
     @staticmethod
     def _re_auth_connection(
-        marked: bool, error: Optional[Exception] = None, connected: bool = True
+        marked: bool,
+        error: Optional[Exception] = None,
+        connected: bool = True,
+        closed_by_server: bool = False,
     ):
         connection = mock.AsyncMock(spec=Connection)
         connection.retry = Retry(NoBackoff(), 0)
         connection.should_reconnect = mock.Mock(return_value=marked)
         connection.is_connected = connected
+        connection.can_read.return_value = False
+        if closed_by_server:
+            connection.can_read.side_effect = ConnectionError("closed by server")
+
+            async def disconnect(*args, **kwargs) -> None:
+                connection.is_connected = False
+
+            connection.disconnect.side_effect = disconnect
         if error is not None:
             connection.send_command.side_effect = error
         return connection
@@ -7919,11 +8255,10 @@ class TestNodesManager:
         self,
     ) -> None:
         """
-        A free connection that is disconnected, or marked for reconnect after a
-        connection error (its socket may be dead), would raise if
-        re-authenticated and stop the token renewal. It is skipped - it
-        authenticates with fresh credentials when it reconnects on acquire -
-        and stays in the free queue.
+        A free connection that is disconnected, or marked for reconnect (its
+        socket may be dead), would raise if re-authenticated and stop the
+        token renewal. It is skipped - it authenticates with fresh credentials
+        when it reconnects on acquire - and stays in the free queue.
         """
         node = ClusterNode(default_host, 7000)
         marked = self._re_auth_connection(True, ConnectionError("dead socket"))
@@ -7946,6 +8281,62 @@ class TestNodesManager:
         healthy.send_command.assert_awaited_once_with("AUTH", "oid", "value")
         healthy.read_response.assert_awaited_once()
         assert list(node._free) == [marked, disconnected, healthy]
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_disconnects_free_connections_the_server_closed(
+        self,
+    ) -> None:
+        """
+        After a node restart the free connections are closed by the server but
+        not marked: nothing has failed on them yet. AUTH on one would fail and
+        stop the token renewal, so it is disconnected instead, and
+        authenticates with fresh credentials when it reconnects on acquire.
+        """
+        node = ClusterNode(default_host, 7000)
+        closed = self._re_auth_connection(
+            False, ConnectionError("dead socket"), closed_by_server=True
+        )
+        healthy = self._re_auth_connection(False)
+        node._free.extend([closed, healthy])
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        await node.re_auth_callback(token)
+
+        closed.disconnect.assert_awaited_once_with(nowait=True)
+        closed.send_command.assert_not_called()
+        healthy.disconnect.assert_not_called()
+        healthy.send_command.assert_awaited_once_with("AUTH", "oid", "value")
+        assert list(node._free) == [closed, healthy]
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_continues_when_disconnecting_a_closed_connection_fails(
+        self,
+    ) -> None:
+        """
+        A failure while disconnecting a connection the server has closed does
+        not stop the token renewal: the next free connection is still
+        re-authenticated, every connection stays in the free queue, and the
+        error is raised once the sweep is done.
+        """
+        node = ClusterNode(default_host, 7000)
+        closed = self._re_auth_connection(False, closed_by_server=True)
+        closed.disconnect.side_effect = TimeoutError("Timed out closing connection")
+        healthy = self._re_auth_connection(False)
+        node._free.extend([closed, healthy])
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(TimeoutError, match="Timed out closing connection"):
+            await node.re_auth_callback(token)
+
+        closed.send_command.assert_not_called()
+        healthy.send_command.assert_awaited_once_with("AUTH", "oid", "value")
+        assert list(node._free) == [closed, healthy]
+        # Not connected, so the node is not reported unclosed when collected
+        closed.is_connected = False
 
     @pytest.mark.fixed_client
     async def test_failed_re_auth_returns_connections_to_the_free_queue(
@@ -8621,6 +9012,9 @@ class TestClusterNodeConnectionHandling:
 
             async def send_packed_command(self, command: Any) -> None:
                 self.send_started.set()
+
+            async def can_read(self) -> bool:
+                return False
 
             async def read_response(self, *args: Any, **kwargs: Any) -> bytes:
                 await self.response_ready.wait()
@@ -11257,6 +11651,41 @@ class TestClusterPubSubWithMocks:
         assert isinstance(pubsub.connection_pool, _ClusterNodePoolAdapter)
         assert pubsub.connection_pool._node is node
         assert pubsub.connection_pool.connection_kwargs is node.connection_kwargs
+
+    @pytest.mark.parametrize("closed_by_server", [False, True])
+    async def test_pubsub_checks_the_free_connection_it_takes(
+        self, closed_by_server
+    ) -> None:
+        """
+        A pubsub takes its connection from the node's free queue like a
+        command does, so a connection the server has closed is disconnected
+        and connects again instead of failing the subscribe. A healthy one is
+        used as is.
+        """
+        node = ClusterNode("127.0.0.1", 7000)
+        cluster = Mock()
+        cluster.get_node.return_value = node
+        pool = self._make_pubsub(cluster, node=node).connection_pool
+        connection = mock.AsyncMock(spec=Connection)
+        connection.is_connected = True
+        connection.should_reconnect.return_value = False
+        connection.can_read.return_value = False
+        if closed_by_server:
+            connection.can_read.side_effect = ConnectionError("closed by server")
+        node._connections = [connection]
+        node._free.append(connection)
+        calls = mock.Mock()
+        calls.attach_mock(connection.disconnect, "disconnect")
+        calls.attach_mock(connection.connect, "connect")
+
+        assert await pool.get_connection("SUBSCRIBE") is connection
+
+        expected = [mock.call.connect()]
+        if closed_by_server:
+            expected.insert(0, mock.call.disconnect(nowait=True))
+        assert calls.mock_calls == expected
+        # Not connected, so the node is not reported unclosed when collected
+        connection.is_connected = False
 
     async def test_init_without_node_has_no_connection_pool(self) -> None:
         """
