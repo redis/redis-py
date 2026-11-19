@@ -272,6 +272,26 @@ class TestMultiDbConfig:
         assert isinstance(default, PingHealthCheck)
         assert default.health_check_probes == 7
 
+    def test_empty_database_health_checks_disable_health_checks(self):
+        factory = Mock(return_value=[Mock(spec=HealthCheck)])
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={"host": "host1", "port": "port1"}, health_checks=[]
+            ),
+            DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+        ]
+
+        for config in (
+            MultiDbConfig(databases_config=db_configs),
+            MultiDbConfig(databases_config=db_configs, health_checks_factory=factory),
+        ):
+            disabled, other = [db.health_checks for db, _ in config.databases()]
+
+            # Neither the factory nor the default ping fills an empty list
+            assert disabled == []
+            assert len(other) == 1
+        factory.assert_called_once_with(db_configs[1])
+
     def test_database_add_health_check(self):
         health_checks = [Mock(spec=HealthCheck)]
         db = Database(Mock(), Mock(spec=CircuitBreaker), 1.0, health_checks)

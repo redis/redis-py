@@ -1245,6 +1245,57 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    def test_add_database_rejected_database_is_released_on_close(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A database rejected by its initial health check is never used, but its
+        client and health checks hold resources that close() has to release.
+        """
+        databases = create_weighted_list(mock_db, mock_db2)
+        rejected_hc = MagicMock()
+        rejected_hc.health_check_probes = 1
+        rejected_hc.health_check_delay = 0.01
+        rejected_hc.health_check_timeout = 1.0
+        rejected_hc.check_health = AsyncMock(side_effect=ConnectionError("refused"))
+        rejected_hc.close = AsyncMock()
+        new_db_config = DatabaseConfig(
+            weight=0.8, from_url="redis://localhost:6379", health_checks=[rejected_hc]
+        )
+        mock_new_client = Mock()
+        mock_new_client.connection_pool = Mock()
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config.client_class,
+                "from_url",
+                return_value=mock_new_client,
+            ),
+        ):
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                with pytest.raises(UnhealthyDatabaseException):
+                    client.add_database(new_db_config, skip_initial_health_check=False)
+                assert len(client.get_databases()) == 2
+            finally:
+                client.close()
+
+        rejected_hc.close.assert_awaited_once()
+        mock_new_client.close.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     def test_remove_highest_weighted_database(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):

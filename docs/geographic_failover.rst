@@ -334,7 +334,9 @@ call.
 They are not combined with the factory: a database with its own health checks
 uses only those, the factory is not called for it and no default ping is added.
 The other databases keep the factory's health checks, or the default ping when
-there is no factory.
+there is no factory. An empty list (`health_checks=[]`) leaves that database
+without health checks: it is then considered healthy until the failure detector
+reports otherwise.
 
 .. code-block:: python
 

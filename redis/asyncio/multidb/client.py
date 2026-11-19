@@ -282,6 +282,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self._check_db_health(database)
         except UnhealthyDatabaseException:
             if not skip_initial_health_check:
+                # The rejected database is never used, but its client and
+                # health checks hold resources: they are closed with the
+                # others on close()
+                self._removed_databases.append(database)
                 raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]

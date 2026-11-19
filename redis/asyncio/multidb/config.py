@@ -76,8 +76,9 @@ class DatabaseConfig:
         circuit (Optional[CircuitBreaker]): Custom circuit breaker implementation.
         grace_period (float): Grace period after which we need to check if the circuit could be closed again.
         health_checks (Optional[list[HealthCheck]]): Health checks owned by this database.
-            Replaces the ones built from the ``MultiDbConfig`` defaults. An instance
-            must not be shared between databases.
+            Replaces the ones built from the ``MultiDbConfig`` defaults. An empty
+            list leaves the database without health checks. An instance must not
+            be shared between databases.
 
     Methods:
         default_circuit_breaker:
@@ -251,7 +252,7 @@ class MultiDbConfig:
         ``PingHealthCheck`` with the global probes, delay and timeout. The
         sources are never combined.
         """
-        if database_config.health_checks:
+        if database_config.health_checks is not None:
             return database_config.health_checks
 
         if self.health_checks_factory is not None:
