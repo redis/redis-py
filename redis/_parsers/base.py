@@ -683,12 +683,15 @@ class _AsyncRESPBase(AsyncBaseParser):
                         buffer.clear()
                     elif remaining >= _BULK_SINGLE_COPY_SIZE:
                         # More data follows the bulk: copy it out once
-                        # through a temporary view. The view is released
-                        # when the expression completes, before the del
-                        # below resizes the buffer, so no view is held
-                        # when the buffer is resized: on PyPy a live view
-                        # would make `del` raise BufferError there.
-                        data = bytes(memoryview(buffer)[:remaining])
+                        # through a temporary view. Both views are
+                        # released when the with block exits, before the
+                        # del below resizes the buffer, so no view is
+                        # held when the buffer is resized: on PyPy the
+                        # views stay alive until garbage collection, and
+                        # a live view would make `del` raise BufferError
+                        # there.
+                        with memoryview(buffer) as view, view[:remaining] as part:
+                            data = bytes(part)
                         del buffer[:remaining]
                     else:
                         # Small bulks keep the slice. Slicing the
