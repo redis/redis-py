@@ -463,6 +463,78 @@ async def test_read_exactly_adds_only_the_joined_buffer_to_chunks():
     assert parser._chunks == [payload]
 
 
+@pytest.mark.parametrize(
+    "factory",
+    [
+        pytest.param(make_resp2_connection, id="resp2"),
+        pytest.param(make_resp3_connection, id="resp3"),
+    ],
+)
+async def test_negative_bulk_length_raises_without_consuming_following_reply(
+    factory,
+):
+    # Regression test for the codex P2 on base.py: with `$-3\r\n+OK\r\n`
+    # already buffered, the buffered fast path in _read turned the
+    # negative remainder into a slice of the following reply and
+    # returned it as a successful value. A negative length must raise
+    # like readexactly() does, leaving the following reply untouched.
+    conn, reader = factory()
+    reader.feed_data(b"$-3\r\n+OK\r\n")
+
+    with pytest.raises(ValueError, match="less than zero"):
+        await conn.read_response()
+
+    assert bytes(reader._buffer) == b"+OK\r\n"
+
+
+async def test_resp3_null_bulk_string_returns_none():
+    # `$-1` is the null bulk string in RESP3 too (the RESP2 parser
+    # already special-cases it); without the check _read(-1) returned
+    # an empty value and consumed bytes of the following reply.
+    conn, reader = make_resp3_connection()
+    reader.feed_data(b"$-1\r\n+OK\r\n")
+
+    assert await conn.read_response() is None
+    assert bytes(reader._buffer) == b"+OK\r\n"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        pytest.param(make_resp2_connection, id="resp2"),
+        pytest.param(make_resp3_connection, id="resp3"),
+    ],
+)
+async def test_timeout_mid_bulk_keeps_fragments_unjoined(factory):
+    # Regression test for the codex P2 on base.py: when a per-read
+    # socket_timeout interrupts _read_exactly after several pieces,
+    # the resume state must hold the fragments as-is. Joining them
+    # would allocate a second full copy while the pieces are still
+    # alive in the exception traceback.
+    conn, reader = factory()
+    parser = conn._parser
+    read_task = asyncio.create_task(conn.read_response(disconnect_on_error=False))
+    # Header plus the first slice of the payload, then a second slice,
+    # then a stall past socket_timeout: _read_exactly sees two pieces
+    # before the timeout fires. The sleeps make sure each piece is
+    # consumed on its own instead of merging into one read.
+    reader.feed_data(BULK_WIRE[:READ_SIZE])
+    await asyncio.sleep(0.05)
+    reader.feed_data(BULK_WIRE[READ_SIZE : READ_SIZE * 2])
+    await asyncio.sleep(0.05)
+
+    with pytest.raises(TimeoutError):
+        await read_task
+    conn.disconnect.assert_not_awaited()
+
+    header = BULK_WIRE[: len(b"$200000\r\n")]
+    assert parser._chunks == [
+        header,
+        PAYLOAD[: READ_SIZE - len(header)],
+        PAYLOAD[READ_SIZE - len(header) : READ_SIZE * 2 - len(header)],
+    ]
+
+
 async def test_read_exactly_constructs_one_timeout_for_multiple_waits(monkeypatch):
     parser = _AsyncRESP2Parser(READ_SIZE)
     reader = asyncio.StreamReader()

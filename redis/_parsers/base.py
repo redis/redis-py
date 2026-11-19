@@ -657,6 +657,13 @@ class _AsyncRESPBase(AsyncBaseParser):
         Read `length` bytes of data.  These are assumed to be followed
         by a '\r\n' terminator which is subsequently discarded.
         """
+        if length < 0:
+            # readexactly() raises ValueError for a negative size; the
+            # buffered fast path below must not turn one into a slice
+            # of the following reply: a negative `remaining` passes
+            # every `len(buffer) >= remaining` check, so `$-3` would
+            # return bytes of the next frame as a successful value.
+            raise ValueError("readexactly size can not be less than zero")
         want = length + 2
         end = self._pos + want
         if len(self._buffer) >= end:
@@ -752,8 +759,10 @@ class _AsyncRESPBase(AsyncBaseParser):
         once for IncompleteReadError.partial and that same buffer is
         reused for _chunks, so the failure path never holds two full
         copies either. If the read unwinds early (a
-        per-read timeout or a cancellation), the joined pieces are added
-        to self._chunks instead: a timeout on the default path usually
+        per-read timeout or a cancellation), the pieces are added
+        to self._chunks as-is, without joining them: joining here
+        would allocate a second full copy while the pieces are still
+        alive in the exception traceback. A timeout on the default path usually
         disconnects, but callers that pass disconnect_on_error=False
         (PubSub and push reads) keep the connection and resume by
         re-parsing the saved header, so bytes already pulled off the
@@ -804,9 +813,10 @@ class _AsyncRESPBase(AsyncBaseParser):
             # without the pieces it would read into the following reply.
             if pieces:
                 if partial is None:
-                    self._chunks.append(
-                        pieces[0] if len(pieces) == 1 else b"".join(pieces)
-                    )
+                    # Keep the fragments as-is: joining them would
+                    # allocate a second full copy while the pieces are
+                    # still alive in the exception traceback.
+                    self._chunks.extend(pieces)
                 else:
                     # The EOF path already joined the pieces once: reuse
                     # that buffer for the resume state instead of
