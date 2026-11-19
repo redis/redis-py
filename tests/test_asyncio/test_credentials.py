@@ -628,6 +628,74 @@ class TestStreamingCredentialProvider:
         ],
         indirect=True,
     )
+    async def test_do_not_re_auth_closed_pub_sub_connection(self, credential_provider):
+        mock_pubsub_connection = AsyncMock(spec=Connection)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
+        mock_another_connection = AsyncMock(spec=Connection)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection.host = "localhost"
+        mock_another_connection.port = 6379
+
+        mock_pool = AsyncMock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection = AsyncMock(return_value=mock_pubsub_connection)
+        mock_pool._available_connections = [mock_another_connection]
+        mock_pool._lock = AsyncLock()
+        auth_token = None
+
+        async def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            async with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    await conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    )
+                    await conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        await p.subscribe("test")
+        # The connection goes back to the pool, where another caller may be
+        # using it by the time the token is rotated
+        await p.aclose()
+        mock_pool.release.assert_awaited_once_with(mock_pubsub_connection)
+        await credential_provider.get_credentials_async()
+
+        # the re-auth runs in the background; poll instead of sleeping
+        def reauth_done():
+            assert auth_token is not None
+            mock_another_connection.send_command.assert_has_calls(
+                [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+            )
+
+        await _wait_until_passes(reauth_done)
+        mock_pubsub_connection.send_command.assert_called_once_with(
+            "SUBSCRIBE", "test", check_health=True
+        )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
     async def test_do_not_re_auth_pub_sub_in_resp2(self, credential_provider):
         mock_pubsub_connection = AsyncMock(spec=Connection)
         mock_pubsub_connection.get_protocol.return_value = 2

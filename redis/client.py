@@ -1346,7 +1346,11 @@ class PubSub:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
-                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
+                    self.connection,
+                    self.connection_pool,
+                    ClientType.SYNC,
+                    self._lock,
+                    pubsub=self,
                 )
             )
         connection = self.connection

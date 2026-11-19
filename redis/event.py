@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 import time
+import weakref
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
@@ -409,11 +410,13 @@ class AfterPubSubConnectionInstantiationEvent:
         connection_pool,
         client_type: ClientType,
         connection_lock: Union[threading.RLock, asyncio.Lock],
+        pubsub=None,
     ):
         self._pubsub_connection = pubsub_connection
         self._connection_pool = connection_pool
         self._client_type = client_type
         self._connection_lock = connection_lock
+        self._pubsub = pubsub
 
     @property
     def pubsub_connection(self):
@@ -430,6 +433,10 @@ class AfterPubSubConnectionInstantiationEvent:
     @property
     def connection_lock(self) -> Union[threading.RLock, asyncio.Lock]:
         return self._connection_lock
+
+    @property
+    def pubsub(self):
+        return self._pubsub
 
 
 class AfterAsyncClusterInstantiationEvent:
@@ -645,6 +652,7 @@ class RegisterReAuthForPubSub(EventListenerInterface):
         self._connection_pool = None
         self._client_type = None
         self._connection_lock = None
+        self._pubsub = None
         self._event = None
 
     def listen(self, event: AfterPubSubConnectionInstantiationEvent):
@@ -656,6 +664,11 @@ class RegisterReAuthForPubSub(EventListenerInterface):
             self._connection_pool = event.connection_pool
             self._client_type = event.client_type
             self._connection_lock = event.connection_lock
+            # A weak reference, so the listener does not keep a dropped PubSub
+            # from being garbage collected and releasing its connection
+            self._pubsub = (
+                weakref.ref(event.pubsub) if event.pubsub is not None else None
+            )
 
             if self._client_type == ClientType.SYNC:
                 self._connection.credential_provider.on_next(self._re_auth)
@@ -666,21 +679,36 @@ class RegisterReAuthForPubSub(EventListenerInterface):
                     self._raise_on_error_async
                 )
 
+    def _owns_connection(self) -> bool:
+        """
+        Whether the PubSub still holds the connection it was registered with.
+
+        Once the PubSub is closed, its connection is back in the pool and may be
+        in use by another caller, so AUTH must not be sent on it here: the pool's
+        re_auth_callback re-authenticates it instead.
+        """
+        if self._pubsub is None:
+            return True
+        pubsub = self._pubsub()
+        return pubsub is not None and pubsub.connection is self._connection
+
     def _re_auth(self, token: TokenInterface):
         with self._connection_lock:
-            self._connection.send_command(
-                "AUTH", token.try_get("oid"), token.get_value()
-            )
-            self._connection.read_response()
+            if self._owns_connection():
+                self._connection.send_command(
+                    "AUTH", token.try_get("oid"), token.get_value()
+                )
+                self._connection.read_response()
 
         self._connection_pool.re_auth_callback(token)
 
     async def _re_auth_async(self, token: TokenInterface):
         async with self._connection_lock:
-            await self._connection.send_command(
-                "AUTH", token.try_get("oid"), token.get_value()
-            )
-            await self._connection.read_response()
+            if self._owns_connection():
+                await self._connection.send_command(
+                    "AUTH", token.try_get("oid"), token.get_value()
+                )
+                await self._connection.read_response()
 
         await self._connection_pool.re_auth_callback(token)
 
