@@ -6378,11 +6378,13 @@ class TestNodesManager:
         ]
 
     @pytest.mark.fixed_client
-    def test_refresh_and_a_command_build_one_client_for_a_topology_node(self):
+    def test_refresh_and_a_command_install_one_client_on_a_topology_node(self):
         """
         A command thread (create_redis_connections, as get_redis_connection
-        calls it) and a refresh that both reach a node with no client build
-        one client for it: the refresh waits while the command builds it.
+        calls it) and a refresh that both reach a node with no client install
+        one client on it. Neither builds under the lock: the refresh goes on
+        while the command builds, and the command keeps the client the refresh
+        installed first.
         """
         nodes_manager, _ = self._seed_only_nodes_manager()
         node = nodes_manager.nodes_cache["127.0.0.1:7002"]
@@ -6415,16 +6417,83 @@ class TestNodesManager:
                 )
             )
             refresh.start()
-            # The refresh is blocked on the lock while the command builds
-            refresh.join(0.2)
+            # The refresh is not blocked while the command builds its client
+            refresh.join(5)
+            refreshed_while_building = not refresh.is_alive()
             release.set()
             command.join(5)
-            refresh.join(5)
 
-        assert not command.is_alive() and not refresh.is_alive()
-        assert len(built) == 1
-        assert node.redis_connection is built[0]
+        assert refreshed_while_building
+        assert not command.is_alive()
+        assert len(built) == 2
+        assert node.redis_connection is built[1]
         assert node in refresh_nodes
+
+    @pytest.mark.fixed_client
+    def test_refresh_publishes_the_client_it_queried_a_listed_node_with(self):
+        """
+        A node with no client that a partial seed answer lists, and that the
+        refresh then queries for the other slots, is published with the client
+        the refresh built to query it: no second client is built for it, so
+        none is left unreleased.
+        """
+        nodes_manager, seed_connection = self._seed_only_nodes_manager()
+        seed_connection.execute_command.return_value = default_cluster_slots[:1]
+        node = nodes_manager.nodes_cache["127.0.0.1:7003"]
+        node.redis_connection = None
+        create_redis_node = nodes_manager.create_redis_node
+        built_ports = []
+
+        def counting_create_redis_node(host, port, **kwargs):
+            built_ports.append(port)
+            return create_redis_node(host, port, **kwargs)
+
+        with (
+            patch.object(
+                nodes_manager,
+                "create_redis_node",
+                side_effect=counting_create_redis_node,
+            ),
+            self._topology_cluster_slots(
+                answers={7003: default_cluster_slots[1:]}
+            ) as queried,
+        ):
+            nodes_manager.initialize()
+
+        assert queried[-1] == 7003
+        assert built_ports == [7003]
+        assert node.redis_connection is not None
+        published = nodes_manager.nodes_cache["127.0.0.1:7003"]
+        assert published.redis_connection is node.redis_connection
+
+    @pytest.mark.fixed_client
+    def test_refresh_keeps_a_client_a_command_installed_while_it_built(self):
+        """
+        The clients of the nodes new to the topology are built outside the
+        lock. If move_slot adds one of them meanwhile and a command installs a
+        client on it, the published node keeps that client.
+        """
+        nodes_manager, _ = self._seed_only_nodes_manager()
+        del nodes_manager.nodes_cache["127.0.0.1:7003"]
+        command_client = nodes_manager.create_redis_node("127.0.0.1", 7003)
+        create_redis_connections = nodes_manager._create_redis_connections
+
+        def move_slot_while_building(nodes):
+            create_redis_connections(nodes)
+            # move_slot adds the node, and a command installs its client
+            nodes_manager.nodes_cache["127.0.0.1:7003"] = ClusterNode(
+                "127.0.0.1", 7003, redis_connection=command_client
+            )
+
+        with patch.object(
+            nodes_manager,
+            "_create_redis_connections",
+            side_effect=move_slot_while_building,
+        ):
+            nodes_manager.initialize()
+
+        published = nodes_manager.nodes_cache["127.0.0.1:7003"]
+        assert published.redis_connection is command_client
 
     @pytest.mark.fixed_client
     def test_refresh_is_unreachable_only_once_the_current_topology_fails_too(self):
