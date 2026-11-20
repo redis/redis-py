@@ -17,6 +17,11 @@ from redis.asyncio.sentinel import (
     SlaveNotFoundError,
 )
 
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = skip_if_redis_enterprise()
+
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 def master_ip(master_host):

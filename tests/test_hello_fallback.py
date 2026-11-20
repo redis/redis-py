@@ -22,6 +22,7 @@ from redis.credentials import CredentialProvider
 from redis.exceptions import AuthenticationError, ConnectionError, ResponseError
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.utils import HIREDIS_AVAILABLE
+from tests.conftest import skip_if_redis_enterprise
 
 
 PARSERS = [
@@ -593,6 +594,7 @@ def test_fallback_cluster_initialization_and_transaction(
 @pytest.mark.parametrize("parser_class", PARSERS)
 @pytest.mark.parametrize("legacy_responses", [True, False])
 @pytest.mark.parametrize("transaction", [None, False, True])
+@skip_if_redis_enterprise()
 def test_fallback_client_and_pipeline(
     request, parser_class, legacy_responses, transaction
 ):
