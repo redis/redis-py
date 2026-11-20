@@ -1529,6 +1529,40 @@ class TestTopologyRefreshPacing:
         )
 
     @pytest.mark.fixed_client
+    async def test_transaction_error_does_not_wait_for_the_failed_socket_to_close(
+        self,
+    ) -> None:
+        """
+        After a connection error in a transaction, the failed connection is
+        discarded without waiting for its socket to close: a close that would
+        time out does not replace the error, and the connection is released.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        strategy = r.pipeline(transaction=True)._execution_strategy
+        owner = r.get_node_from_key("foo")
+        conn = Connection(host=owner.host, port=owner.port, socket_connect_timeout=0.01)
+        writer = mock.Mock()
+
+        async def never_closed() -> None:
+            await asyncio.Event().wait()
+
+        writer.wait_closed = mock.AsyncMock(side_effect=never_closed)
+        conn._reader = mock.Mock()
+        conn._writer = writer
+        strategy._transaction_node = owner
+        strategy._transaction_connection = conn
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True):
+            await strategy._reinitialize_on_error(ConnectionError("down"), 1)
+
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_not_awaited()
+        assert not conn.is_connected
+        assert strategy._transaction_connection is None
+        assert conn in owner._free
+        await r.aclose()
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("watch", [False, True])
     async def test_transaction_attempt_runs_a_requested_refresh(self, watch) -> None:
         """

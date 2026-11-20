@@ -5018,8 +5018,10 @@ class TransactionStrategy(AbstractStrategy):
             error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             if self._transaction_connection and self._transaction_node:
-                # Disconnect and release back to pool
-                await self._transaction_connection.disconnect()
+                # Disconnect and release back to pool. The socket is discarded,
+                # so the close is not waited for: a close that times out must
+                # not replace the error and stop the retry.
+                await self._transaction_connection.disconnect(nowait=True)
                 self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
 
