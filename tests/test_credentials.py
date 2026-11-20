@@ -11,6 +11,7 @@ import pytest
 import redis
 from redis import AuthenticationError, DataError, Redis, ResponseError
 from redis.auth.err import RequestTokenErr
+from redis.auth.token import SimpleToken
 from redis.backoff import NoBackoff
 from redis.connection import (
     ConnectionInterface,
@@ -786,3 +787,49 @@ class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.cp_integration
     def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
         assert r_entra.ping() is True
+
+
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+class TestRejectedReAuthToken:
+    """A rejected token does not stop the renewal or fail a finished command."""
+
+    USER = "re_auth_rejected_token"
+
+    def test_rejected_token_does_not_fail_commands_or_stop_the_renewal(
+        self, request, r
+    ):
+        r.acl_setuser(self.USER, enabled=True, passwords=["+old"], commands=["+@all"])
+        pool = redis.ConnectionPool.from_url(
+            request.config.getoption("--redis-url"), username=self.USER, password="old"
+        )
+        try:
+            free = pool.get_connection()
+            in_use = pool.get_connection()
+            pool.release(free)
+            # Not valid on the server yet, as on a proxy that lags behind
+            token = SimpleToken("new", -1, time.time() * 1000, {"oid": self.USER})
+
+            with pytest.raises(AuthenticationError):
+                pool.re_auth_callback(token)
+
+            # The rejection closed the free connection. It and the in-use one
+            # still have the token pending
+            assert free._sock is None
+            assert free._re_auth_token is token
+            assert in_use._re_auth_token is token
+            in_use.send_command("PING")
+            assert in_use.read_response() == b"PONG"
+            # The deferred AUTH is rejected too, which must not fail the release
+            pool.release(in_use)
+            assert in_use._re_auth_token is token
+
+            # A new socket authenticates in its handshake, which replaces the
+            # pending AUTH
+            client = Redis(connection_pool=pool, single_connection_client=True)
+            assert str_if_bytes(client.acl_whoami()) == self.USER
+            assert client.connection._re_auth_token is None
+            client.close()
+        finally:
+            pool.disconnect()
+            r.acl_deluser(self.USER)
