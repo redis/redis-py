@@ -1828,6 +1828,40 @@ class TestTopologyRefreshPacing:
         )
 
     @pytest.mark.fixed_client
+    async def test_transaction_error_does_not_wait_for_the_failed_socket_to_close(
+        self,
+    ) -> None:
+        """
+        After a connection error in a transaction, the failed connection is
+        discarded without waiting for its socket to close: a close that would
+        time out does not replace the error, and the connection is released.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        strategy = r.pipeline(transaction=True)._execution_strategy
+        owner = r.get_node_from_key("foo")
+        conn = Connection(host=owner.host, port=owner.port, socket_connect_timeout=0.01)
+        writer = mock.Mock()
+
+        async def never_closed() -> None:
+            await asyncio.Event().wait()
+
+        writer.wait_closed = mock.AsyncMock(side_effect=never_closed)
+        conn._reader = mock.Mock()
+        conn._writer = writer
+        strategy._transaction_node = owner
+        strategy._transaction_connection = conn
+
+        with mock.patch.object(NodesManager, "initialize", autospec=True):
+            await strategy._reinitialize_on_error(ConnectionError("down"), 1)
+
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_not_awaited()
+        assert not conn.is_connected
+        assert strategy._transaction_connection is None
+        assert conn in owner._free
+        await r.aclose()
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("watch", [False, True])
     async def test_transaction_attempt_runs_a_requested_refresh(self, watch) -> None:
         """
@@ -3835,6 +3869,101 @@ class TestRedisClusterObjMocked:
                 await cluster.close()
             assert called == 1
         await cluster.aclose()
+
+    async def test_aclose_closes_the_startup_nodes_when_closing_the_topology_fails(
+        self,
+    ) -> None:
+        """
+        A close failure on the topology nodes still closes the startup nodes,
+        and the error reaches the caller.
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        real_aclose = NodesManager.aclose
+        closed = []
+
+        async def aclose(manager: NodesManager, attr: str = "nodes_cache") -> None:
+            closed.append(attr)
+            await real_aclose(manager, attr)
+            if attr == "nodes_cache":
+                raise TimeoutError("Timed out closing connection")
+
+        with mock.patch.object(
+            NodesManager, "aclose", autospec=True, side_effect=aclose
+        ):
+            with pytest.raises(TimeoutError, match="Timed out closing connection"):
+                await cluster.aclose()
+
+        assert closed == ["nodes_cache", "startup_nodes"]
+
+    @pytest.mark.parametrize(
+        "topology_error",
+        [TimeoutError("topology close failed"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_aclose_raises_the_topology_close_error_when_both_closes_fail(
+        self, topology_error: BaseException
+    ) -> None:
+        """
+        When closing the topology nodes fails or is cancelled, and closing the
+        startup nodes fails too, the first error is raised: the later close
+        failure neither replaces it nor turns a cancellation into an error.
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        real_aclose = NodesManager.aclose
+        closed = []
+
+        async def aclose(manager: NodesManager, attr: str = "nodes_cache") -> None:
+            closed.append(attr)
+            await real_aclose(manager, attr)
+            if attr == "nodes_cache":
+                raise topology_error
+            raise TimeoutError("startup close failed")
+
+        with mock.patch.object(
+            NodesManager, "aclose", autospec=True, side_effect=aclose
+        ):
+            with pytest.raises(type(topology_error)) as raised:
+                await cluster.aclose()
+
+        assert raised.value is topology_error
+        assert closed == ["nodes_cache", "startup_nodes"]
+
+    @pytest.mark.parametrize("failing_attr", ["nodes_cache", "startup_nodes"])
+    async def test_failed_first_initialize_raises_its_error_when_closing_fails(
+        self, failing_attr: str
+    ) -> None:
+        """
+        A first initialize that fails closes the topology and the startup nodes
+        even when one of those closes fails, and raises the initialize error,
+        not the close error.
+        """
+        cluster = RedisCluster(host=default_host, port=default_port)
+        real_aclose = NodesManager.aclose
+        closed = []
+
+        async def aclose(manager: NodesManager, attr: str = "nodes_cache") -> None:
+            closed.append(attr)
+            await real_aclose(manager, attr)
+            if attr == failing_attr:
+                raise TimeoutError("Timed out closing connection")
+
+        with (
+            mock.patch.object(
+                RedisCluster,
+                "_refresh_topology",
+                autospec=True,
+                side_effect=RedisClusterException("Redis Cluster cannot be connected"),
+            ),
+            mock.patch.object(
+                NodesManager, "aclose", autospec=True, side_effect=aclose
+            ),
+        ):
+            with pytest.raises(
+                RedisClusterException, match="Redis Cluster cannot be connected"
+            ):
+                await cluster.initialize()
+
+        assert closed == ["nodes_cache", "startup_nodes"]
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
@@ -7367,6 +7496,69 @@ class TestNodesManager:
         with pytest.raises(SlotNotCoveredError):
             nodes_manager.get_node_from_slot(42)
 
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error",
+        [TimeoutError("Timed out closing connection"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_aclose_closes_every_node_when_one_close_fails(
+        self, error: BaseException
+    ) -> None:
+        """
+        One node's close failure does not leave the other nodes closing in the
+        background: every node is disconnected before the error is raised. A
+        cancelled node close is raised too, not reported as a success.
+        """
+        nodes = [ClusterNode(default_host, port) for port in (7000, 7001, 7002)]
+        nodes_manager = NodesManager([], False, {})
+        nodes_manager.nodes_cache = {node.name: node for node in nodes}
+        disconnected = []
+
+        async def disconnect(node: ClusterNode) -> None:
+            if node is nodes[0]:
+                disconnected.append(node)
+                raise error
+            # The other nodes take longer to close than the failing one
+            await asyncio.sleep(0.01)
+            disconnected.append(node)
+
+        with mock.patch.object(
+            ClusterNode, "disconnect", autospec=True, side_effect=disconnect
+        ):
+            with pytest.raises(type(error)):
+                await nodes_manager.aclose()
+
+        assert sorted(disconnected, key=lambda n: n.port) == nodes
+        assert nodes_manager.default_node is None
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error",
+        [TimeoutError("Timed out closing connection"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_node_disconnect_raises_a_failed_or_cancelled_close(
+        self, error: BaseException
+    ) -> None:
+        """
+        A node disconnects every connection, then raises the first close that
+        failed or was cancelled, instead of reporting a cancelled close as a
+        success.
+        """
+        node = ClusterNode(default_host, 7000)
+        failing = mock.AsyncMock(spec=Connection)
+        failing.disconnect.side_effect = error
+        healthy = mock.AsyncMock(spec=Connection)
+        node._connections = [failing, healthy]
+
+        with pytest.raises(type(error)):
+            await node.disconnect()
+
+        failing.disconnect.assert_awaited_once_with()
+        healthy.disconnect.assert_awaited_once_with()
+        node._connections = []
+
     @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:
         n_manager = r.nodes_manager
@@ -8292,7 +8484,7 @@ class TestNodesManager:
                 await self.response_ready.wait()
                 return b"OK"
 
-            async def disconnect(self) -> None:
+            async def disconnect(self, nowait: bool = False) -> None:
                 self.disconnect_called = True
                 self.is_connected = False
                 self.reconnect = False
@@ -9443,7 +9635,7 @@ class TestClusterNodeConnectionHandling:
             def extract_connection_details(self) -> str:
                 return "race connection details"
 
-            async def disconnect(self) -> None:
+            async def disconnect(self, nowait: bool = False) -> None:
                 self.disconnect_calls += 1
                 self.reset_should_reconnect()
 
@@ -9599,10 +9791,11 @@ class TestClusterNodeConnectionHandling:
         conn = mock.AsyncMock(spec=Connection)
         conn.should_reconnect.return_value = True
 
-        # disconnect_if_needed should disconnect the connection
+        # disconnect_if_needed should disconnect the connection without waiting
+        # for the old socket to close
         await node.disconnect_if_needed(conn)
 
-        conn.disconnect.assert_called_once()
+        conn.disconnect.assert_awaited_once_with(nowait=True)
 
     async def test_disconnect_if_needed_skips_when_no_reconnect_needed(self) -> None:
         """
@@ -9618,6 +9811,88 @@ class TestClusterNodeConnectionHandling:
         await node.disconnect_if_needed(conn)
 
         conn.disconnect.assert_not_called()
+
+    @staticmethod
+    def _connection_with_hanging_close() -> Tuple[Connection, mock.Mock]:
+        """
+        A connected Connection whose old socket never finishes closing, so a
+        close that waits for it times out after ``socket_connect_timeout``.
+        """
+        conn = Connection(host=default_host, port=7000, socket_connect_timeout=0.01)
+        writer = mock.Mock()
+
+        async def never_closed() -> None:
+            await asyncio.Event().wait()
+
+        writer.wait_closed = mock.AsyncMock(side_effect=never_closed)
+        conn._reader = mock.Mock()
+        conn._writer = writer
+        return conn, writer
+
+    async def test_disconnect_if_needed_does_not_wait_for_the_old_socket(
+        self,
+    ) -> None:
+        """
+        A marked connection whose old socket never finishes closing is still
+        disconnected at once, without raising the close timeout.
+        """
+        node = ClusterNode(default_host, 7000)
+        conn, writer = self._connection_with_hanging_close()
+        conn.mark_for_reconnect()
+
+        await node.disconnect_if_needed(conn)
+
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_not_awaited()
+        assert not conn.is_connected
+        assert not conn.should_reconnect()
+
+    @pytest.mark.parametrize("marked_during_command", [False, True])
+    async def test_execute_command_is_not_failed_by_closing_a_marked_connection(
+        self, marked_during_command: bool
+    ) -> None:
+        """
+        A marked connection whose old socket never finishes closing does not fail
+        the command. It is marked before the command and reconnected before the
+        send, or marked during the command and disconnected after the reply was
+        read. In both cases the caller gets the reply, not a retryable
+        ``TimeoutError``.
+        """
+        node = ClusterNode(default_host, 7000)
+        conn, writer = self._connection_with_hanging_close()
+        node._connections.append(conn)
+        node._free.append(conn)
+
+        async def send_packed_command(*args: Any, **kwargs: Any) -> None:
+            if not conn.is_connected:
+                # The lazy reconnect on the send, after the old socket was
+                # dropped before it
+                conn._reader = mock.Mock()
+                conn._writer = mock.Mock()
+
+        async def read_response(*args: Any, **kwargs: Any) -> bytes:
+            if marked_during_command:
+                # For example a maintenance notification read with the reply
+                conn.mark_for_reconnect()
+            return b"value"
+
+        if not marked_during_command:
+            conn.mark_for_reconnect()
+        with (
+            mock.patch.object(conn, "can_read", mock.AsyncMock(return_value=False)),
+            mock.patch.object(
+                conn, "send_packed_command", side_effect=send_packed_command
+            ),
+            mock.patch.object(conn, "read_response", side_effect=read_response),
+        ):
+            assert await node.execute_command("GET", "key") == b"value"
+
+        writer.close.assert_called_once()
+        writer.wait_closed.assert_not_awaited()
+        assert list(node._free) == [conn]
+        if marked_during_command:
+            assert not conn.is_connected
+        conn._close()
 
 
 @pytest.mark.fixed_client
