@@ -7198,10 +7198,18 @@ class TestNodesManager:
             nodes_manager.get_node_from_slot(42)
 
     @pytest.mark.fixed_client
-    async def test_aclose_closes_every_node_when_one_close_fails(self) -> None:
+    @pytest.mark.parametrize(
+        "error",
+        [TimeoutError("Timed out closing connection"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_aclose_closes_every_node_when_one_close_fails(
+        self, error: BaseException
+    ) -> None:
         """
         One node's close failure does not leave the other nodes closing in the
-        background: every node is disconnected before the error is raised.
+        background: every node is disconnected before the error is raised. A
+        cancelled node close is raised too, not reported as a success.
         """
         nodes = [ClusterNode(default_host, port) for port in (7000, 7001, 7002)]
         nodes_manager = NodesManager([], False, {})
@@ -7211,7 +7219,7 @@ class TestNodesManager:
         async def disconnect(node: ClusterNode) -> None:
             if node is nodes[0]:
                 disconnected.append(node)
-                raise TimeoutError("Timed out closing connection")
+                raise error
             # The other nodes take longer to close than the failing one
             await asyncio.sleep(0.01)
             disconnected.append(node)
@@ -7219,11 +7227,38 @@ class TestNodesManager:
         with mock.patch.object(
             ClusterNode, "disconnect", autospec=True, side_effect=disconnect
         ):
-            with pytest.raises(TimeoutError, match="Timed out closing connection"):
+            with pytest.raises(type(error)):
                 await nodes_manager.aclose()
 
         assert sorted(disconnected, key=lambda n: n.port) == nodes
         assert nodes_manager.default_node is None
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error",
+        [TimeoutError("Timed out closing connection"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_node_disconnect_raises_a_failed_or_cancelled_close(
+        self, error: BaseException
+    ) -> None:
+        """
+        A node disconnects every connection, then raises the first close that
+        failed or was cancelled, instead of reporting a cancelled close as a
+        success.
+        """
+        node = ClusterNode(default_host, 7000)
+        failing = mock.AsyncMock(spec=Connection)
+        failing.disconnect.side_effect = error
+        healthy = mock.AsyncMock(spec=Connection)
+        node._connections = [failing, healthy]
+
+        with pytest.raises(type(error)):
+            await node.disconnect()
+
+        failing.disconnect.assert_awaited_once_with()
+        healthy.disconnect.assert_awaited_once_with()
+        node._connections = []
 
     @pytest.mark.onlycluster
     async def test_load_balancer(self, r: RedisCluster) -> None:

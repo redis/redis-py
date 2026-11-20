@@ -2505,7 +2505,7 @@ class ClusterNode:
             ),
             return_exceptions=True,
         )
-        exc = next((res for res in ret if isinstance(res, Exception)), None)
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
         if exc:
             raise exc
 
@@ -3651,7 +3651,7 @@ class NodesManager:
             ),
             return_exceptions=True,
         )
-        exc = next((res for res in ret if isinstance(res, Exception)), None)
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
         if exc:
             raise exc
 
