@@ -37,6 +37,7 @@ from redis.utils import str_if_bytes
 from .conftest import (
     REDIS_INFO,
     _get_client,
+    is_redis_enterprise_cluster,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
@@ -44,9 +45,16 @@ from .conftest import (
 )
 
 
+# A Redis Enterprise cluster proxy can take up to about one second to confirm
+# the first SUBSCRIBE or PSUBSCRIBE on a connection.
+RE_CLUSTER_MIN_MESSAGE_WAIT = 2.0
+
+
 def wait_for_message(
     pubsub, timeout=0.5, ignore_subscribe_messages=False, node=None, func=None
 ):
+    if is_redis_enterprise_cluster():
+        timeout = max(timeout, RE_CLUSTER_MIN_MESSAGE_WAIT)
     now = time.monotonic()
     timeout = now + timeout
     while now < timeout:

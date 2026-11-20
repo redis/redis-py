@@ -391,12 +391,17 @@ def skip_if_redis_enterprise() -> _TestDecorator:
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
-def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+def is_redis_enterprise_cluster() -> bool:
     # INFO reports cluster_enabled as an integer, so test it for truthiness.
-    check = REDIS_INFO.get("enterprise", False) is True and bool(
+    return REDIS_INFO.get("enterprise", False) is True and bool(
         REDIS_INFO.get("cluster_enabled", False)
     )
-    return pytest.mark.skipif(check, reason="Redis enterprise cluster")
+
+
+def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+    return pytest.mark.skipif(
+        is_redis_enterprise_cluster(), reason="Redis enterprise cluster"
+    )
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
