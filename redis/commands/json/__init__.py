@@ -5,6 +5,7 @@ from typing import Literal
 
 import redis
 
+from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
     apply_module_callbacks,
     get_legacy_responses,
@@ -253,6 +254,13 @@ class _JSONBase(JSONCommands):
                 lock=self.client._lock,
             )
 
+        elif self._is_async_client:
+            p = AsyncPipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=dict(self.client.response_callbacks),
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
@@ -272,6 +280,10 @@ class ClusterPipeline(JSONCommands, redis.cluster.ClusterPipeline):
 
 class Pipeline(JSONCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
+
+class AsyncPipeline(JSONCommands, AsyncioPipeline):
+    """Asyncio pipeline for the module."""
 
 
 class JSON(_JSONBase):

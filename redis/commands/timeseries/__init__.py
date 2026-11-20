@@ -3,6 +3,7 @@ from typing import Literal
 import redis
 from redis._parsers.helpers import bool_ok
 
+from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
     apply_module_callbacks,
     get_legacy_responses,
@@ -156,6 +157,13 @@ class _TimeSeriesBase(TimeSeriesCommands):
                 lock=self.client._lock,
             )
 
+        elif self._is_async_client:
+            p = AsyncPipeline(
+                connection_pool=self.client.connection_pool,
+                response_callbacks=dict(self.client.response_callbacks),
+                transaction=transaction,
+                shard_hint=shard_hint,
+            )
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
@@ -172,6 +180,10 @@ class ClusterPipeline(TimeSeriesCommands, redis.cluster.ClusterPipeline):
 
 class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
+
+class AsyncPipeline(TimeSeriesCommands, AsyncioPipeline):
+    """Asyncio pipeline for the module."""
 
 
 class TimeSeries(_TimeSeriesBase):
