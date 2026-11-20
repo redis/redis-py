@@ -1628,6 +1628,7 @@ class TestMaintNotificationsMetricsRecording:
             network_peer_address="localhost",
             network_peer_port=6379,
             maint_notification="MIGRATING",
+            otel_config=mock_connection.otel_config,
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
@@ -1653,6 +1654,7 @@ class TestMaintNotificationsMetricsRecording:
             connection_name="localhost:6379_abc123",
             maint_notification="MIGRATING",
             relaxed=True,
+            otel_config=mock_connection.otel_config,
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
@@ -1678,6 +1680,7 @@ class TestMaintNotificationsMetricsRecording:
             connection_name="localhost:6379_abc123",
             maint_notification="MIGRATED",
             relaxed=False,
+            otel_config=mock_connection.otel_config,
         )
 
     @patch("redis.maint_notifications.record_connection_relaxed_timeout")
@@ -1725,6 +1728,7 @@ class TestMaintNotificationsMetricsRecording:
 
         mock_record_connection_handoff.assert_called_once_with(
             pool_name="localhost:6379_a1b2c3d4",
+            otel_config=mock_pool.otel_config,
         )
 
     @patch("redis.maint_notifications.record_connection_handoff")

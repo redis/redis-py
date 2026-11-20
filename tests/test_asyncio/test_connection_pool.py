@@ -1906,7 +1906,7 @@ class TestAsyncConnectionPoolMetricsRecording:
 
             assert not conn.is_connected
             mock_record.assert_awaited_once_with(
-                close_reason=CloseReason.ERROR, error_type=error
+                close_reason=CloseReason.ERROR, error_type=error, otel_config=None
             )
 
     async def test_connection_disconnect_records_connection_closed_on_cancel(self):
@@ -1925,7 +1925,7 @@ class TestAsyncConnectionPoolMetricsRecording:
 
             assert not conn.is_connected
             mock_record.assert_awaited_once_with(
-                close_reason=CloseReason.APPLICATION_CLOSE
+                close_reason=CloseReason.APPLICATION_CLOSE, otel_config=None
             )
 
     async def test_concurrent_disconnects_record_connection_closed_once(self):
@@ -1948,7 +1948,7 @@ class TestAsyncConnectionPoolMetricsRecording:
             assert not conn.is_connected
             writer.close.assert_called_once()
             mock_record.assert_awaited_once_with(
-                close_reason=CloseReason.APPLICATION_CLOSE
+                close_reason=CloseReason.APPLICATION_CLOSE, otel_config=None
             )
 
     async def test_connection_disconnect_records_connection_closed_without_task(
@@ -1968,7 +1968,7 @@ class TestAsyncConnectionPoolMetricsRecording:
 
             assert not conn.is_connected
             mock_record.assert_awaited_once_with(
-                close_reason=CloseReason.APPLICATION_CLOSE
+                close_reason=CloseReason.APPLICATION_CLOSE, otel_config=None
             )
 
     async def test_connection_disconnect_skips_connection_closed_when_not_connected(
@@ -2012,5 +2012,5 @@ class TestAsyncConnectionPoolMetricsRecording:
             assert not conn.is_connected
             # Recorded by disconnect(), not again by the forced close after it
             mock_record.assert_awaited_once_with(
-                close_reason=CloseReason.APPLICATION_CLOSE
+                close_reason=CloseReason.APPLICATION_CLOSE, otel_config=None
             )

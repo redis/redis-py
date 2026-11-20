@@ -8,7 +8,7 @@ OTel semantic conventions for database clients.
 import logging
 import time
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 if TYPE_CHECKING:
     from redis.asyncio.connection import ConnectionPool
@@ -236,6 +236,28 @@ class RedisMetricsCollector:
             description="The total number of bytes saved by using CSC",
         )
 
+    def _add_custom_attributes(
+        self, attrs: dict[str, Any], otel_config: OTelConfig | None
+    ) -> None:
+        """
+        Add custom attributes to a metric's attributes in place.
+
+        The global configuration is applied first and the per-client one last,
+        so for a duplicate key the per-client value wins over the global one
+        and both win over a built-in attribute.
+
+        Args:
+            attrs: Built-in attributes of the metric
+            otel_config: Per-client configuration supplying custom attributes
+        """
+        custom_attributes = self.config.custom_attributes
+        if custom_attributes:
+            attrs.update(custom_attributes)
+        # The type is checked because recording errors are swallowed: anything
+        # else found on a custom pool or connection must not drop the metric.
+        if isinstance(otel_config, OTelConfig) and otel_config.custom_attributes:
+            attrs.update(otel_config.custom_attributes)
+
     # Resiliency metric recording methods
 
     def record_error_count(
@@ -247,6 +269,7 @@ class RedisMetricsCollector:
         error_type: Optional[Exception] = None,
         retry_attempts: Optional[int] = None,
         is_internal: Optional[bool] = None,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Record error count
@@ -259,6 +282,7 @@ class RedisMetricsCollector:
             error_type: Error type
             retry_attempts: Retry attempts
             is_internal: Whether the error is internal (e.g., timeout, network error)
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "client_errors"):
             return
@@ -282,6 +306,7 @@ class RedisMetricsCollector:
             )
         )
 
+        self._add_custom_attributes(attrs, otel_config)
         self.client_errors.add(1, attributes=attrs)
 
     def record_maint_notification_count(
@@ -291,6 +316,7 @@ class RedisMetricsCollector:
         network_peer_address: str,
         network_peer_port: int,
         maint_notification: str,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Record maintenance notification count
@@ -301,6 +327,7 @@ class RedisMetricsCollector:
             network_peer_address: Network peer address
             network_peer_port: Network peer port
             maint_notification: Maintenance notification
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "maintenance_notifications"):
             return
@@ -318,6 +345,7 @@ class RedisMetricsCollector:
         )
 
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
+        self._add_custom_attributes(attrs, otel_config)
         self.maintenance_notifications.add(1, attributes=attrs)
 
     def record_geo_failover(
@@ -325,6 +353,7 @@ class RedisMetricsCollector:
         fail_from: Union["SyncDatabase", "AsyncDatabase"],
         fail_to: Union["SyncDatabase", "AsyncDatabase"],
         reason: GeoFailoverReason,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Record geo failover
@@ -333,6 +362,7 @@ class RedisMetricsCollector:
             fail_from: Database failed from
             fail_to: Database failed to
             reason: Reason for the failover
+            otel_config: Per-client configuration supplying custom attributes
         """
 
         if not hasattr(self, "geo_failovers"):
@@ -344,6 +374,7 @@ class RedisMetricsCollector:
             reason=reason,
         )
 
+        self._add_custom_attributes(attrs, otel_config)
         return self.geo_failovers.add(1, attributes=attrs)
 
     def record_connection_count(
@@ -351,6 +382,7 @@ class RedisMetricsCollector:
         pool_name: str,
         connection_state: ConnectionState,
         counter: int = 1,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a connection count change for a single state.
@@ -359,6 +391,7 @@ class RedisMetricsCollector:
             pool_name: Connection pool name
             connection_state: State to update (IDLE or USED)
             counter: Number to add (positive) or subtract (negative)
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_count_updown"):
             return
@@ -367,6 +400,7 @@ class RedisMetricsCollector:
             pool_name=pool_name,
             connection_state=connection_state,
         )
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_count_updown.add(counter, attributes=attrs)
 
     @deprecated_function(
@@ -418,23 +452,30 @@ class RedisMetricsCollector:
             callbacks=[callback],
         )
 
-    def record_connection_timeout(self, pool_name: str) -> None:
+    def record_connection_timeout(
+        self,
+        pool_name: str,
+        otel_config: OTelConfig | None = None,
+    ) -> None:
         """
         Record a connection timeout event.
 
         Args:
             pool_name: Connection pool name
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_timeouts"):
             return
 
         attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_timeouts.add(1, attributes=attrs)
 
     def record_connection_create_time(
         self,
         connection_pool: Union["ConnectionPoolInterface", "ConnectionPool"],
         duration_seconds: float,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record time taken to create a new connection.
@@ -442,6 +483,7 @@ class RedisMetricsCollector:
         Args:
             connection_pool: Connection pool implementation
             duration_seconds: Creation time in seconds
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_create_time"):
             return
@@ -449,12 +491,14 @@ class RedisMetricsCollector:
         attrs = self.attr_builder.build_connection_attributes(
             pool_name=get_pool_name(connection_pool)
         )
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_wait_time(
         self,
         pool_name: str,
         duration_seconds: float,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record time taken to obtain a connection from the pool.
@@ -462,11 +506,13 @@ class RedisMetricsCollector:
         Args:
             pool_name: Connection pool name
             duration_seconds: Wait time in seconds
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_wait_time"):
             return
 
         attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_wait_time.record(duration_seconds, attributes=attrs)
 
     # Command execution metric recording methods
@@ -489,6 +535,7 @@ class RedisMetricsCollector:
         network_peer_port: Optional[int] = None,
         retry_attempts: Optional[int] = None,
         is_blocking: Optional[bool] = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record command execution duration.
@@ -505,6 +552,7 @@ class RedisMetricsCollector:
             network_peer_port: Peer port number
             retry_attempts: Number of retry attempts made
             is_blocking: Whether the operation is a blocking command
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "operation_duration"):
             return
@@ -535,12 +583,14 @@ class RedisMetricsCollector:
                 error_type=error_type,
             )
         )
+        self._add_custom_attributes(attrs, otel_config)
         self.operation_duration.record(duration_seconds, attributes=attrs)
 
     def record_connection_closed(
         self,
         close_reason: Optional[CloseReason] = None,
         error_type: Optional[Exception] = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a connection closed event.
@@ -548,6 +598,7 @@ class RedisMetricsCollector:
         Args:
             close_reason: Reason for closing (e.g. 'error', 'application_close')
             error_type: Error type if closed due to error
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_closed"):
             return
@@ -562,6 +613,7 @@ class RedisMetricsCollector:
             )
         )
 
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_closed.add(1, attributes=attrs)
 
     def record_connection_relaxed_timeout(
@@ -569,6 +621,7 @@ class RedisMetricsCollector:
         connection_name: str,
         maint_notification: str,
         relaxed: bool,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a connection timeout relaxation event.
@@ -577,28 +630,33 @@ class RedisMetricsCollector:
             connection_name: Connection name
             maint_notification: Maintenance notification type
             relaxed: True to count up (relaxed), False to count down (unrelaxed)
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_relaxed_timeout"):
             return
 
         attrs = self.attr_builder.build_connection_attributes(pool_name=connection_name)
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
 
     def record_connection_handoff(
         self,
         pool_name: str,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a connection handoff event (e.g., after MOVING notification).
 
         Args:
             pool_name: Connection pool name
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "connection_handoff"):
             return
 
         attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        self._add_custom_attributes(attrs, otel_config)
         self.connection_handoff.add(1, attributes=attrs)
 
     # PubSub metric recording methods
@@ -608,6 +666,7 @@ class RedisMetricsCollector:
         direction: PubSubDirection,
         channel: Optional[str] = None,
         sharded: Optional[bool] = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a PubSub message (published or received).
@@ -616,6 +675,7 @@ class RedisMetricsCollector:
             direction: Message direction ('publish' or 'receive')
             channel: Pub/Sub channel name
             sharded: True if sharded Pub/Sub channel
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "pubsub_messages"):
             return
@@ -625,6 +685,7 @@ class RedisMetricsCollector:
             channel=channel,
             sharded=sharded,
         )
+        self._add_custom_attributes(attrs, otel_config)
         self.pubsub_messages.add(1, attributes=attrs)
 
     # Streaming metric recording methods
@@ -640,6 +701,7 @@ class RedisMetricsCollector:
         stream_name: Optional[str] = None,
         consumer_group: Optional[str] = None,
         consumer_name: Optional[str] = None,  # noqa
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record the lag of a streaming message.
@@ -649,6 +711,7 @@ class RedisMetricsCollector:
             stream_name: Stream name
             consumer_group: Consumer group name
             consumer_name: Consumer name
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "stream_lag"):
             return
@@ -657,6 +720,7 @@ class RedisMetricsCollector:
             stream_name=stream_name,
             consumer_group=consumer_group,
         )
+        self._add_custom_attributes(attrs, otel_config)
         self.stream_lag.record(lag_seconds, attributes=attrs)
 
     # CSC metric recording methods
@@ -664,23 +728,27 @@ class RedisMetricsCollector:
     def record_csc_request(
         self,
         result: Optional[CSCResult] = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a Client Side Caching (CSC) request.
 
         Args:
             result: CSC result ('hit' or 'miss')
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "csc_requests"):
             return
 
         attrs = self.attr_builder.build_csc_attributes(result=result)
+        self._add_custom_attributes(attrs, otel_config)
         self.csc_requests.add(1, attributes=attrs)
 
     def record_csc_eviction(
         self,
         count: int,
         reason: Optional[CSCReason] = None,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record a Client Side Caching (CSC) eviction.
@@ -688,27 +756,32 @@ class RedisMetricsCollector:
         Args:
             count: Number of evictions
             reason: Reason for eviction
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "csc_evictions"):
             return
 
         attrs = self.attr_builder.build_csc_attributes(reason=reason)
+        self._add_custom_attributes(attrs, otel_config)
         self.csc_evictions.add(count, attributes=attrs)
 
     def record_csc_network_saved(
         self,
         bytes_saved: int,
+        otel_config: OTelConfig | None = None,
     ) -> None:
         """
         Record the number of bytes saved by using Client Side Caching (CSC).
 
         Args:
             bytes_saved: Number of bytes saved
+            otel_config: Per-client configuration supplying custom attributes
         """
         if not hasattr(self, "csc_network_saved"):
             return
 
         attrs = self.attr_builder.build_csc_attributes()
+        self._add_custom_attributes(attrs, otel_config)
         self.csc_network_saved.add(bytes_saved, attributes=attrs)
 
     # Utility methods

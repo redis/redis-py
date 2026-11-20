@@ -3621,7 +3621,9 @@ class TestCacheEntryLifecycle:
         with patch("redis.connection.record_csc_request") as record:
             assert proxy.read_response() == b"cached"
 
-        record.assert_called_once_with(result=CSCResult.HIT)
+        record.assert_called_once_with(
+            result=CSCResult.HIT, otel_config=proxy.otel_config
+        )
 
     def test_a_stored_miss_records_a_miss(self, proxy_factory, mock_connection):
         proxy, _ = proxy_factory(TrackingMode.PLAIN)
@@ -3631,7 +3633,9 @@ class TestCacheEntryLifecycle:
         with patch("redis.connection.record_csc_request") as record:
             assert proxy.read_response() == b"fresh"
 
-        record.assert_called_once_with(result=CSCResult.MISS)
+        record.assert_called_once_with(
+            result=CSCResult.MISS, otel_config=proxy.otel_config
+        )
 
     def test_a_pending_hit_does_not_outlive_a_disconnect(
         self, proxy_factory, mock_connection

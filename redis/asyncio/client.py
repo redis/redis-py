@@ -91,6 +91,7 @@ from redis.exceptions import (
 from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.observability.attributes import PubSubDirection
+from redis.observability.config import OTelConfig
 from redis.typing import (
     ChannelT,
     EncodableT,
@@ -351,6 +352,7 @@ class Redis(
         legacy_responses: bool = True,
         event_dispatcher: EventDispatcher | None = None,
         maint_notifications_config: MaintNotificationsConfig | None = None,
+        otel_config: OTelConfig | None = None,
     ):
         """
         Initialize a new Redis client.
@@ -393,6 +395,13 @@ class Redis(
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the connection pool
             initialization).
+            Argument is ignored when connection_pool is provided.
+        otel_config:
+            per-client OpenTelemetry configuration - see
+            `redis.observability.OTelConfig` for details. Its custom attributes
+            are added to the metrics recorded for this client, after the ones of
+            the configuration passed to `get_observability_instance().init()`.
+            Only `custom_attributes` is read from it.
             Argument is ignored when connection_pool is provided.
         """
         kwargs: Dict[str, Any]
@@ -505,6 +514,12 @@ class Redis(
                         "maint_notifications_config": maint_notifications_config,
                     }
                 )
+            if otel_config is not None:
+                kwargs.update(
+                    {
+                        "otel_config": otel_config,
+                    }
+                )
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
@@ -528,6 +543,7 @@ class Redis(
             )
 
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -587,6 +603,10 @@ class Redis(
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     @property
     def himport_registry(self) -> HImportRegistry:
@@ -966,6 +986,7 @@ class Redis(
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
 
         await conn.disconnect(error=error, failure_count=failure_count)
@@ -1009,6 +1030,7 @@ class Redis(
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
             return result
         except Exception as e:
@@ -1020,6 +1042,7 @@ class Redis(
                 error_type=e,
                 retry_attempts=actual_retry_attempts,
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
         finally:
@@ -1249,6 +1272,7 @@ class PubSub:
         else:
             self._event_dispatcher = event_dispatcher
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
@@ -1277,6 +1301,10 @@ class PubSub:
         self.shard_channels = {}
         self.pending_unsubscribe_shard_channels = set()
         self._lock = asyncio.Lock()
+
+    #: The per-client OpenTelemetry configuration of the connection pool. Read once
+    #: when the pool is assigned: it is passed with every recorded metric.
+    otel_config: OTelConfig | None = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -1448,6 +1476,7 @@ class PubSub:
                     db_namespace=str(conn.db),
                     error=error,
                     retry_attempts=failure_count,
+                    otel_config=self.otel_config,
                 )
         await conn.disconnect(error=error, failure_count=failure_count)
         await conn.connect()
@@ -1491,6 +1520,7 @@ class PubSub:
                     server_address=getattr(conn, "host", None),
                     server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
+                    otel_config=self.otel_config,
                 )
 
             return response
@@ -1503,6 +1533,7 @@ class PubSub:
                 error_type=e,
                 retry_attempts=actual_retry_attempts,
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 
@@ -1805,6 +1836,7 @@ class PubSub:
             await record_pubsub_message(
                 direction=PubSubDirection.RECEIVE,
                 channel=channel,
+                otel_config=self.otel_config,
             )
         elif message_type == "smessage":
             channel = str_if_bytes(message["channel"])
@@ -1812,6 +1844,7 @@ class PubSub:
                 direction=PubSubDirection.RECEIVE,
                 channel=channel,
                 sharded=True,
+                otel_config=self.otel_config,
             )
 
         # if this is an unsubscribe message, remove it from memory.
@@ -2013,6 +2046,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         shard_hint: Optional[str],
     ):
         self.connection_pool = connection_pool
+        self.otel_config = getattr(connection_pool, "otel_config", None)
         self.connection = None
         self.response_callbacks = response_callbacks
         self.is_transaction = transaction
@@ -2134,6 +2168,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
         await conn.disconnect(error=error, failure_count=failure_count)
         # if we were already watching a variable, the watch is no longer
@@ -2188,6 +2223,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
 
             return response
@@ -2200,6 +2236,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 error_type=e,
                 retry_attempts=actual_retry_attempts,
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
 
@@ -2439,6 +2476,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
+                otel_config=self.otel_config,
             )
         await conn.disconnect(error=error, failure_count=failure_count)
         # if we were watching a variable, the watch is no longer valid
@@ -2498,6 +2536,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
+                otel_config=self.otel_config,
             )
             return response
         except Exception as e:
@@ -2509,6 +2548,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 error_type=e,
                 retry_attempts=actual_retry_attempts,
                 is_internal=False,
+                otel_config=self.otel_config,
             )
             raise
         finally:

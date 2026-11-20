@@ -130,6 +130,7 @@ async def record_operation_duration(
     error: Optional[Exception] = None,
     is_blocking: Optional[bool] = None,
     retry_attempts: Optional[int] = None,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a Redis command execution duration.
@@ -146,6 +147,7 @@ async def record_operation_duration(
         error: Exception if command failed, None if successful
         is_blocking: Whether the operation is a blocking command
         retry_attempts: Number of retry attempts made
+        otel_config: Per-client configuration supplying custom attributes
 
     Example:
         >>> start = time.monotonic()
@@ -172,6 +174,7 @@ async def record_operation_duration(
             network_peer_port=server_port,
             is_blocking=is_blocking,
             retry_attempts=retry_attempts,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -180,6 +183,7 @@ async def record_operation_duration(
 async def record_connection_create_time(
     connection_pool: "ConnectionPool",
     duration_seconds: float,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record connection creation time.
@@ -187,6 +191,7 @@ async def record_connection_create_time(
     Args:
         connection_pool: Connection pool implementation
         duration_seconds: Time taken to create connection in seconds
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -200,6 +205,7 @@ async def record_connection_create_time(
         collector.record_connection_create_time(
             connection_pool=connection_pool,
             duration_seconds=duration_seconds,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -209,6 +215,7 @@ async def record_connection_count(
     pool_name: str,
     connection_state: ConnectionState,
     counter: int = 1,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a connection count change for a single state.
@@ -217,6 +224,7 @@ async def record_connection_count(
         pool_name: Connection pool identifier
         connection_state: State to update (IDLE or USED)
         counter: Number to add (positive) or subtract (negative)
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -231,6 +239,7 @@ async def record_connection_count(
             pool_name=pool_name,
             connection_state=connection_state,
             counter=counter,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -311,12 +320,14 @@ async def register_pools_connection_count(
 
 async def record_connection_timeout(
     pool_name: str,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a connection timeout event.
 
     Args:
         pool_name: Connection pool identifier
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -329,6 +340,7 @@ async def record_connection_timeout(
     try:
         collector.record_connection_timeout(
             pool_name=pool_name,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -337,6 +349,7 @@ async def record_connection_timeout(
 async def record_connection_wait_time(
     pool_name: str,
     duration_seconds: float,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record time taken to obtain a connection from the pool.
@@ -344,6 +357,7 @@ async def record_connection_wait_time(
     Args:
         pool_name: Connection pool identifier
         duration_seconds: Wait time in seconds
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -357,6 +371,7 @@ async def record_connection_wait_time(
         collector.record_connection_wait_time(
             pool_name=pool_name,
             duration_seconds=duration_seconds,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -365,6 +380,7 @@ async def record_connection_wait_time(
 async def record_connection_closed(
     close_reason: Optional[CloseReason] = None,
     error_type: Optional[Exception] = None,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a connection closed event.
@@ -372,6 +388,7 @@ async def record_connection_closed(
     Args:
         close_reason: Reason for closing (e.g. 'error', 'application_close')
         error_type: Error type if closed due to error
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -385,6 +402,7 @@ async def record_connection_closed(
         collector.record_connection_closed(
             close_reason=close_reason,
             error_type=error_type,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -394,6 +412,7 @@ async def record_connection_relaxed_timeout(
     connection_name: str,
     maint_notification: str,
     relaxed: bool,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a connection timeout relaxation event.
@@ -402,6 +421,7 @@ async def record_connection_relaxed_timeout(
         connection_name: Connection identifier (pool name)
         maint_notification: Maintenance notification type
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -416,6 +436,7 @@ async def record_connection_relaxed_timeout(
             connection_name=connection_name,
             maint_notification=maint_notification,
             relaxed=relaxed,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -423,12 +444,14 @@ async def record_connection_relaxed_timeout(
 
 async def record_connection_handoff(
     pool_name: str,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a connection handoff event (e.g., after MOVING notification).
 
     Args:
         pool_name: Connection pool identifier
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -441,6 +464,7 @@ async def record_connection_handoff(
     try:
         collector.record_connection_handoff(
             pool_name=pool_name,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -454,6 +478,7 @@ async def record_error_count(
     error_type: Exception,
     retry_attempts: int,
     is_internal: bool = True,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record error count.
@@ -466,6 +491,7 @@ async def record_error_count(
         error_type: Error type (Exception)
         retry_attempts: Retry attempts
         is_internal: Whether the error is internal (e.g., timeout, network error)
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -484,6 +510,7 @@ async def record_error_count(
             error_type=error_type,
             retry_attempts=retry_attempts,
             is_internal=is_internal,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -493,6 +520,7 @@ async def record_pubsub_message(
     direction: PubSubDirection,
     channel: Optional[str] = None,
     sharded: Optional[bool] = None,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a PubSub message (published or received).
@@ -501,6 +529,7 @@ async def record_pubsub_message(
         direction: Message direction ('publish' or 'receive')
         channel: Pub/Sub channel name
         sharded: True if sharded Pub/Sub channel
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -525,6 +554,7 @@ async def record_pubsub_message(
             direction=direction,
             channel=effective_channel,
             sharded=sharded,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -534,6 +564,7 @@ async def record_streaming_lag(
     lag_seconds: float,
     stream_name: Optional[str] = None,
     consumer_group: Optional[str] = None,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record the lag of a streaming message.
@@ -542,6 +573,7 @@ async def record_streaming_lag(
         lag_seconds: Lag in seconds
         stream_name: Stream name
         consumer_group: Consumer group name
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -563,6 +595,7 @@ async def record_streaming_lag(
             lag_seconds=lag_seconds,
             stream_name=effective_stream_name,
             consumer_group=consumer_group,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -571,6 +604,7 @@ async def record_streaming_lag(
 async def record_streaming_lag_from_response(
     response,
     consumer_group: Optional[str] = None,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record streaming lag from XREAD/XREADGROUP response.
@@ -580,6 +614,7 @@ async def record_streaming_lag_from_response(
     Args:
         response: Response from XREAD/XREADGROUP command
         consumer_group: Consumer group name (for XREADGROUP)
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -618,6 +653,7 @@ async def record_streaming_lag_from_response(
                             lag_seconds=lag_seconds,
                             stream_name=effective_stream_name,
                             consumer_group=consumer_group,
+                            otel_config=otel_config,
                         )
         else:
             # RESP2 format: list
@@ -634,6 +670,7 @@ async def record_streaming_lag_from_response(
                         lag_seconds=lag_seconds,
                         stream_name=effective_stream_name,
                         consumer_group=consumer_group,
+                        otel_config=otel_config,
                     )
     except Exception:
         pass
@@ -645,6 +682,7 @@ async def record_maint_notification_count(
     network_peer_address: str,
     network_peer_port: int,
     maint_notification: str,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a maintenance notification count.
@@ -655,6 +693,7 @@ async def record_maint_notification_count(
         network_peer_address: Network peer address
         network_peer_port: Network peer port
         maint_notification: Maintenance notification type (e.g., 'MOVING', 'MIGRATING')
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -671,6 +710,7 @@ async def record_maint_notification_count(
             network_peer_address=network_peer_address,
             network_peer_port=network_peer_port,
             maint_notification=maint_notification,
+            otel_config=otel_config,
         )
     except Exception:
         pass
@@ -680,6 +720,7 @@ async def record_geo_failover(
     fail_from: "AsyncDatabase",
     fail_to: "AsyncDatabase",
     reason: GeoFailoverReason,
+    otel_config: "OTelConfig | None" = None,
 ) -> None:
     """
     Record a geo failover.
@@ -688,6 +729,7 @@ async def record_geo_failover(
         fail_from: Database failed from
         fail_to: Database failed to
         reason: Reason for the failover
+        otel_config: Per-client configuration supplying custom attributes
     """
     collector = _async_metrics_collector
     if collector is None:
@@ -702,6 +744,7 @@ async def record_geo_failover(
             fail_from=fail_from,
             fail_to=fail_to,
             reason=reason,
+            otel_config=otel_config,
         )
     except Exception:
         pass

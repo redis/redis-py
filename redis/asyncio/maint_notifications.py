@@ -196,6 +196,7 @@ class AsyncMaintNotificationsPoolHandler:
 
             await record_connection_handoff(
                 pool_name=get_pool_name(self.pool),
+                otel_config=getattr(self.pool, "otel_config", None),
             )
 
             self._processed_notifications.add(notification)
@@ -385,6 +386,7 @@ class AsyncMaintNotificationsConnectionHandler:
             network_peer_address=self.connection.host,
             network_peer_port=self.connection.port,
             maint_notification=maint_notification,
+            otel_config=getattr(self.connection, "otel_config", None),
         )
 
         if notification_type is None:
@@ -428,6 +430,7 @@ class AsyncMaintNotificationsConnectionHandler:
             connection_name=self._get_pool_name(),
             maint_notification=maint_notification,
             relaxed=True,
+            otel_config=getattr(self.connection, "otel_config", None),
         )
 
         _dispatch_maintenance_event(
@@ -474,6 +477,7 @@ class AsyncMaintNotificationsConnectionHandler:
                 connection_name=self._get_pool_name(),
                 maint_notification=maint_notification,
                 relaxed=False,
+                otel_config=getattr(self.connection, "otel_config", None),
             )
 
         if was_relaxed:
@@ -659,7 +663,8 @@ class AsyncOSSMaintNotificationsHandler:
                             )
                             conn.mark_for_reconnect()
                     await record_connection_handoff(
-                        pool_name=f"{current_node.host}:{current_node.port}"
+                        pool_name=f"{current_node.host}:{current_node.port}",
+                        otel_config=self.cluster_client.otel_config,
                     )
                     handoff_recorded = True
                 else:
@@ -686,7 +691,8 @@ class AsyncOSSMaintNotificationsHandler:
                     )
                     if not handoff_recorded:
                         await record_connection_handoff(
-                            pool_name=f"{current_node.host}:{current_node.port}"
+                            pool_name=f"{current_node.host}:{current_node.port}",
+                            otel_config=self.cluster_client.otel_config,
                         )
 
             self._processed_notifications.add(notification)

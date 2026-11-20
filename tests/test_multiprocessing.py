@@ -338,7 +338,7 @@ class TestMultiprocessing:
     ):
         counts = Counter()
 
-        def record(pool_name, connection_state, counter=1):
+        def record(pool_name, connection_state, counter=1, otel_config=None):
             counts[pool_name, connection_state] += counter
 
         def pool_counts(pool_name):

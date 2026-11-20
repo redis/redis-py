@@ -8834,13 +8834,19 @@ class StreamCommands(CommandsProtocol):
             async def _record_and_return():
                 actual_response = await response
 
-                await async_record_streaming_lag(response=actual_response)
+                await async_record_streaming_lag(
+                    response=actual_response,
+                    otel_config=getattr(self, "otel_config", None),
+                )
                 return actual_response
 
             return _record_and_return()
         else:
             # Sync client
-            record_streaming_lag_from_response(response=response)
+            record_streaming_lag_from_response(
+                response=response,
+                otel_config=getattr(self, "otel_config", None),
+            )
             return response
 
     @overload
@@ -8968,6 +8974,7 @@ class StreamCommands(CommandsProtocol):
                 await async_record_streaming_lag(
                     response=actual_response,
                     consumer_group=groupname,
+                    otel_config=getattr(self, "otel_config", None),
                 )
                 return actual_response
 
@@ -8977,6 +8984,7 @@ class StreamCommands(CommandsProtocol):
             record_streaming_lag_from_response(
                 response=response,
                 consumer_group=groupname,
+                otel_config=getattr(self, "otel_config", None),
             )
             return response
 
@@ -12161,6 +12169,7 @@ class PubSubCommands(CommandsProtocol):
         record_pubsub_message(
             direction=PubSubDirection.PUBLISH,
             channel=str_if_bytes(channel),
+            otel_config=getattr(self, "otel_config", None),
         )
         return response
 
@@ -12188,6 +12197,7 @@ class PubSubCommands(CommandsProtocol):
             direction=PubSubDirection.PUBLISH,
             channel=str_if_bytes(shard_channel),
             sharded=True,
+            otel_config=getattr(self, "otel_config", None),
         )
         return response
 
