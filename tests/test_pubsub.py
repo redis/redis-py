@@ -280,6 +280,62 @@ class TestPubSubCloseServerCleanup:
         assert conn.read_response.call_count == 1
         assert conn.connect.call_count == 1
 
+    @pytest.mark.fixed_client
+    def test_reader_woken_by_close_disconnect_does_not_reconnect(self):
+        # close() wakes a reader blocked in another thread from inside
+        # disconnect(), before it releases the connection. The reader's retry
+        # runs at that point and must already see the connection as detached.
+        pool = mock.MagicMock()
+        conn = mock.MagicMock()
+        conn.retry = Retry(NoBackoff(), 3)
+        conn.health_check_interval = 0
+        conn.should_reconnect.return_value = False
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        p.connection = conn
+
+        reading = threading.Event()
+        socket_closed = threading.Event()
+        reader_done = threading.Event()
+        closer = threading.current_thread()
+        errors = []
+
+        def blocked_read(*args, **kwargs):
+            reading.set()
+            socket_closed.wait(timeout=5)
+            raise ConnectionError("Connection closed by server.")
+
+        def disconnect(*args, **kwargs):
+            if threading.current_thread() is closer:
+                socket_closed.set()
+                # Let the woken reader run its retry before close() goes on
+                assert reader_done.wait(timeout=5)
+
+        conn.read_response.side_effect = blocked_read
+        conn.disconnect.side_effect = disconnect
+
+        def reader():
+            try:
+                p.parse_response(block=True)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                reader_done.set()
+
+        t = threading.Thread(target=reader, daemon=True)
+        t.start()
+        assert reading.wait(timeout=5)
+        p.close()
+        t.join(timeout=5)
+
+        assert len(errors) == 1
+        assert isinstance(errors[0], ConnectionError)
+        pool.release.assert_called_once_with(conn)
+        assert conn.read_response.call_count == 1
+        assert conn.connect.call_count == 1
+
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("7.0.0")
     def test_close_while_ssubscribed_removes_shardnumsub_entry(self, r):

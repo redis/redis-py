@@ -1274,20 +1274,23 @@ class PubSub:
 
     def reset(self) -> None:
         if self.connection:
-            self.connection.disconnect()
-            self.connection.deregister_connect_callback(self.on_connect)
+            # Detach before disconnecting: a reader blocked on this connection
+            # in another thread wakes up as soon as the socket is closed, and
+            # its retry must already see that the pubsub no longer owns it.
+            connection, self.connection = self.connection, None
+            connection.disconnect()
+            connection.deregister_connect_callback(self.on_connect)
             if self.push_handler_func is not None:
                 # The handler is set on the parser of a pooled connection: put
                 # the parser's own back, or the next PubSub that gets this
                 # connection has its messages handed to ours
-                parser = self.connection._get_parser()
+                parser = connection._get_parser()
                 if (
                     getattr(parser, "pubsub_push_handler_func", None)
                     is self.push_handler_func
                 ):
                     parser.set_pubsub_push_handler(parser.handle_pubsub_push_response)
-            self.connection_pool.release(self.connection)
-            self.connection = None
+            self.connection_pool.release(connection)
         self.health_check_response_counter = 0
         self.channels = {}
         self.pending_unsubscribe_channels = set()
