@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import patch, AsyncMock, MagicMock, Mock
 
 import pybreaker
 import pytest
@@ -70,7 +70,6 @@ class TestMultiDbClient:
         client, not only the active one.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
         mock_hc.check_health.return_value = True
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
@@ -105,7 +104,6 @@ class TestMultiDbClient:
         aclose() raises the first error once every client was closed.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
         mock_hc.check_health.return_value = True
         first_error = ConnectionError("first")
         mock_db1.client.aclose.side_effect = first_error
@@ -144,7 +142,6 @@ class TestMultiDbClient:
         the database list.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
         mock_hc.check_health.return_value = True
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
@@ -189,7 +186,6 @@ class TestMultiDbClient:
         as cross-slot commands, which must be raised without retries.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
         mock_hc.check_health.return_value = True
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
@@ -212,6 +208,45 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    async def test_aclose_closes_health_checks_of_every_database(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        Health checks are owned by their database, so aclose() has to release
+        the ones of every database, a removed one included: it is no longer
+        health checked, but its checks still hold their resources. One check
+        failing to close must not strand the others.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        health_checks = []
+        for database in (mock_db, mock_db1, mock_db2):
+            health_check = MagicMock()
+            health_check.close = AsyncMock()
+            database.health_checks = [health_check]
+            health_checks.append(health_check)
+        health_checks[1].close.side_effect = RuntimeError("check close failed")
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            await client.remove_database(mock_db)
+            await client.aclose()
+
+        for health_check in health_checks:
+            health_check.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     async def test_aclose_stops_recurring_health_checks(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
@@ -223,7 +258,6 @@ class TestMultiDbClient:
         released health check resources.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
         mock_hc.close = AsyncMock()
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
@@ -252,7 +286,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -297,7 +330,6 @@ class TestMultiDbClient:
         # zrank/zrevrank with a custom score cast follow the active database's
         # decode_responses setting.
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.get_connection_kwargs.return_value = {
@@ -332,7 +364,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_hc.check_health.return_value = True
@@ -385,7 +416,6 @@ class TestMultiDbClient:
         decode_responses,
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.get_connection_kwargs.return_value = {
@@ -427,7 +457,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.get_encoder.return_value = Encoder(
@@ -468,7 +497,6 @@ class TestMultiDbClient:
         with a CLOSED circuit.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command = AsyncMock(
@@ -585,7 +613,6 @@ class TestMultiDbClient:
             return False
 
         mock_hc.check_health.side_effect = mock_check_health
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command = AsyncMock(return_value="OK")
@@ -665,7 +692,6 @@ class TestMultiDbClient:
         mock_db1.circuit = cb1
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -728,7 +754,6 @@ class TestMultiDbClient:
             return True
 
         mock_hc.check_health.side_effect = mock_check_health
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command = AsyncMock(return_value="OK")
@@ -814,7 +839,6 @@ class TestMultiDbClient:
             return True
 
         mock_hc.check_health.side_effect = mock_check_health
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command = AsyncMock(return_value="OK")
@@ -865,12 +889,15 @@ class TestMultiDbClient:
         and makes it active if it has the highest weight.
         """
         databases = create_weighted_list(mock_db, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         new_db_config = DatabaseConfig(
             weight=0.8,  # Higher than mock_db2's 0.5
             from_url="redis://localhost:6379",
         )
+        # The new database has no health checks of its own, so it gets the ones
+        # the factory builds from its config
+        health_checks_factory = Mock(return_value=[mock_hc])
+        mock_multi_db_config.health_checks_factory = health_checks_factory
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db2.client.execute_command.return_value = "OK2"
@@ -897,6 +924,7 @@ class TestMultiDbClient:
                 ):
                     await client.add_database(new_db_config)
 
+                health_checks_factory.assert_called_once_with(new_db_config)
                 # Health check should have been called for the new database
                 assert len(mock_hc.check_health.call_args_list) > initial_hc_count
 
@@ -924,11 +952,11 @@ class TestMultiDbClient:
         when the new database fails health check due to an exception.
         """
         databases = create_weighted_list(mock_db, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         new_db_config = DatabaseConfig(
             weight=0.8,
             from_url="redis://localhost:6379",
+            health_checks=[mock_hc],
         )
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
@@ -978,11 +1006,61 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    async def test_add_database_rejected_database_is_released_on_close(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A database rejected by its initial health check is never used, but its
+        client and health checks hold resources that close() has to release.
+        """
+        databases = create_weighted_list(mock_db, mock_db2)
+        rejected_hc = MagicMock()
+        rejected_hc.health_check_probes = 1
+        rejected_hc.health_check_delay = 0.01
+        rejected_hc.health_check_timeout = 1.0
+        rejected_hc.check_health = AsyncMock(side_effect=ConnectionError("refused"))
+        rejected_hc.close = AsyncMock()
+        new_db_config = DatabaseConfig(
+            weight=0.8, from_url="redis://localhost:6379", health_checks=[rejected_hc]
+        )
+        mock_new_client = AsyncMock()
+        mock_new_client.connection_pool = Mock()
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config.client_class,
+                "from_url",
+                return_value=mock_new_client,
+            ),
+        ):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                with pytest.raises(UnhealthyDatabaseException):
+                    await client.add_database(
+                        new_db_config, skip_initial_health_check=False
+                    )
+                assert len(client.get_databases()) == 2
+
+        rejected_hc.close.assert_awaited_once()
+        mock_new_client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     async def test_remove_highest_weighted_database(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1018,7 +1096,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1056,7 +1133,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1115,7 +1191,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1135,11 +1210,19 @@ class TestMultiDbClient:
                 another_hc.health_check_timeout = 3.0
                 another_hc.check_health.return_value = True
 
-                await client.add_health_check(another_hc)
+                mock_db1.add_health_check.side_effect = mock_db1.health_checks.append
+                mock_db1.add_health_check(another_hc)
                 await client._check_db_health(mock_db1)
 
                 assert len(mock_hc.check_health.call_args_list) >= 12
                 assert len(another_hc.check_health.call_args_list) >= 3
+
+                # The check belongs to mock_db1 only
+                await client._check_db_health(mock_db)
+                assert all(
+                    call.args[0] is mock_db1
+                    for call in another_hc.check_health.call_args_list
+                )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1158,7 +1241,6 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1216,7 +1298,6 @@ class TestGeoFailoverMetricRecording:
         from redis.observability.attributes import GeoFailoverReason
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -1264,7 +1345,6 @@ class TestGeoFailoverMetricRecording:
         from redis.observability.attributes import GeoFailoverReason
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -1316,7 +1396,6 @@ class TestGeoFailoverMetricRecording:
         Test that no geo failover metric is recorded when active database doesn't change.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -1362,7 +1441,6 @@ class TestInitialHealthCheckPolicy:
         Test that ALL_HEALTHY policy succeeds when all databases pass health check.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1392,7 +1470,6 @@ class TestInitialHealthCheckPolicy:
         Test that ALL_HEALTHY policy fails when any database fails health check.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
@@ -1430,7 +1507,6 @@ class TestInitialHealthCheckPolicy:
         With 3 databases, 2 healthy is a majority.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
@@ -1466,7 +1542,6 @@ class TestInitialHealthCheckPolicy:
         With 3 databases, only 1 healthy is not a majority.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
 
@@ -1503,7 +1578,6 @@ class TestInitialHealthCheckPolicy:
         Test that ANY_HEALTHY policy succeeds when at least one database is healthy.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command.return_value = "OK"
@@ -1538,7 +1612,6 @@ class TestInitialHealthCheckPolicy:
         Test that ANY_HEALTHY policy fails when no database is healthy.
         """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_hc.check_health = AsyncMock(return_value=False)
@@ -1604,7 +1677,8 @@ class TestInitialHealthCheckPolicy:
         assert custom_hc.health_check_delay == 0.02
         assert custom_hc.health_check_timeout == 2.0
 
-        mock_multi_db_config.health_checks = [custom_hc]
+        for database in (mock_db, mock_db1, mock_db2):
+            database.health_checks = [custom_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
@@ -1681,7 +1755,8 @@ class TestInitialHealthCheckPolicy:
         # Verify custom timeout is set
         assert slow_hc.health_check_timeout == 0.1
 
-        mock_multi_db_config.health_checks = [slow_hc]
+        for database in (mock_db, mock_db1, mock_db2):
+            database.health_checks = [slow_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")

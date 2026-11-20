@@ -18,7 +18,11 @@ from redis.multidb.failover import DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_D
 from redis.asyncio.multidb.healthcheck import LagAwareHealthCheck
 from redis.retry import Retry
 from redis.utils import dummy_fail
-from tests.test_scenario.conftest import RELAXED_TIMEOUT, use_mock_proxy
+from tests.test_scenario.conftest import (
+    RELAXED_TIMEOUT,
+    extract_cluster_fqdn,
+    use_mock_proxy,
+)
 from tests.test_scenario.fault_injector_client import (
     ActionRequest,
     ActionType,
@@ -436,15 +440,22 @@ class TestActiveActive:
             kwargs={"delay": LAG_AWARE_NETWORK_FAILURE_DELAY},
         )
 
-        # Adding additional health check to the client.
-        r_multi_db.add_health_check(
-            LagAwareHealthCheck(
-                verify_tls=False,
-                auth_basic=lag_aware_auth_basic(),
-                lag_aware_tolerance=10000,
-                health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
+        # Adding a lag aware health check to each database, on top of its default
+        # ping health check. Each one targets the REST API of the cluster that
+        # hosts its database. Databases are listed by descending weight, which
+        # is the order of the endpoints they were configured from.
+        for (database, _), endpoint in zip(
+            r_multi_db.get_databases(), config["endpoints"]
+        ):
+            database.add_health_check(
+                LagAwareHealthCheck(
+                    rest_api_url=extract_cluster_fqdn(endpoint),
+                    verify_tls=False,
+                    auth_basic=lag_aware_auth_basic(),
+                    lag_aware_tolerance=10000,
+                    health_check_timeout=LAG_AWARE_HEALTH_CHECK_TIMEOUT,
+                )
             )
-        )
 
         # Client initialized on the first command.
         retry.call_with_retry(

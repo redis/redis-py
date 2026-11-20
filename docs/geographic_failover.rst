@@ -6,6 +6,10 @@ It is designed to work with Redis Software and Redis Cloud Active-Active setups.
 The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy.
 When the original database becomes healthy again, the client can automatically switch back to it.
 
+.. note::
+
+    The multi-database client is experimental: its API may change between releases.
+
 Key concepts
 ------------
 
@@ -20,9 +24,10 @@ Key concepts
 - Health checks:
   A set of checks determines whether a database is healthy in proactive manner.
   By default, an "PING" check runs against the database (all cluster nodes must
-  pass for a cluster). You can provide your own set of health checks or add an
-  additional health check on top of the default one. A Redis Enterprise specific
-  "lag-aware" health check is also available.
+  pass for a cluster). Health checks belong to a database: you can provide your
+  own set of health checks for each database or add an additional health check
+  on top of the ones a database has. A Redis Enterprise specific "lag-aware"
+  health check is also available.
 
 - Failure detector:
   A detector observes command failures over a moving window (reactive monitoring).
@@ -149,7 +154,7 @@ The asyncio API mirrors the synchronous one and provides async/await semantics.
 MultiDBClient
 ^^^^^^^^^^^^^
 
-The client exposes the same API as the `Redis` or `RedisCluster` client, making it fully interchangeable and ensuring a simple migration of your application code. Additionally, it supports runtime reconfiguration, allowing you to add features such as health checks, failure detectors, or even new databases without restarting.
+The client exposes the same API as the `Redis` or `RedisCluster` client, making it fully interchangeable and ensuring a simple migration of your application code. Additionally, it supports runtime reconfiguration, allowing you to add features such as per-database health checks, failure detectors, or even new databases without restarting.
 
 Configuration
 -------------
@@ -174,8 +179,8 @@ MultiDbConfig
                 weight=1.0,
                 # Optional: use a custom circuit breaker grace period
                 grace_period=DEFAULT_GRACE_PERIOD,
-                # Optional: Redis Enterprise cluster FQDN for REST health checks
-                health_check_url="https://cluster.example.com",
+                # Optional: health checks of this database, replacing the default ones
+                health_checks=[PingHealthCheck(health_check_probes=5)],
                 # Optional: Underlying Redis client related configuration
                 client_kwargs={"socket_timeout": 5}
             ),
@@ -190,6 +195,8 @@ MultiDbConfig
         ),
 
         # Health checks
+        # Optional: builds the health checks of a database that has none of its own
+        health_checks_factory: Callable[[DatabaseConfig], list[HealthCheck]] | None = None
         health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL # seconds
         health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
         health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY # seconds
@@ -267,8 +274,97 @@ The `MultiDBClient` uses two complementary mechanisms to ensure database availab
 Health Checks (Proactive Monitoring)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 These checks run continuously in the background at configured intervals to proactively
-detect database issues. They run in the background with a given interval and
-configuration defined in the `MultiDBConfig` class.
+detect database issues. They run in the background with the interval defined in
+the `MultiDbConfig` class.
+
+Every database owns its health checks. There are three ways to configure them,
+from the simplest to the most specific.
+
+**1. Global values: the default ping, tuned**
+
+With nothing else configured every database gets a single `PingHealthCheck`. Use
+`health_check_probes`, `health_check_delay` and `health_check_timeout` of
+`MultiDbConfig` to tune it for all databases:
+
+.. code-block:: python
+
+    from redis.multidb.config import MultiDbConfig, DatabaseConfig
+
+    cfg = MultiDbConfig(
+        databases_config=[
+            DatabaseConfig(from_url="redis://db-primary:6379/0", weight=1.0),
+            DatabaseConfig(from_url="redis://db-secondary:6379/0", weight=0.5),
+        ],
+        health_check_probes=5,
+        health_check_delay=0.2,
+        health_check_timeout=2,
+    )
+
+These three values configure the default `PingHealthCheck` only. They are not
+applied to health checks built by a factory or given for a database, which carry
+their own probes, delay and timeout.
+
+**2. Health checks factory: your own set for every database**
+
+`MultiDbConfig.health_checks_factory` is a callable that receives a
+`DatabaseConfig` and returns the health checks for that database. It replaces the
+default ping and is called once for each database of the set, including the ones
+added at runtime with `add_database()`. It has to return new instances on every
+call.
+
+.. code-block:: python
+
+    from redis.asyncio.multidb.healthcheck import PingHealthCheck
+    from redis.multidb.config import MultiDbConfig, DatabaseConfig
+
+    cfg = MultiDbConfig(
+        databases_config=[
+            DatabaseConfig(from_url="redis://db-primary:6379/0", weight=1.0),
+            DatabaseConfig(from_url="redis://db-secondary:6379/0", weight=0.5),
+        ],
+        health_checks_factory=lambda database_config: [
+            PingHealthCheck(health_check_probes=5),
+            MyHealthCheck(),
+        ],
+    )
+
+**3. Per-database health checks: a specific database**
+
+`DatabaseConfig.health_checks` holds the health check instances of one database.
+They are not combined with the factory: a database with its own health checks
+uses only those, the factory is not called for it and no default ping is added.
+The other databases keep the factory's health checks, or the default ping when
+there is no factory. An empty list (`health_checks=[]`) leaves that database
+without health checks: it is then considered healthy until the failure detector
+reports otherwise.
+
+.. code-block:: python
+
+    from redis.asyncio.multidb.healthcheck import PingHealthCheck
+    from redis.multidb.config import MultiDbConfig, DatabaseConfig
+
+    cfg = MultiDbConfig(
+        databases_config=[
+            # The default ping
+            DatabaseConfig(from_url="redis://db-primary:6379/0", weight=1.0),
+            # Only its own health checks
+            DatabaseConfig(
+                from_url="redis://db-secondary:6379/0",
+                weight=0.5,
+                health_checks=[PingHealthCheck(health_check_probes=5), MyHealthCheck()],
+            ),
+        ],
+    )
+
+A health check instance is owned by its database and is closed with the client,
+so do not share one instance between databases.
+
+A health check can also be added to a database at runtime:
+
+.. code-block:: python
+
+    for database, _ in client.get_databases():
+        database.add_health_check(PingHealthCheck())
 
 To avoid false positives, you can configure amount of health check probes and also
 define one of the health check policies to evaluate probes result.
@@ -277,7 +373,7 @@ define one of the health check policies to evaluate probes result.
 **HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful.
 **HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful.
 
-The whole health check - all of its probes - runs under `health_check_timeout`
+The whole health check - all of its probes - runs under its `health_check_timeout`
 (3 seconds by default), and a single check running out of it marks the database
 unhealthy regardless of the failure detector's threshold. See
 `Planned maintenance (maintenance notifications)`_ for how this budget behaves
@@ -296,44 +392,51 @@ This is a special type of healthcheck available for Redis (Enterprise) Software
 that utilizes a REST API endpoint to obtain information about the synchronization
 lag between a given database and all other databases in an Active-Active setup.
 
-To use this healthcheck, first you need to adjust your `DatabaseConfig`
-to expose `health_check_url` used by your deployment. By default, your
-Cluster FQDN should be used as URL, unless you have some kind of
+Each database gets its own `LagAwareHealthCheck`, configured with the REST API
+of the cluster that hosts this database: `rest_api_url`, `rest_api_port` and the
+authentication/TLS options may differ between databases. By default, your
+Cluster FQDN should be used as `rest_api_url`, unless you have some kind of
 reverse proxy behind an actual REST API endpoint.
 
 .. code-block:: python
 
     from redis.multidb.client import MultiDBClient
     from redis.multidb.config import MultiDbConfig, DatabaseConfig
-    from redis.multidb.healthcheck import PingHealthCheck, LagAwareHealthCheck
-    from redis.retry import Retry
-    from redis.backoff import ExponentialWithJitterBackoff
+    from redis.asyncio.multidb.healthcheck import PingHealthCheck, LagAwareHealthCheck
 
     cfg = MultiDbConfig(
         databases_config=[
             DatabaseConfig(
                 from_url="redis://db-primary:6379/0",
                 weight=1.0,
-                health_check_url="https://cluster.example.com",  # optional for LagAware
+                # The health checks given here replace the default one, so keep
+                # the ping check if you want it next to the lag-aware one
+                health_checks=[
+                    PingHealthCheck(),
+                    # Redis Enterprise REST-based lag-aware check
+                    LagAwareHealthCheck(
+                        rest_api_url="https://cluster-primary.example.com",
+                        # Customize REST port, lag tolerance, TLS, etc.
+                        rest_api_port=9443,
+                        lag_aware_tolerance=100,  # ms
+                        verify_tls=True,
+                        # auth_basic=("user", "pass"),
+                        # ca_file="/path/ca.pem",
+                        # client_cert_file="/path/cert.pem",
+                        # client_key_file="/path/key.pem",
+                    ),
+                ],
             ),
             DatabaseConfig(
                 from_url="redis://db-secondary:6379/0",
                 weight=0.5,
-                health_check_url="https://cluster.example.com",
-            ),
-        ],
-        # Add custom health check to replace the default
-        health_checks=[
-            # Redis Enterprise REST-based lag-aware check
-            LagAwareHealthCheck(
-                # Customize REST port, lag tolerance, TLS, etc.
-                rest_api_port=9443,
-                lag_aware_tolerance=100,  # ms
-                verify_tls=True,
-                # auth_basic=("user", "pass"),
-                # ca_file="/path/ca.pem",
-                # client_cert_file="/path/cert.pem",
-                # client_key_file="/path/key.pem",
+                health_checks=[
+                    PingHealthCheck(),
+                    LagAwareHealthCheck(
+                        rest_api_url="https://cluster-secondary.example.com",
+                        rest_api_port=8443,
+                    ),
+                ],
             ),
         ],
     )
@@ -344,7 +447,8 @@ reverse proxy behind an actual REST API endpoint.
 **Custom Health Checks**
 ~~~~~~~~~~~~~~~~~~~~~
 You can add custom health checks for specific requirements. Please notice that all health checks are executed within
-asyncio event loop, so please ensure that `check_health` method is async:
+asyncio event loop, so please ensure that `check_health` method is async. Pass them through
+`DatabaseConfig.health_checks`, `MultiDbConfig.health_checks_factory` or `Database.add_health_check()`:
 
 .. code-block:: python
 
@@ -356,8 +460,7 @@ asyncio event loop, so please ensure that `check_health` method is async:
         """
 
         async def check_health(self, database, hc_client: AsyncRedisClientT) -> bool:
-            await connection.send_command("ECHO", "healthcheck")
-            response = await connection.read_response()
+            response = await hc_client.execute_command("ECHO", "healthcheck")
             return response in (b"healthcheck", "healthcheck")
 
 Failure Detection (Reactive Monitoring)
@@ -609,7 +712,7 @@ the `EventDispatcher`.
         health_check_probes=3,
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
-        health_check_probes_delay=health_check_delay,
+        health_check_delay=health_check_delay,
     )
 
     client = MultiDBClient(config)
@@ -624,24 +727,16 @@ You can manually add/remove databases, update weights, and promote a database if
 
     from redis.multidb.client import MultiDBClient
     from redis.multidb.config import MultiDbConfig, DatabaseConfig
-    from redis.multidb.database import Database
-    from redis.multidb.circuit import PBCircuitBreakerAdapter
-    import pybreaker
-    from redis import Redis
 
     cfg = MultiDbConfig(
         databases_config=[DatabaseConfig(from_url="redis://db-a:6379/0", weight=1.0)]
     )
     client = MultiDBClient(cfg)
 
-    # Add a database programmatically
-    other = Database(
-        client=Redis.from_url("redis://db-b:6379/0"),
-        circuit=PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5.0)),
-        weight=0.5,
-        health_check_url=None,
-    )
-    client.add_database(other)
+    # Add a database programmatically. It gets the health checks of its config,
+    # or the default ones when it has none.
+    client.add_database(DatabaseConfig(from_url="redis://db-b:6379/0", weight=0.5))
+    other = next(db for db, _ in client.get_databases() if db.weight == 0.5)
 
     # Update weight; if it becomes the highest and healthy, it may become active
     client.update_database_weight(other, 0.9)
@@ -717,8 +812,8 @@ Troubleshooting
 
 - Health checks always failing:
   Verify connectivity and, for clusters, that all nodes are reachable. For `LagAwareHealthCheck`,
-  ensure `health_check_url` points to your Redis Enterprise endpoint and authentication/TLS options
-  are configured properly.
+  ensure `rest_api_url` and `rest_api_port` point to the REST API of the Redis Enterprise cluster that
+  hosts the database and authentication/TLS options are configured properly.
 
 - Pub/Sub not receiving messages after failover:
   Ensure you are using the client’s Pub/Sub helper. The client re-subscribes automatically on switch.

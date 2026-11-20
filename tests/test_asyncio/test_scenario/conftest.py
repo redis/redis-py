@@ -28,7 +28,6 @@ from tests.test_scenario.conftest import (
     MULTI_DB_READY_TIMEOUT,
     RELAXED_TIMEOUT,
     _prepare_ssl_certificates,
-    extract_cluster_fqdn,
     get_endpoints_config,
     multi_db_client_kwargs,
     use_mock_proxy,
@@ -338,7 +337,6 @@ async def r_multi_db(
     health_check_timeout = request.param.get(
         "health_check_timeout", DEFAULT_HEALTH_CHECK_TIMEOUT
     )
-    health_checks = request.param.get("health_checks", [])
     maint_notifications_config = request.param.get("maint_notifications_config", None)
     event_dispatcher = EventDispatcher()
     listener = CheckActiveDatabaseChangedListener()
@@ -355,7 +353,6 @@ async def r_multi_db(
         client_kwargs=multi_db_client_kwargs(
             username, password, maint_notifications_config
         ),
-        health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][0]),
     )
     db_configs.append(db_config)
 
@@ -365,7 +362,6 @@ async def r_multi_db(
         client_kwargs=multi_db_client_kwargs(
             username, password, maint_notifications_config
         ),
-        health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][1]),
     )
     db_configs.append(db_config1)
 
@@ -374,7 +370,6 @@ async def r_multi_db(
         databases_config=db_configs,
         command_retry=command_retry,
         min_num_failures=min_num_failures,
-        health_checks=health_checks,
         health_check_probes=3,
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
