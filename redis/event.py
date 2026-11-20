@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import threading
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
@@ -18,6 +20,37 @@ if TYPE_CHECKING:
         MaintenanceState,
         MaintNotificationsConfig,
     )
+
+logger = logging.getLogger(__name__)
+
+# A failed deferred AUTH is logged by every connection, on every release that
+# retries it, so it is a warning at most once per interval and debug otherwise
+_RE_AUTH_FAILURE_WARNING_INTERVAL = 60.0
+_last_re_auth_failure_warning = float("-inf")
+_suppressed_re_auth_failures = 0
+
+
+def _log_re_auth_failure(connection: object, error: Exception) -> None:
+    """Log a failed deferred AUTH without flooding the log."""
+    global _last_re_auth_failure_warning, _suppressed_re_auth_failures
+    now = time.monotonic()
+    if now - _last_re_auth_failure_warning >= _RE_AUTH_FAILURE_WARNING_INTERVAL:
+        suppressed = _suppressed_re_auth_failures
+        _last_re_auth_failure_warning = now
+        _suppressed_re_auth_failures = 0
+        logger.warning(
+            "Deferred re-authentication of %s failed: %r (%d failures since "
+            "the last warning were logged at debug level)",
+            connection,
+            error,
+            suppressed,
+        )
+    else:
+        _suppressed_re_auth_failures += 1
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Deferred re-authentication of %s failed: %r", connection, error
+            )
 
 
 class EventListenerInterface(ABC):
@@ -456,7 +489,13 @@ class ReAuthConnectionListener(EventListenerInterface):
     """
 
     def listen(self, event: AfterConnectionReleasedEvent):
-        event.connection.re_auth()
+        # It runs between commands, where an error would fail a command that
+        # did not cause it, so a failure is logged instead. The token stays
+        # pending on the connection.
+        try:
+            event.connection.re_auth()
+        except Exception as e:
+            _log_re_auth_failure(event.connection, e)
 
 
 class AsyncReAuthConnectionListener(AsyncEventListenerInterface):
@@ -465,7 +504,13 @@ class AsyncReAuthConnectionListener(AsyncEventListenerInterface):
     """
 
     async def listen(self, event: AsyncAfterConnectionReleasedEvent):
-        await event.connection.re_auth()
+        # It runs between commands, where an error would fail a command that
+        # did not cause it, so a failure is logged instead. The token stays
+        # pending on the connection.
+        try:
+            await event.connection.re_auth()
+        except Exception as e:
+            _log_re_auth_failure(event.connection, e)
 
 
 class RegisterReAuthForPooledConnections(EventListenerInterface):
