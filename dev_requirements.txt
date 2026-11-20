@@ -1,7 +1,7 @@
 build
 build==1.2.2.post1 ; platform_python_implementation == "PyPy"
 click==8.3.3
-invoke==2.2.0
+invoke==2.2.1
 packaging>=20.4
 packaging==24.2 ; platform_python_implementation == "PyPy"
 
