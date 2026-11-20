@@ -147,6 +147,9 @@ class DummyConnection(Connection):
     def _force_disconnect(self):
         self._connected = False
 
+    def extract_connection_details(self) -> str:
+        return "DummyConnection"
+
 
 class TestConnectionPool:
     @asynccontextmanager
@@ -188,17 +191,15 @@ class TestConnectionPool:
         async with aclosing(pool):
             pass
 
-    async def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0]}
-        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+    async def test_multiple_connections(self, master_connection_kwargs):
+        async with self.get_pool(connection_kwargs=master_connection_kwargs) as pool:
             c1 = await pool.get_connection()
             c2 = await pool.get_connection()
             assert c1 != c2
 
-    async def test_max_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0]}
+    async def test_max_connections(self, master_connection_kwargs):
         async with self.get_pool(
-            max_connections=2, connection_kwargs=connection_kwargs
+            max_connections=2, connection_kwargs=master_connection_kwargs
         ) as pool:
             await pool.get_connection()
             await pool.get_connection()
@@ -244,9 +245,8 @@ class TestConnectionPool:
             other.send_command.assert_not_awaited()
             in_use.set_re_auth_token.assert_not_called()
 
-    async def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0]}
-        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+    async def test_reuse_previously_released_connection(self, master_connection_kwargs):
+        async with self.get_pool(connection_kwargs=master_connection_kwargs) as pool:
             c1 = await pool.get_connection()
             await pool.release(c1)
             c2 = await pool.get_connection()
@@ -276,12 +276,8 @@ class TestConnectionPool:
             expected = "path=/abc,db=1,client_name=test-client"
             assert expected in repr(pool)
 
-    async def test_pool_disconnect(self, master_host):
-        connection_kwargs = {
-            "host": master_host[0],
-            "port": master_host[1],
-        }
-        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+    async def test_pool_disconnect(self, master_connection_kwargs):
+        async with self.get_pool(connection_kwargs=master_connection_kwargs) as pool:
             conn = await pool.get_connection()
             await pool.disconnect(inuse_connections=True)
             assert not conn.is_connected

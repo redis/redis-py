@@ -230,6 +230,7 @@ class TestCredentialsProvider:
 
         assert r2.ping() is True
 
+    @skip_if_redis_enterprise()
     def test_credential_provider_no_password_success(self, r, request):
         init_acl_user(r, request, "username", "")
         r2 = _get_client(
@@ -241,6 +242,7 @@ class TestCredentialsProvider:
         assert r2.ping() is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_credential_provider_no_password_error(self, r, request):
         init_acl_user(r, request, "username", "password")
         with pytest.raises(AuthenticationError) as e:
@@ -253,6 +255,7 @@ class TestCredentialsProvider:
         assert e.match("invalid username-password")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_credential_provider_error_does_not_skip_authentication(self, r, request):
         init_acl_user(r, request, "username", "password")
         provider = FlakyCredProvider()
@@ -273,6 +276,7 @@ class TestCredentialsProvider:
         assert "username" in [client["user"] for client in r.client_list()]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_password_and_username_together_with_cred_provider_raise_error(
         self, r, request
     ):
@@ -295,6 +299,7 @@ class TestCredentialsProvider:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_change_username_password_on_existing_connection(self, r, request):
         username = "origin_username"
         password = "origin_password"
@@ -324,6 +329,7 @@ class TestCredentialsProvider:
 
 
 class TestUsernamePasswordCredentialProvider:
+    @skip_if_redis_enterprise()
     def test_user_pass_credential_provider_acl_user_and_pass(self, r, request):
         username = "username"
         password = "password"
@@ -337,6 +343,7 @@ class TestUsernamePasswordCredentialProvider:
         )
         assert r2.ping() is True
 
+    @skip_if_redis_enterprise()
     def test_user_pass_provider_only_password(self, r, request):
         password = "password"
         provider = UsernamePasswordCredentialProvider(password=password)

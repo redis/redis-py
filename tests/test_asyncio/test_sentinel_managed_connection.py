@@ -9,7 +9,10 @@ from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, ResponseError
 
-pytestmark = pytest.mark.asyncio
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = [pytest.mark.asyncio, skip_if_redis_enterprise()]
 
 
 @pytest.mark.fixed_client
