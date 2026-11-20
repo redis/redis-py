@@ -256,6 +256,7 @@ class TestCredentialsProvider:
 
         assert await r2.ping() is True
 
+    @skip_if_redis_enterprise()
     async def test_async_credential_provider_no_password_success(
         self, r_acl_teardown, create_redis
     ):
@@ -269,6 +270,7 @@ class TestCredentialsProvider:
         assert await r2.ping() is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_credential_provider_no_password_error(
         self, r_acl_teardown, create_redis
     ):
@@ -286,6 +288,7 @@ class TestCredentialsProvider:
 
     @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("create_redis", [(False,)], ids=["pool"], indirect=True)
+    @skip_if_redis_enterprise()
     async def test_credential_provider_error_does_not_skip_authentication(
         self, r_acl_teardown, create_redis
     ):
@@ -305,6 +308,7 @@ class TestCredentialsProvider:
 
     @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("create_redis", [(False,)], ids=["pool"], indirect=True)
+    @skip_if_redis_enterprise()
     async def test_cancelled_credential_fetch_does_not_skip_authentication(
         self, r_acl_teardown, create_redis
     ):
@@ -326,6 +330,7 @@ class TestCredentialsProvider:
         assert username in [client["user"] for client in await r.client_list()]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_password_and_username_together_with_cred_provider_raise_error(
         self, r_acl_teardown, create_redis
     ):
@@ -349,6 +354,7 @@ class TestCredentialsProvider:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_change_username_password_on_existing_connection(
         self, r_acl_teardown, create_redis
     ):
@@ -374,6 +380,7 @@ class TestCredentialsProvider:
 
 @pytest.mark.asyncio
 class TestUsernamePasswordCredentialProvider:
+    @skip_if_redis_enterprise()
     async def test_user_pass_credential_provider_acl_user_and_pass(
         self, r_acl_teardown, create_redis
     ):
@@ -388,6 +395,7 @@ class TestUsernamePasswordCredentialProvider:
         r2 = await create_redis(flushdb=False, credential_provider=provider)
         assert await r2.ping() is True
 
+    @skip_if_redis_enterprise()
     async def test_user_pass_provider_only_password(
         self, r_required_pass_teardown, create_redis
     ):

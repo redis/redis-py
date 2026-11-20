@@ -151,9 +151,8 @@ class TestConnectionPool:
         with closing(pool):
             pass
 
-    def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_multiple_connections(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         c2 = pool.get_connection()
         assert c1 != c2
@@ -294,21 +293,17 @@ class TestConnectionPool:
         second.disconnect.assert_called_once()
         second.read_response.assert_not_called()
 
-    def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_reuse_previously_released_connection(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         pool.release(c1)
         c2 = pool.get_connection()
         assert c1 == c2
 
-    def test_release_not_owned_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_release_not_owned_connection(self, master_connection_kwargs):
+        pool1 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool1.get_connection()
-        pool2 = self.get_pool(
-            connection_kwargs={"host": master_host[0], "port": master_host[1]}
-        )
+        pool2 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c2 = pool2.get_connection()
         pool2.release(c2)
 
@@ -341,12 +336,8 @@ class TestConnectionPool:
         expected = "path=/abc,db=1,client_name=test-client"
         assert expected in repr(pool)
 
-    def test_pool_disconnect(self, master_host):
-        connection_kwargs = {
-            "host": master_host[0],
-            "port": master_host[1],
-        }
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_pool_disconnect(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
 
         conn = pool.get_connection()
         pool.disconnect()
@@ -523,11 +514,10 @@ class TestBlockingConnectionPool:
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     @skip_if_server_version_lt("7.4.0")
-    def test_initialise_pool_with_cache(self, master_host):
+    def test_initialise_pool_with_cache(self, master_connection_kwargs):
         pool = redis.BlockingConnectionPool(
             connection_class=Connection,
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             protocol=3,
             cache_config=CacheConfig(),
         )
@@ -1294,6 +1284,7 @@ class TestConnection:
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
+    @skip_if_redis_enterprise()
     def test_oom_error(self, r):
         "OOM errors get turned into OutOfMemoryError exceptions"
         with pytest.raises(redis.OutOfMemoryError):

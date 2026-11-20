@@ -789,13 +789,17 @@ async def test_connect_without_retry_on_non_retryable_error():
 
 
 @pytest.mark.fixed_client
-async def test_connect_with_retries():
+async def test_connect_with_retries(master_connection_kwargs):
     """
     Test that retries occur for the entire connect+handshake flow when OSError happens during the handshake phase.
     """
     with patch.object(asyncio.StreamWriter, "writelines") as writelines:
         writelines.side_effect = OSError(ECONNREFUSED)
-        conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+        conn = Connection(
+            retry_on_timeout=True,
+            retry=Retry(NoBackoff(), 2),
+            **master_connection_kwargs,
+        )
         with pytest.raises(ConnectionError):
             await conn.connect()
         # the handshake commands are the failing ones
