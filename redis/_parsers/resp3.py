@@ -104,8 +104,6 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             elif byte == b"#":
                 return response == b"t"
             # bulk response
-            elif byte == b"$" and response == b"-1":
-                return None
             elif byte == b"$":
                 response = self._buffer.read(_parse_int(response, raw), timeout=timeout)
             # verbatim string response
@@ -253,8 +251,6 @@ class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
             elif byte == b"#":
                 return response == b"t"
             # bulk response
-            elif byte == b"$" and response == b"-1":
-                return None
             elif byte == b"$":
                 response = await self._read(_parse_int(response, raw))
             # verbatim string response

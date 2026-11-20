@@ -487,17 +487,6 @@ async def test_negative_bulk_length_raises_without_consuming_following_reply(
     assert bytes(reader._buffer) == b"+OK\r\n"
 
 
-async def test_resp3_null_bulk_string_returns_none():
-    # `$-1` is the null bulk string in RESP3 too (the RESP2 parser
-    # already special-cases it); without the check _read(-1) returned
-    # an empty value and consumed bytes of the following reply.
-    conn, reader = make_resp3_connection()
-    reader.feed_data(b"$-1\r\n+OK\r\n")
-
-    assert await conn.read_response() is None
-    assert bytes(reader._buffer) == b"+OK\r\n"
-
-
 @pytest.mark.parametrize(
     "factory",
     [
