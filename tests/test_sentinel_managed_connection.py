@@ -11,6 +11,11 @@ from redis.backoff import NoBackoff
 from redis.utils import SENTINEL
 from unittest import mock
 
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = skip_if_redis_enterprise()
+
 
 @pytest.mark.fixed_client
 def test_connect_retry_on_timeout_error(master_host):

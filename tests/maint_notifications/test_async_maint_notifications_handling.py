@@ -74,6 +74,9 @@ class DummyAsyncConnection:
     def get_resolved_ip(self):
         return self.peer
 
+    def extract_connection_details(self) -> str:
+        return f"connected to ip {self.peer}, state: {self.maintenance_state}"
+
     def set_tmp_settings(
         self,
         tmp_host_address: str | object | None = SENTINEL,

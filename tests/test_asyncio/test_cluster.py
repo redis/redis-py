@@ -2225,6 +2225,12 @@ class TestTopologyRefreshKeepsConnections:
         def should_reconnect(self) -> bool:
             return self.reconnect
 
+        def reset_should_reconnect(self) -> None:
+            self.reconnect = False
+
+        def extract_connection_details(self) -> str:
+            return "server-closed connection details"
+
     class _RefusedConnection(_ServerClosedConnection):
         """A fresh connection whose connect the server refuses or throttles."""
 
@@ -2738,6 +2744,7 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
+    @skip_if_redis_enterprise()
     async def test_startup_nodes(self) -> None:
         """
         Test that it is possible to use startup_nodes
@@ -2800,6 +2807,7 @@ class TestRedisClusterObj:
             new_conn = rand_cluster_node.acquire_connection()
             assert new_conn.retry._retries == 0
 
+    @skip_if_redis_enterprise()
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url) as rc_default:
@@ -2850,6 +2858,7 @@ class TestRedisClusterObj:
         ) as rc_no_retries:
             assert rc_no_retries.retry.get_retries() == 0
 
+    @skip_if_redis_enterprise()
     async def test_deprecated_lib_name_lib_version(self) -> None:
         with (
             pytest.warns(
@@ -2879,6 +2888,7 @@ class TestRedisClusterObj:
         rc = RedisCluster.from_url("rediss://localhost:16379")
         assert rc.connection_kwargs["connection_class"] is SSLConnection
 
+    @skip_if_redis_enterprise()
     async def test_max_connections(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
@@ -2970,6 +2980,7 @@ class TestRedisClusterObj:
             conn = replica._free.pop()
             assert conn.read_response.called is not True
 
+    @skip_if_redis_enterprise()
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag REPLICAS
@@ -3382,6 +3393,7 @@ class TestRedisClusterObj:
             # Rollback to the old default node
             r.replace_default_node(curr_default_node)
 
+    @skip_if_redis_enterprise()
     async def test_address_remap(self, create_redis, master_host):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
@@ -3425,6 +3437,7 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "remap_host, offset",
         # Not the ports of the other remap tests: their listeners may still be open
@@ -3945,6 +3958,7 @@ class TestClusterRedisCommands:
                 pytest.fail("Timed out waiting for BGSAVE to finish")
             await asyncio.sleep(0.05)
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -3997,6 +4011,7 @@ class TestClusterRedisCommands:
     async def test_config_set(self, r: RedisCluster) -> None:
         assert await r.config_set("slowlog-log-slower-than", 0)
 
+    @skip_if_redis_enterprise()
     async def test_cluster_config_resetstat(self, r: RedisCluster) -> None:
         await r.ping(target_nodes="all")
         all_info = await r.info(target_nodes="all")
@@ -4284,6 +4299,7 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
@@ -4319,6 +4335,7 @@ class TestClusterRedisCommands:
         assert await r.bgsave(True)
         await self._wait_for_bgsave(r)
 
+    @skip_if_redis_enterprise()
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot
         await r.set("x{1}", 1)
@@ -4352,6 +4369,8 @@ class TestClusterRedisCommands:
             is True
         )
 
+    # Redis Enterprise's SLOWLOG GET does not include the SLOWLOG RESET entry.
+    @skip_if_redis_enterprise()
     async def test_slowlog_get(
         self, r: RedisCluster, slowlog: Optional[List[Dict[str, Union[int, bytes]]]]
     ) -> None:
@@ -4461,6 +4480,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             await r.debug_segfault()
 
+    @skip_if_redis_enterprise()
     async def test_config_resetstat(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         await r.ping(target_nodes=node)
@@ -4481,6 +4501,7 @@ class TestClusterRedisCommands:
         assert len(res) > 2
         assert "prefixes" in res or b"prefixes" in res
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.9.50")
     async def test_client_pause(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
@@ -5359,6 +5380,7 @@ class TestClusterRedisCommands:
         assert set(await r.keys(pattern="test*", target_nodes="primaries")) == keys
 
     # SCAN COMMANDS
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     async def test_cluster_scan(self, r: RedisCluster) -> None:
         await r.set("a", 1)
@@ -5378,6 +5400,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     async def test_cluster_scan_type(self, r: RedisCluster) -> None:
         await r.sadd("a-set", 1)
@@ -5401,6 +5424,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     async def test_cluster_scan_iter(self, r: RedisCluster) -> None:
         keys_all = []
@@ -8070,6 +8094,9 @@ class TestNodesManager:
             def should_reconnect(self) -> bool:
                 return self.reconnect
 
+            def extract_connection_details(self) -> str:
+                return "fake connection details"
+
         node = ClusterNode(default_host, 7000)
         active_conn = FakeConnection()
         free_conn = FakeConnection()
@@ -9119,6 +9146,9 @@ class TestClusterNodeConnectionHandling:
             def reset_should_reconnect(self) -> None:
                 self._reconnect = False
 
+            def extract_connection_details(self) -> str:
+                return "race connection details"
+
             async def disconnect(self, nowait: bool = False) -> None:
                 self.disconnect_calls += 1
                 self.reset_should_reconnect()
@@ -9172,6 +9202,9 @@ class TestClusterNodeConnectionHandling:
 
             def should_reconnect(self) -> bool:
                 return True
+
+            def extract_connection_details(self) -> str:
+                return "fake connection details"
 
             async def disconnect(self) -> None:
                 self.disconnect_called = True
@@ -9875,6 +9908,7 @@ class TestClusterPipeline:
                 assert r.reinitialize_counter == 0
                 assert await readwrite_pipe.execute() == [b"bar", b"bar"]
 
+    @skip_if_redis_enterprise()
     async def test_readonly_pipeline_from_readonly_client(
         self, r: RedisCluster
     ) -> None:
@@ -9896,6 +9930,7 @@ class TestClusterPipeline:
                         break
             assert executed_on_replica
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -11649,6 +11684,7 @@ class TestClusterPubSub:
             for p in pubsub_nodes:
                 await p.aclose()
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_pubsub_numsub_merge_results(self, r):
         """
