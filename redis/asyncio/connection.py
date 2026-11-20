@@ -3403,13 +3403,12 @@ class ConnectionPool(
         # lock, so their I/O does not block the pool. A listener error is
         # raised once the connection is back.
         listener_error = None
-        if connection in self._in_use_connections:
-            try:
-                await self._event_dispatcher.dispatch_async(
-                    AsyncAfterConnectionReleasedEvent(connection)
-                )
-            except BaseException as e:
-                listener_error = e
+        try:
+            await self._event_dispatcher.dispatch_async(
+                AsyncAfterConnectionReleasedEvent(connection)
+            )
+        except BaseException as e:
+            listener_error = e
         locked = False
         disconnect_failed = False
         try:
@@ -3771,18 +3770,25 @@ class BlockingConnectionPool(ConnectionPool):
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
-        locked = False
+        # Released outside the condition, so the listeners the release runs,
+        # such as a deferred AUTH, do not hold up the tasks waiting for a
+        # connection. The condition is taken only to wake one of them once the
+        # connection is back.
         try:
-            async with self._condition:
-                locked = True
-                try:
-                    await super().release(connection)
-                finally:
+            await super().release(connection)
+        finally:
+            try:
+                async with self._condition:
                     self._condition.notify()
-        except asyncio.CancelledError:
-            if not locked:
-                self._release_in_background(connection)
-            raise
+            except asyncio.CancelledError:
+                # Cancelled while waiting for the condition: still wake a
+                # waiter, or it can miss the returned connection
+                self._run_in_background(self._notify_waiter())
+                raise
+
+    async def _notify_waiter(self) -> None:
+        async with self._condition:
+            self._condition.notify()
 
 
 def __getattr__(name: str):

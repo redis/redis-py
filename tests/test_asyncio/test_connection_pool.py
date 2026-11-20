@@ -2195,6 +2195,60 @@ class TestDeferredReAuthOnRelease:
         assert connection in pool._available_connections
         self._disconnected(connection)
 
+    async def test_blocking_pool_runs_the_auth_outside_the_condition(self):
+        """Tasks waiting for a connection are not held up by the AUTH."""
+        pool = redis.BlockingConnectionPool()
+        observed = []
+
+        async def read_response():
+            observed.append(
+                (
+                    connection in pool._available_connections,
+                    pool._lock.locked(),
+                    pool._condition.locked(),
+                )
+            )
+            return b"OK"
+
+        connection, _ = self._in_use_connection_with_pending_auth(pool, read_response)
+
+        await pool.release(connection)
+
+        assert observed == [(False, False, False)]
+        assert connection in pool._available_connections
+        self._disconnected(connection)
+
+    async def test_blocking_pool_release_cancelled_on_the_condition_wakes_a_waiter(
+        self,
+    ):
+        pool = redis.BlockingConnectionPool(max_connections=1, timeout=5)
+        connection = pool.make_connection()
+        pool._created_connections = 1
+        pool._in_use_connections.add(connection)
+
+        with patch.object(pool, "ensure_connection", AsyncMock()):
+            waiter = asyncio.create_task(pool.get_connection())
+            await asyncio.sleep(0)
+            # The waiter sleeps on the condition, and the release cannot take it
+            await pool._condition.acquire()
+            release = asyncio.create_task(pool.release(connection))
+
+            async def returned():
+                while connection not in pool._available_connections:
+                    await asyncio.sleep(0)
+
+            try:
+                # It is back in the pool, and the release waits for the
+                # condition only to wake the waiter
+                await asyncio.wait_for(returned(), 1)
+                release.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await release
+            finally:
+                pool._condition.release()
+
+            assert await asyncio.wait_for(waiter, 1) is connection
+
     async def test_token_set_during_the_auth_stays_pending(self):
         pool = redis.ConnectionPool()
         newer = mock.Mock()

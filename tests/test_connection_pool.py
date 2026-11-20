@@ -1700,6 +1700,22 @@ class TestDeferredReAuthOnRelease:
         connection.disconnect.assert_called_once()
         assert connection._re_auth_token is token
 
+    def test_connection_the_pool_no_longer_owns_skips_the_auth(self):
+        """
+        It is disconnected instead of returned, like a Sentinel connection to
+        the old master.
+        """
+        pool = redis.ConnectionPool()
+        connection, _ = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.disconnect = mock.Mock()
+
+        with mock.patch.object(pool, "owns_connection", return_value=False):
+            pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
+        assert connection not in pool._available_connections
+
     def test_new_socket_replaces_the_pending_auth(self):
         """The handshake of a new socket authenticates with current credentials."""
         connection = Connection()

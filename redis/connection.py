@@ -4444,70 +4444,73 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
-        try:
-            # Run the listeners, such as a deferred AUTH, while the connection
-            # is still in use, so no other thread can take it, and outside the
-            # pool lock, so their I/O does not block the pool
-            if connection in self._in_use_connections and self.owns_connection(
-                connection
-            ):
+        # Run the listeners, such as a deferred AUTH, while the connection is
+        # still in use, so no other thread can take it, and outside the pool
+        # lock, so their I/O does not block the pool. A listener error is
+        # raised once the connection is back.
+        listener_error = None
+        if connection in self._in_use_connections and self.owns_connection(connection):
+            try:
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
                 )
-        finally:
-            self._release(connection)
+            except BaseException as e:
+                listener_error = e
+        try:
+            with self._lock:
+                try:
+                    self._in_use_connections.remove(connection)
+                except KeyError:
+                    # Gracefully fail when a connection is returned to this pool
+                    # that the pool doesn't actually own
+                    return
 
-    def _release(self, connection: "Connection") -> None:
-        with self._lock:
-            try:
-                self._in_use_connections.remove(connection)
-            except KeyError:
-                # Gracefully fail when a connection is returned to this pool
-                # that the pool doesn't actually own
-                return
+                if self.owns_connection(connection):
+                    if connection.should_reconnect():
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "Disconnecting released connection marked for "
+                                f"reconnect: {connection}, "
+                                f"{connection.extract_connection_details()}"
+                            )
+                        connection.disconnect()
+                    self._available_connections.append(connection)
 
-            if self.owns_connection(connection):
-                if connection.should_reconnect():
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Disconnecting released connection marked for reconnect: "
-                            f"{connection}, {connection.extract_connection_details()}"
-                        )
-                    connection.disconnect()
-                self._available_connections.append(connection)
-
-                # Record state transition: USED -> IDLE
-                pool_name = get_pool_name(self)
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.IDLE,
-                    counter=1,
-                )
-            else:
-                # Pool doesn't own this connection, do not add it back
-                # to the pool.
-                connection.disconnect()
-                # Subclasses such as SentinelConnectionPool can override
-                # owns_connection() with a comparison different from local PID
-                # ownership. When such a subclass rejects a connection, also require
-                # connection.pid == self.pid before reclaiming its slot.
-                if connection.pid == self.pid:
-                    self._created_connections -= 1
-                    # The connection was checked out by this process, so
-                    # decrement USED, which was counted in get_connection().
-                    # Connections inherited across a fork are skipped here,
-                    # their accounting belongs to the parent process.
+                    # Record state transition: USED -> IDLE
+                    pool_name = get_pool_name(self)
                     record_connection_count(
-                        pool_name=get_pool_name(self),
+                        pool_name=pool_name,
                         connection_state=ConnectionState.USED,
                         counter=-1,
                     )
-                return
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=1,
+                    )
+                else:
+                    # Pool doesn't own this connection, do not add it back
+                    # to the pool.
+                    connection.disconnect()
+                    # Subclasses such as SentinelConnectionPool can override
+                    # owns_connection() with a comparison different from local PID
+                    # ownership. When such a subclass rejects a connection, also require
+                    # connection.pid == self.pid before reclaiming its slot.
+                    if connection.pid == self.pid:
+                        self._created_connections -= 1
+                        # The connection was checked out by this process, so
+                        # decrement USED, which was counted in get_connection().
+                        # Connections inherited across a fork are skipped here,
+                        # their accounting belongs to the parent process.
+                        record_connection_count(
+                            pool_name=get_pool_name(self),
+                            connection_state=ConnectionState.USED,
+                            counter=-1,
+                        )
+                    return
+        finally:
+            if listener_error is not None:
+                raise listener_error
 
     def owns_connection(self, connection: "Connection") -> int:
         return connection.pid == self.pid
