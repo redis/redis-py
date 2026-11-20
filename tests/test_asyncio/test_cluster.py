@@ -3596,6 +3596,39 @@ class TestRedisClusterObjMocked:
 
         assert closed == ["nodes_cache", "startup_nodes"]
 
+    @pytest.mark.parametrize(
+        "topology_error",
+        [TimeoutError("topology close failed"), asyncio.CancelledError()],
+        ids=["error", "cancelled"],
+    )
+    async def test_aclose_raises_the_topology_close_error_when_both_closes_fail(
+        self, topology_error: BaseException
+    ) -> None:
+        """
+        When closing the topology nodes fails or is cancelled, and closing the
+        startup nodes fails too, the first error is raised: the later close
+        failure neither replaces it nor turns a cancellation into an error.
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        real_aclose = NodesManager.aclose
+        closed = []
+
+        async def aclose(manager: NodesManager, attr: str = "nodes_cache") -> None:
+            closed.append(attr)
+            await real_aclose(manager, attr)
+            if attr == "nodes_cache":
+                raise topology_error
+            raise TimeoutError("startup close failed")
+
+        with mock.patch.object(
+            NodesManager, "aclose", autospec=True, side_effect=aclose
+        ):
+            with pytest.raises(type(topology_error)) as raised:
+                await cluster.aclose()
+
+        assert raised.value is topology_error
+        assert closed == ["nodes_cache", "startup_nodes"]
+
     @pytest.mark.parametrize("failing_attr", ["nodes_cache", "startup_nodes"])
     async def test_failed_first_initialize_raises_its_error_when_closing_fails(
         self, failing_attr: str

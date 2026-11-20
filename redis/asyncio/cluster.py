@@ -965,11 +965,7 @@ class RedisCluster(
                             # raised: a close failure of a client that never
                             # initialized must not hide why it failed
                             try:
-                                await self.nodes_manager.aclose()
-                            except Exception:
-                                pass
-                            try:
-                                await self.nodes_manager.aclose("startup_nodes")
+                                await self.nodes_manager._aclose_all()
                             except Exception:
                                 pass
                             raise
@@ -1061,12 +1057,7 @@ class RedisCluster(
                         for task in tasks:
                             task.cancel()
                         await asyncio.gather(*tasks, return_exceptions=True)
-                    try:
-                        await self.nodes_manager.aclose()
-                    finally:
-                        # The startup nodes are closed even when closing the
-                        # topology nodes failed
-                        await self.nodes_manager.aclose("startup_nodes")
+                    await self.nodes_manager._aclose_all()
 
     @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -3663,6 +3654,24 @@ class NodesManager:
         exc = next((res for res in ret if isinstance(res, Exception)), None)
         if exc:
             raise exc
+
+    async def _aclose_all(self) -> None:
+        """
+        Close the nodes of the topology, then the startup nodes.
+
+        The startup nodes are closed even when closing the topology nodes fails
+        or is cancelled. The first error is the one raised, so a later close
+        failure cannot replace it, or turn a cancellation into an error.
+        """
+        try:
+            await self.aclose()
+        except BaseException:
+            try:
+                await self.aclose("startup_nodes")
+            except Exception:
+                pass
+            raise
+        await self.aclose("startup_nodes")
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
