@@ -2750,7 +2750,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self._conn.set_re_auth_token(token)
 
     def re_auth(self):
-        self._conn.re_auth()
+        # A cache hit on another connection drains this socket under the pool
+        # lock, and the drain reads ordinary replies too, so the AUTH reply
+        # must not be in flight outside it
+        with self._pool_lock:
+            self._conn.re_auth()
 
     def mark_for_reconnect(self):
         self._conn.mark_for_reconnect()
