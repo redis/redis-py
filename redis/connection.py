@@ -2396,8 +2396,19 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     encode(k) if isinstance(k, (int, float)) else k for k in keys
                 )
                 break
+        # A float argument compares equal to an int or to the other signed zero
+        # (1 == 1.0, 0.0 == -0.0) but is sent as different bytes, so it is keyed by
+        # its encoded form, or HGET h 1.0 would be served the entry of HGET h 1.
+        redis_args = args
+        for arg in args:
+            if isinstance(arg, float):
+                encode = self._conn.encoder.encode
+                redis_args = tuple(
+                    encode(a) if isinstance(a, float) else a for a in args
+                )
+                break
         self._current_command_cache_key = CacheKey(
-            command=command, redis_keys=redis_keys, redis_args=args
+            command=command, redis_keys=redis_keys, redis_args=redis_args
         )
 
         is_hit = False
