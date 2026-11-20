@@ -1,6 +1,8 @@
 import select
 import selectors
 import socket
+import sys
+from asyncio import get_running_loop
 from logging import getLogger
 from typing import Callable, List, Optional, TypedDict, Union
 
@@ -17,6 +19,7 @@ from .base import (
     AsyncPushNotificationsParser,
     BaseParser,
     PushNotificationsParser,
+    async_timeout,
 )
 from .socket import (
     NONBLOCKING_EXCEPTION_ERROR_NUMBERS,
@@ -300,13 +303,17 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
 class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
-    __slots__ = ("_reader",)
+    __slots__ = ("_reader", "_response_read_timeout")
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise RedisError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader = None
+        # Timeout context shared by all socket reads of one response,
+        # created lazily by the first read that can wait and closed when
+        # read_response() returns; see read_from_socket().
+        self._response_read_timeout = None
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
@@ -371,7 +378,34 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         return bool(self._stream._buffer)
 
     async def read_from_socket(self):
-        buffer = await self._stream.read(self._read_size)
+        # Each socket read is bounded by its own socket_timeout window,
+        # matching the sync parser, where the OS timeout applies to every
+        # recv(). One timeout context is shared across all socket reads
+        # of a single response and rescheduled before each read that can
+        # wait, mirroring _read_exactly: entering a fresh context per
+        # read costs a new asyncio.Timeout per socket read. Check the
+        # flags first to avoid private stream access when per-read
+        # timeouts do not apply. StreamReader.read can only wait while
+        # its bytearray buffer is empty; only then arm (or reschedule)
+        # the timeout. The context is closed by read_response().
+        if (
+            self._apply_read_timeout
+            and self._read_timeout is not None
+            and not self._stream._buffer
+        ):
+            if self._response_read_timeout is None:
+                self._response_read_timeout = async_timeout(self._read_timeout)
+                await self._response_read_timeout.__aenter__()
+                self._active_read_timeout = self._response_read_timeout
+            else:
+                deadline = get_running_loop().time() + self._read_timeout
+                if hasattr(self._response_read_timeout, "reschedule"):
+                    self._response_read_timeout.reschedule(deadline)
+                elif hasattr(self._response_read_timeout, "update"):
+                    self._response_read_timeout.update(deadline)
+            buffer = await self._stream.read(self._read_size)
+        else:
+            buffer = await self._stream.read(self._read_size)
         if not buffer or not isinstance(buffer, bytes):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
         self._reader.feed(buffer)
@@ -379,47 +413,77 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # return True to indicate that data was read.
         return True
 
+    async def _close_response_read_timeout(self) -> None:
+        # Close the timeout context shared by this response's socket
+        # reads, if one was armed; a later socket read arms a fresh
+        # one. Called before a push handler runs, so a slow handler
+        # (maintenance reconnect, custom invalidation) is not bounded
+        # by the socket read deadline, and by read_response()'s
+        # finally as a safety net. This mirrors the Python parsers,
+        # whose per-read contexts close when each read returns.
+        if self._response_read_timeout is not None:
+            try:
+                await self._response_read_timeout.__aexit__(*sys.exc_info())
+            finally:
+                self._response_read_timeout = None
+                self._active_read_timeout = None
+
     async def read_response(
         self, disable_decoding: bool = False, push_request: bool = False
     ) -> Union[EncodableT, List[EncodableT]]:
-        while True:
-            # If `on_disconnect()` has been called, prohibit any more reads
-            # even if they could happen because data might be present.
-            # We still allow reads in progress to finish
-            if not self._connected:
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
+        try:
+            while True:
+                # If `on_disconnect()` has been called, prohibit any more reads
+                # even if they could happen because data might be present.
+                # We still allow reads in progress to finish
+                if not self._connected:
+                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
-            if disable_decoding:
-                response = self._reader.gets(False)
-            else:
-                response = self._reader.gets()
-
-            while response is NOT_ENOUGH_DATA:
-                await self.read_from_socket()
                 if disable_decoding:
                     response = self._reader.gets(False)
                 else:
                     response = self._reader.gets()
-            if self._hiredis_PushNotificationType is None or not isinstance(
-                response, self._hiredis_PushNotificationType
-            ):
-                break
-            response = await self.handle_push_response(response)
-            if push_request:
-                return response
-            # Otherwise read the reply the push interleaved with. Looping
-            # instead of recursing keeps a burst of consecutive push frames
-            # from growing the stack.
 
-        # if the response is a ConnectionError or the response is a list and
-        # the first item is a ConnectionError, raise it as something bad
-        # happened
-        if isinstance(response, ConnectionError):
-            raise response
-        elif (
-            isinstance(response, list)
-            and response
-            and isinstance(response[0], ConnectionError)
-        ):
-            raise response[0]
-        return response
+                while response is NOT_ENOUGH_DATA:
+                    await self.read_from_socket()
+                    if disable_decoding:
+                        response = self._reader.gets(False)
+                    else:
+                        response = self._reader.gets()
+
+                if self._hiredis_PushNotificationType is None or not isinstance(
+                    response, self._hiredis_PushNotificationType
+                ):
+                    break
+                # The per-read timeout bounds socket reads only: close
+                # it before the push handler runs, so a handler that
+                # suspends (maintenance reconnect, custom invalidation)
+                # cannot raise TimeoutError while the socket never
+                # stalled. The next socket read, if one is needed,
+                # arms a fresh context in read_from_socket().
+                await self._close_response_read_timeout()
+                response = await self.handle_push_response(response)
+                if push_request:
+                    return response
+                # Otherwise read the reply the push interleaved with. Looping
+                # instead of recursing keeps a burst of consecutive push frames
+                # from growing the stack.
+
+            # if the response is a ConnectionError or the response is a list and
+            # the first item is a ConnectionError, raise it as something bad
+            # happened
+            if isinstance(response, ConnectionError):
+                raise response
+            elif (
+                isinstance(response, list)
+                and response
+                and isinstance(response[0], ConnectionError)
+            ):
+                raise response[0]
+            return response
+        finally:
+            # Close the timeout context shared by this response's socket
+            # reads, if one is still armed; a later response arms a
+            # fresh one. Already closed (a no-op) when a push handler
+            # ran above.
+            await self._close_response_read_timeout()
