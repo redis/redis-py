@@ -17,6 +17,11 @@ from redis.asyncio.sentinel import (
     SlaveNotFoundError,
 )
 
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = skip_if_redis_enterprise()
+
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 def master_ip(master_host):
@@ -334,6 +339,58 @@ async def test_replica_round_robin(cluster, sentinel, master_ip):
     assert await rotator.__anext__() == (master_ip, 6379)
     with pytest.raises(ReplicaNotFoundError):
         await rotator.__anext__()
+
+
+@pytest.mark.fixed_client
+async def test_master_failover_does_not_reuse_connection_to_old_master():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.connection_pool = kwargs["connection_pool"]
+            self.host = self.port = None
+            self._should_reconnect = False
+
+        async def connect(self):
+            if self.host is None:
+                self.host, self.port = await self.connection_pool.get_master_address()
+
+        async def disconnect(self):
+            self.host = self.port = None
+            self._should_reconnect = False
+
+        async def can_read(self):
+            return False
+
+        async def re_auth(self):
+            pass
+
+        def mark_for_reconnect(self):
+            self._should_reconnect = True
+
+        def should_reconnect(self):
+            return self._should_reconnect
+
+    sentinel_manager = mock.AsyncMock()
+    sentinel_manager.discover_master.return_value = master_a
+    pool = SentinelConnectionPool(
+        "mymaster", sentinel_manager, connection_class=FakeConnection
+    )
+
+    in_use = await pool.get_connection()
+    assert (in_use.host, in_use.port) == master_a
+
+    # Sentinel reports a new master while in_use is checked out. The next new
+    # connection learns about it, which disconnects only the idle connections.
+    sentinel_manager.discover_master.return_value = master_b
+    other = await pool.get_connection()
+    assert (other.host, other.port) == master_b
+    await pool.release(other)
+    await pool.release(in_use)
+
+    connections = [await pool.get_connection() for _ in range(2)]
+    assert [(c.host, c.port) for c in connections] == [master_b, master_b]
 
 
 @pytest.mark.onlynoncluster

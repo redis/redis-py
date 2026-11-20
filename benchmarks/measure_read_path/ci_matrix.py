@@ -1,7 +1,7 @@
 """Print the Benchmarks workflow's job matrix as JSON.
 
 One job each for peak memory, the parser-only benchmark, the
-observability recorder benchmark, the cluster routing benchmark and the client-side cache on each topology, and one run_bench job per config: every client, topology, pool class, parser,
+observability recorder benchmark, the cluster routing benchmark, the pool re-authentication benchmark and the client-side cache on each topology, and one run_bench job per config: every client, topology, pool class, parser,
 protocol and socket timeout combination run_bench supports. The workflow
 reads it from the `matrix` output of its plan job, so the grid lives here
 and in run_bench.py, not in the YAML.
@@ -34,6 +34,11 @@ def jobs():
             "name": "Cluster routing tests",
             "tool": "routing_micro",
             "args": "--passes 16",
+        },
+        {
+            "name": "Re-authentication tests",
+            "tool": "re_auth_micro",
+            "args": "--passes 8",
         },
         {
             "name": "Client-side cache; standalone",

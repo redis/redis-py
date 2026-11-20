@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import pytest
 import redis
@@ -389,6 +389,19 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 def skip_if_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO.get("enterprise", False) is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
+
+
+def is_redis_enterprise_cluster() -> bool:
+    # INFO reports cluster_enabled as an integer, so test it for truthiness.
+    return REDIS_INFO.get("enterprise", False) is True and bool(
+        REDIS_INFO.get("cluster_enabled", False)
+    )
+
+
+def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+    return pytest.mark.skipif(
+        is_redis_enterprise_cluster(), reason="Redis enterprise cluster"
+    )
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
@@ -801,6 +814,23 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     return parts.hostname, (parts.port or 6379)
+
+
+@pytest.fixture(scope="session")
+def master_connection_kwargs(request):
+    """
+    Connection kwargs for the server under test: the host and port of
+    ``master_host`` plus the username and password of ``--redis-url``, if it
+    has them, so a test that builds its own connection can authenticate.
+    """
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    kwargs = {"host": parts.hostname, "port": parts.port or 6379}
+    if parts.username:
+        kwargs["username"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    return kwargs
 
 
 @pytest.fixture()

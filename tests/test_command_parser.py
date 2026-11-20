@@ -177,6 +177,7 @@ class TestCommandsParser:
 
     # Key specs, and every command below, first ship in 7.0.
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_movablekeys_commands_derive_the_keyed_defaults(self, r):
         """
         A ``movablekeys`` command reports ``first_key_pos`` 0, so the keyed default is
@@ -195,6 +196,7 @@ class TestCommandsParser:
     @skip_if_server_version_lt("8.0.0")
     @skip_if_server_version_gte("8.5.240")
     @pytest.mark.onlycluster
+    @skip_if_redis_enterprise()
     def test_get_command_policies(self, r):
         commands_parser = CommandsParser(r)
 
@@ -215,6 +217,7 @@ class TestCommandsParser:
     @skip_if_server_version_lt("8.5.240")
     @skip_if_server_version_gte("8.10.0")
     @pytest.mark.onlycluster
+    @skip_if_redis_enterprise()
     def test_get_command_policies_json_debug_without_its_key_stays_keyless(self, r):
         """
         From 8.5.240, JSON.DEBUG reports ``first_key_pos`` 0. Before 8.10 the server does

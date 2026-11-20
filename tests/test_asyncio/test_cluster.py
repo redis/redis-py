@@ -2524,6 +2524,12 @@ class TestTopologyRefreshKeepsConnections:
         def should_reconnect(self) -> bool:
             return self.reconnect
 
+        def reset_should_reconnect(self) -> None:
+            self.reconnect = False
+
+        def extract_connection_details(self) -> str:
+            return "server-closed connection details"
+
     class _RefusedConnection(_ServerClosedConnection):
         """A fresh connection whose connect the server refuses or throttles."""
 
@@ -3037,6 +3043,7 @@ class TestRedisClusterObj:
     Tests for the RedisCluster class
     """
 
+    @skip_if_redis_enterprise()
     async def test_startup_nodes(self) -> None:
         """
         Test that it is possible to use startup_nodes
@@ -3099,6 +3106,7 @@ class TestRedisClusterObj:
             new_conn = rand_cluster_node.acquire_connection()
             assert new_conn.retry._retries == 0
 
+    @skip_if_redis_enterprise()
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url) as rc_default:
@@ -3149,6 +3157,7 @@ class TestRedisClusterObj:
         ) as rc_no_retries:
             assert rc_no_retries.retry.get_retries() == 0
 
+    @skip_if_redis_enterprise()
     async def test_deprecated_lib_name_lib_version(self) -> None:
         with (
             pytest.warns(
@@ -3178,6 +3187,7 @@ class TestRedisClusterObj:
         rc = RedisCluster.from_url("rediss://localhost:16379")
         assert rc.connection_kwargs["connection_class"] is SSLConnection
 
+    @skip_if_redis_enterprise()
     async def test_max_connections(
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
@@ -3269,6 +3279,7 @@ class TestRedisClusterObj:
             conn = replica._free.pop()
             assert conn.read_response.called is not True
 
+    @skip_if_redis_enterprise()
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
         """
         Test command execution with nodes flag REPLICAS
@@ -3681,6 +3692,7 @@ class TestRedisClusterObj:
             # Rollback to the old default node
             r.replace_default_node(curr_default_node)
 
+    @skip_if_redis_enterprise()
     async def test_address_remap(self, create_redis, master_host):
         """Test that we can create a rediscluster object with
         a host-port remapper and map connections through proxy objects
@@ -3724,6 +3736,7 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "remap_host, offset",
         # Not the ports of the other remap tests: their listeners may still be open
@@ -4182,6 +4195,7 @@ class TestClusterRedisCommands:
                 pytest.fail("Timed out waiting for BGSAVE to finish")
             await asyncio.sleep(0.05)
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -4234,6 +4248,7 @@ class TestClusterRedisCommands:
     async def test_config_set(self, r: RedisCluster) -> None:
         assert await r.config_set("slowlog-log-slower-than", 0)
 
+    @skip_if_redis_enterprise()
     async def test_cluster_config_resetstat(self, r: RedisCluster) -> None:
         await r.ping(target_nodes="all")
         all_info = await r.info(target_nodes="all")
@@ -4521,6 +4536,7 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
@@ -4556,6 +4572,7 @@ class TestClusterRedisCommands:
         assert await r.bgsave(True)
         await self._wait_for_bgsave(r)
 
+    @skip_if_redis_enterprise()
     async def test_info(self, r: RedisCluster) -> None:
         # Map keys to same slot
         await r.set("x{1}", 1)
@@ -4589,6 +4606,8 @@ class TestClusterRedisCommands:
             is True
         )
 
+    # Redis Enterprise's SLOWLOG GET does not include the SLOWLOG RESET entry.
+    @skip_if_redis_enterprise()
     async def test_slowlog_get(
         self, r: RedisCluster, slowlog: Optional[List[Dict[str, Union[int, bytes]]]]
     ) -> None:
@@ -4698,6 +4717,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             await r.debug_segfault()
 
+    @skip_if_redis_enterprise()
     async def test_config_resetstat(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
         await r.ping(target_nodes=node)
@@ -4718,6 +4738,7 @@ class TestClusterRedisCommands:
         assert len(res) > 2
         assert "prefixes" in res or b"prefixes" in res
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.9.50")
     async def test_client_pause(self, r: RedisCluster) -> None:
         node = r.get_primaries()[0]
@@ -5596,6 +5617,7 @@ class TestClusterRedisCommands:
         assert set(await r.keys(pattern="test*", target_nodes="primaries")) == keys
 
     # SCAN COMMANDS
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     async def test_cluster_scan(self, r: RedisCluster) -> None:
         await r.set("a", 1)
@@ -5615,6 +5637,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     async def test_cluster_scan_type(self, r: RedisCluster) -> None:
         await r.sadd("a-set", 1)
@@ -5638,6 +5661,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     async def test_cluster_scan_iter(self, r: RedisCluster) -> None:
         keys_all = []
@@ -8279,6 +8303,9 @@ class TestNodesManager:
             def should_reconnect(self) -> bool:
                 return self.reconnect
 
+            def extract_connection_details(self) -> str:
+                return "fake connection details"
+
         node = ClusterNode(default_host, 7000)
         active_conn = FakeConnection()
         free_conn = FakeConnection()
@@ -8654,25 +8681,110 @@ class TestNodesManager:
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
-    async def test_re_auth_stops_at_authentication_error(self) -> None:
+    async def test_re_auth_continues_past_authentication_error(self) -> None:
         """
-        A rejected token is rejected by every connection, so the first
-        AuthenticationError stops the re-authentication. Every connection
-        stays in the free queue.
+        One rejected AUTH does not stop the others. The rejected connection
+        keeps the token pending, an in-use connection gets it too, and every
+        free connection stays in the free queue.
         """
         node = ClusterNode(default_host, 7000)
         failing = self._re_auth_connection(False)
         failing.retry = Retry(NoBackoff(), 3)
         failing.read_response.side_effect = AuthenticationError("expired")
         other = self._re_auth_connection(False)
+        in_use = self._re_auth_connection(False)
         node._free.extend([failing, other])
+        node._connections.extend([failing, other, in_use])
+        token = mock.Mock()
 
         with pytest.raises(AuthenticationError, match="expired"):
-            await node.re_auth_callback(mock.Mock())
+            await node.re_auth_callback(token)
 
         failing.read_response.assert_awaited_once()
-        other.send_command.assert_not_awaited()
+        assert failing.set_re_auth_token.call_args_list == [
+            mock.call(None),
+            mock.call(token),
+        ]
+        other.send_command.assert_awaited_once()
+        other.set_re_auth_token.assert_called_once_with(None)
+        in_use.set_re_auth_token.assert_called_once_with(token)
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
+        # Not connected, so the node is not reported unclosed when collected
+        for connection in (failing, other, in_use):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_skips_connections_created_while_it_runs(self) -> None:
+        """
+        A connection created while the AUTH replies are awaited has
+        authenticated with the current token in its handshake.
+        """
+        node = ClusterNode(default_host, 7000)
+        free = self._re_auth_connection(False)
+        created = self._re_auth_connection(False)
+        node._free.append(free)
+        node._connections.append(free)
+
+        async def read_response(*args, **kwargs):
+            # Another task opens a connection meanwhile
+            node._connections.append(created)
+
+        free.read_response.side_effect = read_response
+
+        await node.re_auth_callback(mock.Mock())
+
+        created.set_re_auth_token.assert_not_called()
+        for connection in (free, created):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_cancelled_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ) -> None:
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply. Every connection still goes back
+        to the free queue.
+        """
+        node = ClusterNode(default_host, 7000)
+        first = self._re_auth_connection(False)
+        first.read_response.side_effect = asyncio.CancelledError()
+        second = self._re_auth_connection(False)
+        node._free.extend([first, second])
+
+        with pytest.raises(asyncio.CancelledError):
+            await node.re_auth_callback(mock.Mock())
+
+        first._force_disconnect.assert_called_once()
+        second._force_disconnect.assert_called_once()
+        second.read_response.assert_not_awaited()
+        assert sorted(map(id, node._free)) == sorted(map(id, [first, second]))
+        for connection in (first, second):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_acquire_runs_the_deferred_auth_without_raising(self) -> None:
+        """
+        The AUTH a token renewal deferred while a connection was in use runs
+        when it is next acquired, and a rejection does not fail the command
+        about to use it.
+        """
+        node = ClusterNode(default_host, 7000)
+        accepted = self._re_auth_connection(False)
+        rejected = self._re_auth_connection(False)
+        rejected.re_auth.side_effect = AuthenticationError("rejected")
+        disconnected = self._re_auth_connection(False, connected=False)
+
+        await node._prepare_acquired_connection(accepted)
+        await node._prepare_acquired_connection(rejected)
+        await node._prepare_acquired_connection(disconnected)
+
+        accepted.re_auth.assert_awaited_once()
+        rejected.re_auth.assert_awaited_once()
+        # It authenticates when it connects
+        disconnected.re_auth.assert_not_awaited()
+        for connection in (accepted, rejected):
+            connection.is_connected = False
 
     @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(
@@ -9328,6 +9440,9 @@ class TestClusterNodeConnectionHandling:
             def reset_should_reconnect(self) -> None:
                 self._reconnect = False
 
+            def extract_connection_details(self) -> str:
+                return "race connection details"
+
             async def disconnect(self) -> None:
                 self.disconnect_calls += 1
                 self.reset_should_reconnect()
@@ -9381,6 +9496,9 @@ class TestClusterNodeConnectionHandling:
 
             def should_reconnect(self) -> bool:
                 return True
+
+            def extract_connection_details(self) -> str:
+                return "fake connection details"
 
             async def disconnect(self) -> None:
                 self.disconnect_called = True
@@ -10001,6 +10119,7 @@ class TestClusterPipeline:
                 assert r.reinitialize_counter == 0
                 assert await readwrite_pipe.execute() == [b"bar", b"bar"]
 
+    @skip_if_redis_enterprise()
     async def test_readonly_pipeline_from_readonly_client(
         self, r: RedisCluster
     ) -> None:
@@ -10022,6 +10141,7 @@ class TestClusterPipeline:
                         break
             assert executed_on_replica
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -11775,6 +11895,7 @@ class TestClusterPubSub:
             for p in pubsub_nodes:
                 await p.aclose()
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_pubsub_numsub_merge_results(self, r):
         """
