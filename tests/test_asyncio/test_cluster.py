@@ -4203,7 +4203,7 @@ class TestRedisClusterObjMocked:
         redirects = []
 
         async def execute_command(node, *args, **kwargs):
-            calls.append((node, args[0]))
+            calls.append((node, args[0], kwargs.get("asking", False)))
             if node is origin:
                 redirects.append(error(f"{slot} :{target.port}"))
                 raise redirects[-1]
@@ -4214,10 +4214,7 @@ class TestRedisClusterObjMocked:
         ):
             assert await rc.get("foo") == b"value"
 
-        expected = [(origin, "GET"), (target, "GET")]
-        if error is AskError:
-            expected.insert(1, (target, "ASKING"))
-        assert calls == expected
+        assert calls == [(origin, "GET", False), (target, "GET", error is AskError)]
         assert [redirect.node_addr for redirect in redirects] == [
             (origin.host, target.port)
         ]
@@ -4247,7 +4244,7 @@ class TestRedisClusterObjMocked:
         calls = []
 
         async def execute_command(node, *args, **kwargs):
-            calls.append((node, args[0]))
+            calls.append((node, args[0], kwargs.get("asking", False)))
             if node is origin:
                 # A node redirects to the port it advertises, not the remapped one
                 raise error(f"{slot} :{target.port - offset}")
@@ -4258,10 +4255,44 @@ class TestRedisClusterObjMocked:
         ):
             assert await rc.get("foo") == b"value"
 
-        expected = [(origin, "GET"), (target, "GET")]
-        if error is AskError:
-            expected.insert(1, (target, "ASKING"))
-        assert calls == expected
+        assert calls == [(origin, "GET", False), (target, "GET", error is AskError)]
+
+        await rc.aclose()
+
+    async def test_ask_redirect_sends_asking_on_the_command_connection(self) -> None:
+        """
+        ASKING is a one-shot allowance on the connection that sends it, so the
+        redirected command has to follow it on that same connection. With more
+        than one idle connection on the target node, an ASKING sent as its own
+        pooled command is granted on one connection while the command goes out
+        on another, which the node then answers with MOVED.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=default_port)
+        slot = rc.keyslot("foo")
+        origin = rc.get_node_from_key("foo")
+        target = next(node for node in rc.get_primaries() if node is not origin)
+        mock_node_resp_exc(origin, AskError(f"{slot} {target.host}:{target.port}"))
+        connections = []
+        for _ in range(2):
+            connection = mock.AsyncMock(spec=Connection)
+            connection._resp2_fallback = False
+            connection.is_connected = True
+            connection.should_reconnect.return_value = False
+            # the ASKING reply, then the command reply
+            connection.read_response.side_effect = ["OK", b"value"]
+            connections.append(connection)
+        target._free.clear()
+        target._free.extend(connections)
+
+        assert await rc.get("foo") == b"value"
+
+        (used,) = [c for c in connections if c.send_packed_command.await_count]
+        used.pack_commands.assert_called_once_with([("ASKING",), ("GET", "foo")])
+        used.send_packed_command.assert_awaited_once_with(
+            used.pack_commands.return_value
+        )
+        assert used.read_response.await_count == 2
+        assert sorted(map(id, target._free)) == sorted(map(id, connections))
 
         await rc.aclose()
 

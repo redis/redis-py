@@ -1975,18 +1975,17 @@ class RedisCluster(
 
         while ttl > 0:
             ttl -= 1
-            ask_himport = False
+            ask = False
             try:
                 if asking:
                     target_node = self.get_node(*redirect_addr)
-                    if parse_himport_set_args(args) is not None:
-                        # ASKING must sit on the same connection as the SET,
-                        # immediately before it. HIMPORT SET's own executor folds
-                        # ASKING into the SET's packed write after the session setup,
-                        # so don't send it here as a separately pooled command.
-                        ask_himport = True
-                    else:
-                        await target_node.execute_command("ASKING")
+                    # ASKING is a one-shot allowance on the connection that sends
+                    # it, so it must sit on the same connection as the command,
+                    # immediately before it. ClusterNode.execute_command folds it
+                    # into the command's packed write; sending it here as a
+                    # separately pooled command would grant it to one free
+                    # connection and send the command on another.
+                    ask = True
                     asking = False
                 elif moved:
                     # MOVED occurred and the slots cache was updated,
@@ -2004,7 +2003,7 @@ class RedisCluster(
                     moved = False
 
                 response = await target_node.execute_command(
-                    *args, asking=ask_himport, **kwargs
+                    *args, asking=ask, **kwargs
                 )
                 await self._record_command_metric(
                     command_name=command,
@@ -2770,8 +2769,26 @@ class ClusterNode:
                     connection, key, fieldset_name, values, asking=asking
                 )
 
-            # Execute command
-            await connection.send_packed_command(connection.pack_command(*args))
+            if asking:
+                # Pack ASKING into the command's own write so the allowance is
+                # granted on this connection immediately before the command
+                await connection.send_packed_command(
+                    connection.pack_commands([("ASKING",), args])
+                )
+                try:
+                    await self.parse_response(connection, "ASKING")
+                except ResponseError:
+                    # The command reply is still queued behind the failed
+                    # ASKING. Drain it before raising, otherwise the connection
+                    # returns to the free queue with an unread reply.
+                    try:
+                        await self.parse_response(connection, args[0], **kwargs)
+                    except ResponseError:
+                        pass
+                    raise
+            else:
+                # Execute command
+                await connection.send_packed_command(connection.pack_command(*args))
 
             # Read response
             return await self.parse_response(connection, args[0], **kwargs)
