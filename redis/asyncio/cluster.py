@@ -964,8 +964,13 @@ class RedisCluster(
                         # the current topology, which every other task is using,
                         # and leaves _initialize set so the next command retries.
                         if first_initialize:
-                            await self.nodes_manager.aclose()
-                            await self.nodes_manager.aclose("startup_nodes")
+                            # Every node is closed, and the refresh error is
+                            # raised: a close failure of a client that never
+                            # initialized must not hide why it failed
+                            try:
+                                await self.nodes_manager._aclose_all()
+                            except Exception:
+                                pass
                             raise
                         if isinstance(e, RedisClusterException):
                             # No node answered, or nodes answered with a
@@ -1055,8 +1060,7 @@ class RedisCluster(
                         for task in tasks:
                             task.cancel()
                         await asyncio.gather(*tasks, return_exceptions=True)
-                    await self.nodes_manager.aclose()
-                    await self.nodes_manager.aclose("startup_nodes")
+                    await self.nodes_manager._aclose_all()
 
     @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -2512,7 +2516,7 @@ class ClusterNode:
             ),
             return_exceptions=True,
         )
-        exc = next((res for res in ret if isinstance(res, Exception)), None)
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
         if exc:
             raise exc
 
@@ -2548,6 +2552,11 @@ class ClusterNode:
         Disconnect a connection if it's marked for reconnect.
         This implements lazy disconnection to avoid race conditions.
         The connection will auto-reconnect on next use.
+
+        The old socket is closed without waiting for the close to finish. The
+        caller never needs it again, so a slow close must not fail the command,
+        and after a reply was read it must not turn a finished command into a
+        retried one.
         """
         if connection.should_reconnect():
             # Render the connection before disconnecting: extract_connection_details()
@@ -2560,7 +2569,7 @@ class ClusterNode:
                     "Disconnecting acquired connection marked for reconnect: "
                     f"{connection}, {connection.extract_connection_details()}"
                 )
-            await connection.disconnect()
+            await connection.disconnect(nowait=True)
 
     async def _prepare_acquired_connection(self, connection: Connection) -> None:
         """
@@ -3644,12 +3653,36 @@ class NodesManager:
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-        await asyncio.gather(
+        # Wait for every node to close before raising, so one node's close
+        # failure does not return while the others are still closing
+        ret = await asyncio.gather(
             *(
                 asyncio.create_task(node.disconnect())
                 for node in getattr(self, attr).values()
-            )
+            ),
+            return_exceptions=True,
         )
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
+        if exc:
+            raise exc
+
+    async def _aclose_all(self) -> None:
+        """
+        Close the nodes of the topology, then the startup nodes.
+
+        The startup nodes are closed even when closing the topology nodes fails
+        or is cancelled. The first error is the one raised, so a later close
+        failure cannot replace it, or turn a cancellation into an error.
+        """
+        try:
+            await self.aclose()
+        except BaseException:
+            try:
+                await self.aclose("startup_nodes")
+            except Exception:
+                pass
+            raise
+        await self.aclose("startup_nodes")
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
@@ -5042,8 +5075,10 @@ class TransactionStrategy(AbstractStrategy):
             error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             if self._transaction_connection and self._transaction_node:
-                # Disconnect and release back to pool
-                await self._transaction_connection.disconnect()
+                # Disconnect and release back to pool. The socket is discarded,
+                # so the close is not waited for: a close that times out must
+                # not replace the error and stop the retry.
+                await self._transaction_connection.disconnect(nowait=True)
                 self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
 
