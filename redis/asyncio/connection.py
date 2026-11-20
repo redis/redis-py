@@ -1149,6 +1149,9 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         except Exception as exc:
             raise ConnectionError(exc) from exc
 
+        # A new socket authenticates in the handshake below with current
+        # credentials, which replaces any AUTH deferred on the old one
+        self._re_auth_token = None
         try:
             if not self.redis_connect_func:
                 # Use the default on_connect function
@@ -1816,17 +1819,26 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
 
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         self._re_auth_token = token
 
     async def re_auth(self):
-        if self._re_auth_token is not None:
-            await self.send_command(
-                "AUTH",
-                self._re_auth_token.try_get("oid"),
-                self._re_auth_token.get_value(),
-            )
-            await self.read_response()
+        """
+        Send the pending AUTH, if any.
+
+        The token stays pending until this socket accepts it, or until the
+        connection opens a new socket, whose handshake authenticates with
+        current credentials. A connection that is disconnected, or marked for
+        reconnect, is skipped for that reason: the AUTH would go to a socket
+        that is about to be replaced. A token set while the AUTH is in flight
+        stays pending.
+        """
+        token = self._re_auth_token
+        if token is None or not self.is_connected or self.should_reconnect():
+            return
+        await self.send_command("AUTH", token.try_get("oid"), token.get_value())
+        await self.read_response()
+        if self._re_auth_token is token:
             self._re_auth_token = None
 
 
@@ -3403,6 +3415,17 @@ class ConnectionPool(
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool"""
+        # Run the listeners, such as a deferred AUTH, while the connection is
+        # still in use, so no other task can take it, and outside the pool
+        # lock, so their I/O does not block the pool. A listener error is
+        # raised once the connection is back.
+        listener_error = None
+        try:
+            await self._event_dispatcher.dispatch_async(
+                AsyncAfterConnectionReleasedEvent(connection)
+            )
+        except BaseException as e:
+            listener_error = e
         locked = False
         disconnect_failed = False
         try:
@@ -3430,7 +3453,7 @@ class ConnectionPool(
                     self._available_connections.append(connection)
         except BaseException as e:
             if disconnect_failed:
-                # It is back in the pool: still notify listeners and metrics.
+                # It is back in the pool: still record the metrics.
                 self._run_in_background(self._finish_release(connection))
             elif not locked and isinstance(e, asyncio.CancelledError):
                 # Cancelled while waiting for a contended lock: don't leak.
@@ -3438,11 +3461,11 @@ class ConnectionPool(
             raise
 
         await self._finish_release(connection)
+        if listener_error is not None:
+            raise listener_error
 
     async def _finish_release(self, connection: AbstractConnection) -> None:
-        # Record state transition: USED -> IDLE. Done before the listeners,
-        # which may await I/O and be cancelled, so the counts always match
-        # the pool.
+        # Record state transition: USED -> IDLE
         pool_name = get_pool_name(self)
         await record_connection_count(
             pool_name=pool_name,
@@ -3453,10 +3476,6 @@ class ConnectionPool(
             pool_name=pool_name,
             connection_state=ConnectionState.IDLE,
             counter=1,
-        )
-
-        await self._event_dispatcher.dispatch_async(
-            AsyncAfterConnectionReleasedEvent(connection)
         )
 
     def _release_in_background(self, connection: AbstractConnection) -> None:
@@ -3536,30 +3555,71 @@ class ConnectionPool(
             conn.retry = retry
 
     async def re_auth_callback(self, token: TokenInterface):
+        """
+        Send AUTH with ``token`` on every connected free connection, and defer
+        it to the next release of every in-use one.
+
+        A free connection whose AUTH fails keeps ``token`` pending, like an
+        in-use one. The first error is raised after every connection is
+        handled, an ``AuthenticationError`` first.
+        """
+        auth_error = None
         first_error = None
         async with self._lock:
-            for conn in self._available_connections:
-                try:
-                    await conn.retry.call_with_retry(
-                        lambda: conn.send_command(
-                            "AUTH", token.try_get("oid"), token.get_value()
-                        ),
-                        lambda error: self._mock(error),
-                    )
-                    await conn.retry.call_with_retry(
-                        lambda: conn.read_response(),
-                        lambda error: self._mock(error),
-                        is_retryable=lambda error: not isinstance(
-                            error, AuthenticationError
-                        ),
-                    )
-                except AuthenticationError:
-                    raise
-                except Exception as e:
-                    if first_error is None:
-                        first_error = e
+            # Send every AUTH before reading any reply, so the pool lock is
+            # held for about one round trip instead of one per connection
+            sent = []
+            # Replies read so far, in send order
+            done = 0
+            try:
+                for conn in self._available_connections:
+                    if not conn.is_connected:
+                        # It authenticates with current credentials when it
+                        # connects. Sending AUTH would connect it here, under the
+                        # pool lock.
+                        continue
+                    # Pending until the AUTH below succeeds
+                    conn.set_re_auth_token(token)
+                    try:
+                        await conn.retry.call_with_retry(
+                            lambda: conn.send_command(
+                                "AUTH", token.try_get("oid"), token.get_value()
+                            ),
+                            lambda error: self._mock(error),
+                        )
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        sent.append(conn)
+                for conn in sent:
+                    try:
+                        await conn.retry.call_with_retry(
+                            lambda: conn.read_response(),
+                            lambda error: self._mock(error),
+                            is_retryable=lambda error: not isinstance(
+                                error, AuthenticationError
+                            ),
+                        )
+                    except AuthenticationError as e:
+                        if auth_error is None:
+                            auth_error = e
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        conn.set_re_auth_token(None)
+                    done += 1
+            except BaseException:
+                # Interrupted, for example cancelled: the replies not read yet
+                # would be read by the next command on those connections
+                for conn in sent[done:]:
+                    conn._force_disconnect()
+                raise
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if auth_error is not None:
+            raise auth_error
         if first_error is not None:
             raise first_error
 
@@ -3727,18 +3787,25 @@ class BlockingConnectionPool(ConnectionPool):
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
-        locked = False
+        # Released outside the condition, so the listeners the release runs,
+        # such as a deferred AUTH, do not hold up the tasks waiting for a
+        # connection. The condition is taken only to wake one of them once the
+        # connection is back.
         try:
-            async with self._condition:
-                locked = True
-                try:
-                    await super().release(connection)
-                finally:
+            await super().release(connection)
+        finally:
+            try:
+                async with self._condition:
                     self._condition.notify()
-        except asyncio.CancelledError:
-            if not locked:
-                self._release_in_background(connection)
-            raise
+            except asyncio.CancelledError:
+                # Cancelled while waiting for the condition: still wake a
+                # waiter, or it can miss the returned connection
+                self._run_in_background(self._notify_waiter())
+                raise
+
+    async def _notify_waiter(self) -> None:
+        async with self._condition:
+            self._condition.notify()
 
 
 def __getattr__(name: str):

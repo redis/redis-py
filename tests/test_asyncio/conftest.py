@@ -13,7 +13,11 @@ from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider
-from tests.conftest import REDIS_INFO, get_credential_provider
+from tests.conftest import (
+    REDIS_INFO,
+    get_credential_provider,
+    stop_credential_provider,
+)
 
 
 async def _get_info(redis_url):
@@ -231,7 +235,9 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 @pytest_asyncio.fixture()
 async def credential_provider(request) -> CredentialProvider:
-    return get_credential_provider(request)
+    provider = get_credential_provider(request)
+    yield provider
+    stop_credential_provider(provider)
 
 
 async def wait_for_command(
@@ -299,24 +305,25 @@ async def _async_enable_keyspace_notifications(client, flags="KEA"):
     """
     Enable keyspace notifications on an async Redis server (standalone or cluster).
 
-    Returns a dict mapping a label to (connection, original_value, owns_conn).
+    Returns a dict mapping a label to (target_nodes kwargs, original_value). The
+    configuration goes through ``client``, so it uses the client's credentials.
     """
     cluster_mode = REDIS_INFO.get("cluster_enabled", False)
 
     original_configs = {}
     if cluster_mode:
         for node in client.get_primaries():
-            node_conn = redis.Redis(host=node.host, port=node.port)
-            original = await node_conn.config_get("notify-keyspace-events")
+            target = {"target_nodes": node}
+            original = await client.config_get("notify-keyspace-events", **target)
             original_configs[node.name] = (
-                node_conn,
+                target,
                 original.get("notify-keyspace-events", ""),
             )
-            await node_conn.config_set("notify-keyspace-events", flags)
+            await client.config_set("notify-keyspace-events", flags, **target)
     else:
         original = await client.config_get("notify-keyspace-events")
         original_configs["standalone"] = (
-            client,
+            {},
             original.get("notify-keyspace-events", ""),
         )
         await client.config_set("notify-keyspace-events", flags)
@@ -324,14 +331,12 @@ async def _async_enable_keyspace_notifications(client, flags="KEA"):
     return original_configs, cluster_mode
 
 
-async def _async_restore_keyspace_notifications(original_configs, cluster_mode):
-    for _name, (conn, original_value) in original_configs.items():
+async def _async_restore_keyspace_notifications(client, original_configs):
+    for _name, (target, original_value) in original_configs.items():
         try:
-            await conn.config_set("notify-keyspace-events", original_value)
+            await client.config_set("notify-keyspace-events", original_value, **target)
         except Exception:
             pass
-        if cluster_mode:
-            await conn.aclose()
 
 
 @pytest_asyncio.fixture()
@@ -344,13 +349,13 @@ async def async_r_with_keyspace_notifications(create_redis):
     In cluster mode, keyspace notifications are enabled on all primary nodes.
     """
     client = await create_redis()
-    original_configs, cluster_mode = await _async_enable_keyspace_notifications(
+    original_configs, _ = await _async_enable_keyspace_notifications(
         client, flags="KEA"
     )
     try:
         yield client
     finally:
-        await _async_restore_keyspace_notifications(original_configs, cluster_mode)
+        await _async_restore_keyspace_notifications(client, original_configs)
 
 
 @pytest_asyncio.fixture()
@@ -364,10 +369,10 @@ async def async_r_with_subkey_notifications(create_redis):
     Works for both standalone Redis and RedisCluster.
     """
     client = await create_redis()
-    original_configs, cluster_mode = await _async_enable_keyspace_notifications(
+    original_configs, _ = await _async_enable_keyspace_notifications(
         client, flags="KEASTIV"
     )
     try:
         yield client
     finally:
-        await _async_restore_keyspace_notifications(original_configs, cluster_mode)
+        await _async_restore_keyspace_notifications(client, original_configs)
