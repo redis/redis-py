@@ -578,3 +578,42 @@ async def test_hiredis_read_from_socket_shares_one_timeout_per_response(monkeypa
     assert timeout_count == 1
     assert parser._response_read_timeout is None
     assert parser._active_read_timeout is None
+
+
+@requires_hiredis
+async def test_hiredis_push_handler_is_not_bound_by_read_timeout():
+    # Cursor Bugbot (Medium): the per-read timeout context stayed armed
+    # across handle_push_response, so a slow push handler raised
+    # TimeoutError even though the socket never stalled. The timeout
+    # must close before the handler runs, like the Python parsers do:
+    # their per-read contexts close when each read returns.
+    conn, reader = make_hiredis_connection()
+    parser = conn._parser
+    parser._apply_read_timeout = True
+    parser._read_timeout = 0.05
+
+    handled = asyncio.Event()
+
+    async def slow_handler(response):
+        await asyncio.sleep(0.3)  # far longer than the 0.05 read timeout
+        handled.set()
+        return response
+
+    parser.set_pubsub_push_handler(slow_handler)
+
+    async def feed_push_then_reply():
+        # Arrive after read_response() starts waiting, so the socket
+        # read arms the timeout context the handler must outlive.
+        await asyncio.sleep(0.01)
+        reader.feed_data(
+            b">3\r\n$7\r\nmessage\r\n$7\r\nchannel\r\n$5\r\nhello\r\n+OK\r\n"
+        )
+
+    feeder = asyncio.create_task(feed_push_then_reply())
+    response = await conn.read_response()
+    await feeder
+
+    assert handled.is_set()
+    assert response == b"OK"
+    assert parser._response_read_timeout is None
+    assert parser._active_read_timeout is None

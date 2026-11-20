@@ -413,6 +413,21 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         # return True to indicate that data was read.
         return True
 
+    async def _close_response_read_timeout(self) -> None:
+        # Close the timeout context shared by this response's socket
+        # reads, if one was armed; a later socket read arms a fresh
+        # one. Called before a push handler runs, so a slow handler
+        # (maintenance reconnect, custom invalidation) is not bounded
+        # by the socket read deadline, and by read_response()'s
+        # finally as a safety net. This mirrors the Python parsers,
+        # whose per-read contexts close when each read returns.
+        if self._response_read_timeout is not None:
+            try:
+                await self._response_read_timeout.__aexit__(*sys.exc_info())
+            finally:
+                self._response_read_timeout = None
+                self._active_read_timeout = None
+
     async def read_response(
         self, disable_decoding: bool = False, push_request: bool = False
     ) -> Union[EncodableT, List[EncodableT]]:
@@ -440,6 +455,13 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
                     response, self._hiredis_PushNotificationType
                 ):
                     break
+                # The per-read timeout bounds socket reads only: close
+                # it before the push handler runs, so a handler that
+                # suspends (maintenance reconnect, custom invalidation)
+                # cannot raise TimeoutError while the socket never
+                # stalled. The next socket read, if one is needed,
+                # arms a fresh context in read_from_socket().
+                await self._close_response_read_timeout()
                 response = await self.handle_push_response(response)
                 if push_request:
                     return response
@@ -461,10 +483,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             return response
         finally:
             # Close the timeout context shared by this response's socket
-            # reads, if one was armed; a later response arms a fresh one.
-            if self._response_read_timeout is not None:
-                try:
-                    await self._response_read_timeout.__aexit__(*sys.exc_info())
-                finally:
-                    self._response_read_timeout = None
-                    self._active_read_timeout = None
+            # reads, if one is still armed; a later response arms a
+            # fresh one. Already closed (a no-op) when a push handler
+            # ran above.
+            await self._close_response_read_timeout()
