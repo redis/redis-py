@@ -23,19 +23,19 @@ r.delete(
 
 # STEP_START vadd
 res1 = r.vset().vadd("points", [1.0, 1.0], "pt:A")
-print(res1)  # >>> 1
+print(res1)  # >>> True
 
 res2 = r.vset().vadd("points", [-1.0, -1.0], "pt:B")
-print(res2)  # >>> 1
+print(res2)  # >>> True
 
 res3 = r.vset().vadd("points", [-1.0, 1.0], "pt:C")
-print(res3)  # >>> 1
+print(res3)  # >>> True
 
 res4 = r.vset().vadd("points", [1.0, -1.0], "pt:D")
-print(res4)  # >>> 1
+print(res4)  # >>> True
 
 res5 = r.vset().vadd("points", [1.0, 0], "pt:E")
-print(res5)  # >>> 1
+print(res5)  # >>> True
 
 res6 = r.type("points")
 print(res6)  # >>> vectorset
@@ -95,14 +95,14 @@ res14 = r.vset().vsetattr("points", "pt:A", {
     "name": "Point A",
     "description": "First point added"
 })
-print(res14)  # >>> 1
+print(res14)  # >>> True
 
 res15 = r.vset().vgetattr("points", "pt:A")
 print(res15)
 # >>> {'name': 'Point A', 'description': 'First point added'}
 
 res16 = r.vset().vsetattr("points", "pt:A", "")
-print(res16)  # >>> 1
+print(res16)  # >>> True
 
 res17 = r.vset().vgetattr("points", "pt:A")
 print(res17)  # >>> None
@@ -116,13 +116,13 @@ assert res17 is None
 
 # STEP_START vrem
 res18 = r.vset().vadd("points", [0, 0], "pt:F")
-print(res18)  # >>> 1
+print(res18)  # >>> True
 
 res19 = r.vset().vcard("points")
 print(res19)  # >>> 6
 
 res20 = r.vset().vrem("points", "pt:F")
-print(res20)  # >>> 1
+print(res20)  # >>> True
 
 res21 = r.vset().vcard("points")
 print(res21)  # >>> 5
@@ -164,31 +164,31 @@ res24 = r.vset().vsetattr("points", "pt:A", {
     "size": "large",
     "price": 18.99
 })
-print(res24)  # >>> 1
+print(res24)  # >>> True
 
 res25 = r.vset().vsetattr("points", "pt:B", {
     "size": "large",
     "price": 35.99
 })
-print(res25)  # >>> 1
+print(res25)  # >>> True
 
 res26 = r.vset().vsetattr("points", "pt:C", {
     "size": "large",
     "price": 25.99
 })
-print(res26)  # >>> 1
+print(res26)  # >>> True
 
 res27 = r.vset().vsetattr("points", "pt:D", {
     "size": "small",
     "price": 21.00
 })
-print(res27)  # >>> 1
+print(res27)  # >>> True
 
 res28 = r.vset().vsetattr("points", "pt:E", {
     "size": "small",
     "price": 17.75
 })
-print(res28)  # >>> 1
+print(res28)  # >>> True
 
 # Return elements in order of distance from point A whose
 # `size` attribute is `large`.
@@ -227,7 +227,7 @@ res31 = r.vset().vadd(
     "quantElement",
     quantization=QuantizationOptions.Q8
 )
-print(res31)  # >>> 1
+print(res31)  # >>> True
 
 res32 = r.vset().vemb("quantSetQ8", "quantElement")
 print(f"Q8: {res32}")
@@ -238,7 +238,7 @@ res33 = r.vset().vadd(
     "quantElement",
     quantization=QuantizationOptions.NOQUANT
 )
-print(res33)  # >>> 1
+print(res33)  # >>> True
 
 res34 = r.vset().vemb("quantSetNoQ", "quantElement")
 print(f"NOQUANT: {res34}")
@@ -249,7 +249,7 @@ res35 = r.vset().vadd(
     "quantElement",
     quantization=QuantizationOptions.BIN
 )
-print(res35)  # >>> 1
+print(res35)  # >>> True
 
 res36 = r.vset().vemb("quantSetBin", "quantElement")
 print(f"BIN: {res36}")
@@ -268,7 +268,7 @@ res37 = r.vset().vadd(
     values,
     "element"
 )
-print(res37)  # >>> 1
+print(res37)  # >>> True
 
 res38 = r.vset().vdim("setNotReduced")
 print(res38)  # >>> 300
@@ -279,7 +279,7 @@ res39 = r.vset().vadd(
     "element",
     reduce_dim=100
 )
-print(res39)  # >>> 1
+print(res39)  # >>> True
 
 res40 = r.vset().vdim("setReduced")  # >>> 100
 print(res40)
