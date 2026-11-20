@@ -157,13 +157,6 @@ class _TimeSeriesBase(TimeSeriesCommands):
                 lock=self.client._lock,
             )
 
-        elif self._is_async_client:
-            p = AsyncPipeline(
-                connection_pool=self.client.connection_pool,
-                response_callbacks=dict(self.client.response_callbacks),
-                transaction=transaction,
-                shard_hint=shard_hint,
-            )
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
@@ -192,3 +185,15 @@ class TimeSeries(_TimeSeriesBase):
 
 class AsyncTimeSeries(_TimeSeriesBase):
     _is_async_client: Literal[True] = True
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates an asyncio pipeline for the TimeSeries module, that can be
+        used for executing TimeSeries commands and core commands.
+        """
+        p = AsyncPipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=self._MODULE_CALLBACKS,
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        return p

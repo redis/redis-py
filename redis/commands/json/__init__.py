@@ -254,13 +254,6 @@ class _JSONBase(JSONCommands):
                 lock=self.client._lock,
             )
 
-        elif self._is_async_client:
-            p = AsyncPipeline(
-                connection_pool=self.client.connection_pool,
-                response_callbacks=dict(self.client.response_callbacks),
-                transaction=transaction,
-                shard_hint=shard_hint,
-            )
         else:
             p = Pipeline(
                 connection_pool=self.client.connection_pool,
@@ -292,6 +285,20 @@ class JSON(_JSONBase):
 
 class AsyncJSON(_JSONBase):
     _is_async_client: Literal[True] = True
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates an asyncio pipeline for the JSON module, that can be used for
+        executing JSON commands, as well as classic core commands.
+        """
+        p = AsyncPipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=dict(self.client.response_callbacks),
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        p._encode = self._encode
+        p._decode = self._decode
+        return p
 
     async def set_file(
         self,

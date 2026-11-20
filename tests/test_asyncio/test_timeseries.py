@@ -2046,7 +2046,7 @@ async def test_pipeline(decoded_r: redis.Redis):
         pipeline.add("with_pipeline", i, 1.1 * i)
     pipeline.set("k", "v")
     res = await pipeline.execute()
-    assert res == [True] + list(range(100)) + [True]
+    assert res == [True] + list(range(100)) + ["OK"]
 
     info = await decoded_r.ts().info("with_pipeline")
     assert_resp_response(
