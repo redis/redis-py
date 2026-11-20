@@ -93,6 +93,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     NoPermissionError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -1141,6 +1142,304 @@ class TestTopologyRefreshPacing:
         assert nodes_manager._failed_refreshes == 1
         assert "Redis Cluster cannot be connected" in str(raised.value)
         assert type(raised.value.__cause__) is ConnectionError
+
+    @staticmethod
+    def _readonly() -> ReadOnlyError:
+        return ReadOnlyError("You can't write against a read only replica.")
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("due", [True, False])
+    async def test_readonly_from_a_primary_asks_for_a_refresh_and_is_retried(
+        self, due
+    ) -> None:
+        """
+        Only a replica answers READONLY, so a node cached as a primary that
+        does was demoted by a failover. A command without keys gets no MOVED to
+        learn that from: the error asks for a topology refresh, which the retry
+        of the command runs once due.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        if due:
+            r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        primaries = len(r.get_primaries())
+        # One primary answers READONLY; the retry asks only that shard again
+        execute_command, _ = TestTopologyRefreshKeepsConnections._command_side_effect(
+            [self._readonly()]
+        )
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ) as execute,
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+        ):
+            await r.execute_command("FLUSHALL")
+
+        assert execute.call_count == primaries + 1
+        if due:
+            refresh.assert_awaited_once()
+            assert r._initialize is False
+        else:
+            refresh.assert_not_called()
+            assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    async def test_readonly_from_a_primary_is_raised_once_out_of_retries(
+        self,
+    ) -> None:
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 2)
+        )
+        primaries = len(r.get_primaries())
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=self._readonly()
+        ) as execute:
+            with pytest.raises(ReadOnlyError):
+                await r.execute_command("FLUSHALL")
+
+        assert execute.call_count == 3 * primaries
+        assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    async def test_readonly_from_a_replica_is_raised_at_once(self, pipeline) -> None:
+        """
+        A write sent to a replica, here by a nodes flag, is answered READONLY
+        whatever the topology is: no refresh is asked for, and it is not retried.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        replicas = len(r.get_replicas())
+
+        async def execute_pipeline(node, commands) -> bool:
+            for command in commands:
+                command.result = self._readonly()
+            return True
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=self._readonly(),
+            ) as execute,
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ) as execute_pipe,
+        ):
+            with pytest.raises(ReadOnlyError):
+                if pipeline:
+                    async with r.pipeline() as pipe:
+                        pipe.execute_command(
+                            "FLUSHALL", target_nodes=RedisCluster.REPLICAS
+                        )
+                        await pipe.execute()
+                else:
+                    await r.execute_command(
+                        "FLUSHALL", target_nodes=RedisCluster.REPLICAS
+                    )
+
+        assert (execute_pipe if pipeline else execute).call_count == replicas
+        assert r._initialize is False
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_pipeline_readonly_from_a_primary_asks_for_a_refresh_and_is_retried(
+        self,
+    ) -> None:
+        """
+        A pipeline retries a READONLY reply of a node cached as a primary as a
+        command does, after the refresh it asked for, and resends only the
+        command that got it.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        sent = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            failed = False
+            for command in commands:
+                name = command.args[0]
+                if name == "FT.CREATE" and name not in sent:
+                    command.result = self._readonly()
+                    failed = True
+                else:
+                    command.result = b"value"
+                sent.append(name)
+            return failed
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+        ):
+            async with r.pipeline() as pipe:
+                pipe.get("foo")
+                pipe.execute_command("FT.CREATE", "idx", "SCHEMA", "t", "TEXT")
+                assert await pipe.execute() == [b"value", b"value"]
+
+        assert sorted(sent) == ["FT.CREATE", "FT.CREATE", "GET"]
+        refresh.assert_awaited_once()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("commands", [1, 3])
+    async def test_pipeline_readonly_from_primaries_asks_for_one_refresh(
+        self, commands
+    ) -> None:
+        """
+        However many READONLY replies of nodes cached as primaries an attempt
+        reads, it asks for one topology refresh, and the retry for one more.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        sent = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            failed = False
+            for command in commands:
+                name = command.args[1]
+                if name not in sent:
+                    command.result = self._readonly()
+                    failed = True
+                else:
+                    command.result = b"OK"
+                sent.append(name)
+            return failed
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+            mock.patch.object(
+                r, "_request_refresh", wraps=r._request_refresh
+            ) as request_refresh,
+        ):
+            async with r.pipeline() as pipe:
+                for i in range(commands):
+                    pipe.execute_command("FT.CREATE", f"idx{i}", "SCHEMA", "t", "TEXT")
+                assert await pipe.execute() == [b"OK"] * commands
+
+        assert sorted(sent) == sorted([f"idx{i}" for i in range(commands)] * 2)
+        assert request_refresh.call_count == 2
+        refresh.assert_awaited_once()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    async def test_pipeline_readonly_from_the_default_node_replaces_it(
+        self, raise_on_error
+    ) -> None:
+        """
+        A pipeline that reads a READONLY of the default node replaces the node at
+        once, as a command does, without waiting for the refresh: a retry goes to
+        another primary, and so do the default-node commands that follow.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        demoted = r.get_default_node()
+
+        async def execute_pipeline(node, commands) -> bool:
+            for command in commands:
+                command.result = self._readonly() if node == demoted else b"OK"
+            return node == demoted
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                RedisCluster, "_refresh_topology", autospec=True
+            ) as refresh,
+        ):
+            async with r.pipeline() as pipe:
+                pipe.execute_command(
+                    "FT.CREATE",
+                    "idx",
+                    "SCHEMA",
+                    "t",
+                    "TEXT",
+                    target_nodes=RedisCluster.DEFAULT_NODE,
+                )
+                result = await pipe.execute(raise_on_error=raise_on_error)
+
+        # The refresh it asked for is not due yet
+        refresh.assert_not_called()
+        assert r.get_default_node() != demoted
+        if raise_on_error:
+            assert result == [b"OK"]
+        else:
+            assert isinstance(result[0], ReadOnlyError)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("retried_with", [None, "GET"])
+    async def test_pipeline_readonly_from_a_named_primary_is_not_rerouted(
+        self, retried_with
+    ) -> None:
+        """
+        A command sent to a node the caller named is not retried on READONLY,
+        as a command with target nodes is not, and an attempt retried for
+        another command sends it to the same node again: routed by its own
+        policy, a FLUSHALL would run on every primary.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        target = r.get_primaries()[0]
+        sent = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            failed = False
+            for command in commands:
+                name = command.args[0]
+                sent.append((name, node.name))
+                if name == "FLUSHALL" or sent.count((name, node.name)) == 1:
+                    command.result = self._readonly()
+                    failed = True
+                else:
+                    command.result = b"OK"
+            return failed
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(RedisCluster, "_refresh_topology", autospec=True),
+        ):
+            async with r.pipeline() as pipe:
+                if retried_with:
+                    pipe.execute_command(retried_with, "foo")
+                pipe.execute_command("FLUSHALL", target_nodes=target)
+                with pytest.raises(ReadOnlyError):
+                    await pipe.execute()
+
+        flushed = [name for command, name in sent if command == "FLUSHALL"]
+        assert flushed == [target.name] * (2 if retried_with else 1)
+        assert r._initialize is True
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
@@ -8382,25 +8681,110 @@ class TestNodesManager:
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
-    async def test_re_auth_stops_at_authentication_error(self) -> None:
+    async def test_re_auth_continues_past_authentication_error(self) -> None:
         """
-        A rejected token is rejected by every connection, so the first
-        AuthenticationError stops the re-authentication. Every connection
-        stays in the free queue.
+        One rejected AUTH does not stop the others. The rejected connection
+        keeps the token pending, an in-use connection gets it too, and every
+        free connection stays in the free queue.
         """
         node = ClusterNode(default_host, 7000)
         failing = self._re_auth_connection(False)
         failing.retry = Retry(NoBackoff(), 3)
         failing.read_response.side_effect = AuthenticationError("expired")
         other = self._re_auth_connection(False)
+        in_use = self._re_auth_connection(False)
         node._free.extend([failing, other])
+        node._connections.extend([failing, other, in_use])
+        token = mock.Mock()
 
         with pytest.raises(AuthenticationError, match="expired"):
-            await node.re_auth_callback(mock.Mock())
+            await node.re_auth_callback(token)
 
         failing.read_response.assert_awaited_once()
-        other.send_command.assert_not_awaited()
+        assert failing.set_re_auth_token.call_args_list == [
+            mock.call(None),
+            mock.call(token),
+        ]
+        other.send_command.assert_awaited_once()
+        other.set_re_auth_token.assert_called_once_with(None)
+        in_use.set_re_auth_token.assert_called_once_with(token)
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
+        # Not connected, so the node is not reported unclosed when collected
+        for connection in (failing, other, in_use):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_skips_connections_created_while_it_runs(self) -> None:
+        """
+        A connection created while the AUTH replies are awaited has
+        authenticated with the current token in its handshake.
+        """
+        node = ClusterNode(default_host, 7000)
+        free = self._re_auth_connection(False)
+        created = self._re_auth_connection(False)
+        node._free.append(free)
+        node._connections.append(free)
+
+        async def read_response(*args, **kwargs):
+            # Another task opens a connection meanwhile
+            node._connections.append(created)
+
+        free.read_response.side_effect = read_response
+
+        await node.re_auth_callback(mock.Mock())
+
+        created.set_re_auth_token.assert_not_called()
+        for connection in (free, created):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_cancelled_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ) -> None:
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply. Every connection still goes back
+        to the free queue.
+        """
+        node = ClusterNode(default_host, 7000)
+        first = self._re_auth_connection(False)
+        first.read_response.side_effect = asyncio.CancelledError()
+        second = self._re_auth_connection(False)
+        node._free.extend([first, second])
+
+        with pytest.raises(asyncio.CancelledError):
+            await node.re_auth_callback(mock.Mock())
+
+        first._force_disconnect.assert_called_once()
+        second._force_disconnect.assert_called_once()
+        second.read_response.assert_not_awaited()
+        assert sorted(map(id, node._free)) == sorted(map(id, [first, second]))
+        for connection in (first, second):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_acquire_runs_the_deferred_auth_without_raising(self) -> None:
+        """
+        The AUTH a token renewal deferred while a connection was in use runs
+        when it is next acquired, and a rejection does not fail the command
+        about to use it.
+        """
+        node = ClusterNode(default_host, 7000)
+        accepted = self._re_auth_connection(False)
+        rejected = self._re_auth_connection(False)
+        rejected.re_auth.side_effect = AuthenticationError("rejected")
+        disconnected = self._re_auth_connection(False, connected=False)
+
+        await node._prepare_acquired_connection(accepted)
+        await node._prepare_acquired_connection(rejected)
+        await node._prepare_acquired_connection(disconnected)
+
+        accepted.re_auth.assert_awaited_once()
+        rejected.re_auth.assert_awaited_once()
+        # It authenticates when it connects
+        disconnected.re_auth.assert_not_awaited()
+        for connection in (accepted, rejected):
+            connection.is_connected = False
 
     @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(

@@ -1,7 +1,10 @@
+import logging
+import time
 from unittest.mock import Mock, AsyncMock
 
 import pytest
 
+from redis import event
 from redis.credentials import StreamingCredentialProvider
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
@@ -11,7 +14,7 @@ from redis.event import (
     AsyncEventListenerInterface,
     RegisterReAuthForPooledConnections,
 )
-from redis.exceptions import ConnectionError
+from redis.exceptions import AuthenticationError, ConnectionError
 
 
 @pytest.mark.fixed_client
@@ -198,3 +201,63 @@ class TestRegisterReAuthForPooledConnections:
 
         for pool in pools:
             pool.re_auth_callback.assert_awaited_once_with(token)
+
+
+class TestReAuthConnectionListener:
+    @pytest.fixture(autouse=True)
+    def _fresh_rate_limit(self, monkeypatch):
+        monkeypatch.setattr(event, "_last_re_auth_failure_warning", float("-inf"))
+        monkeypatch.setattr(event, "_suppressed_re_auth_failures", 0)
+
+    def test_failure_is_logged_not_raised(self, caplog):
+        """A deferred AUTH runs between commands and must not fail one."""
+        connection = Mock()
+        connection.re_auth.side_effect = AuthenticationError("rejected")
+
+        with caplog.at_level(logging.WARNING, logger="redis.event"):
+            event.ReAuthConnectionListener().listen(
+                event.AfterConnectionReleasedEvent(connection)
+            )
+
+        connection.re_auth.assert_called_once()
+        assert "Deferred re-authentication" in caplog.text
+
+    async def test_async_failure_is_logged_not_raised(self, caplog):
+        connection = Mock()
+        connection.re_auth = AsyncMock(side_effect=ConnectionError("closed"))
+
+        with caplog.at_level(logging.WARNING, logger="redis.event"):
+            await event.AsyncReAuthConnectionListener().listen(
+                event.AsyncAfterConnectionReleasedEvent(connection)
+            )
+
+        connection.re_auth.assert_awaited_once()
+        assert "Deferred re-authentication" in caplog.text
+
+    def test_failures_are_warned_at_most_once_per_interval(self, caplog, monkeypatch):
+        """Every connection logs on every retry, which must not flood the log."""
+        connection = Mock()
+        connection.re_auth.side_effect = AuthenticationError("rejected")
+        listener = event.ReAuthConnectionListener()
+        caplog.set_level(logging.DEBUG, logger="redis.event")
+
+        for _ in range(3):
+            listener.listen(event.AfterConnectionReleasedEvent(connection))
+
+        assert [r.levelno for r in caplog.records] == [
+            logging.WARNING,
+            logging.DEBUG,
+            logging.DEBUG,
+        ]
+
+        # The next warning, once the interval has passed, counts the others
+        monkeypatch.setattr(
+            event,
+            "_last_re_auth_failure_warning",
+            time.monotonic() - event._RE_AUTH_FAILURE_WARNING_INTERVAL,
+        )
+        caplog.clear()
+        listener.listen(event.AfterConnectionReleasedEvent(connection))
+
+        assert [r.levelno for r in caplog.records] == [logging.WARNING]
+        assert "2 failures since the last warning" in caplog.text

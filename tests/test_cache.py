@@ -3793,3 +3793,35 @@ class TestUnitCacheProxyConnectionInvalidations:
         proxy._process_pending_invalidations()
 
         assert cache.size == 1
+
+    def test_deferred_auth_holds_the_pool_lock(self):
+        """
+        A cache hit on another connection drains this one under the pool lock,
+        and the drain reads ordinary replies too, so it must not run while the
+        AUTH reply is in flight.
+        """
+        pool_lock = threading.RLock()
+        conn = MagicMock()
+        proxy = redis.connection.CacheProxyConnection(
+            conn, DefaultCache(CacheConfig(max_size=5)), pool_lock
+        )
+        auth_in_flight = threading.Event()
+        finish_auth = threading.Event()
+
+        def re_auth():
+            auth_in_flight.set()
+            assert finish_auth.wait(timeout=5)
+
+        conn.re_auth.side_effect = re_auth
+        worker = threading.Thread(target=proxy.re_auth)
+        worker.start()
+        try:
+            assert auth_in_flight.wait(timeout=5)
+            # What a draining connection would have to take first
+            assert not pool_lock.acquire(blocking=False)
+        finally:
+            finish_auth.set()
+            worker.join(timeout=5)
+
+        assert pool_lock.acquire(blocking=False)
+        pool_lock.release()
