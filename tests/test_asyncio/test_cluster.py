@@ -8355,25 +8355,85 @@ class TestNodesManager:
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
 
     @pytest.mark.fixed_client
-    async def test_re_auth_stops_at_authentication_error(self) -> None:
+    async def test_re_auth_continues_past_authentication_error(self) -> None:
         """
-        A rejected token is rejected by every connection, so the first
-        AuthenticationError stops the re-authentication. Every connection
-        stays in the free queue.
+        One rejected AUTH does not stop the others. The rejected connection
+        keeps the token pending, an in-use connection gets it too, and every
+        free connection stays in the free queue.
         """
         node = ClusterNode(default_host, 7000)
         failing = self._re_auth_connection(False)
         failing.retry = Retry(NoBackoff(), 3)
         failing.read_response.side_effect = AuthenticationError("expired")
         other = self._re_auth_connection(False)
+        in_use = self._re_auth_connection(False)
         node._free.extend([failing, other])
+        node._connections.extend([failing, other, in_use])
+        token = mock.Mock()
 
         with pytest.raises(AuthenticationError, match="expired"):
-            await node.re_auth_callback(mock.Mock())
+            await node.re_auth_callback(token)
 
         failing.read_response.assert_awaited_once()
-        other.send_command.assert_not_awaited()
+        assert failing.set_re_auth_token.call_args_list == [
+            mock.call(None),
+            mock.call(token),
+        ]
+        other.send_command.assert_awaited_once()
+        other.set_re_auth_token.assert_called_once_with(None)
+        in_use.set_re_auth_token.assert_called_once_with(token)
         assert sorted(map(id, node._free)) == sorted(map(id, [failing, other]))
+        # Not connected, so the node is not reported unclosed when collected
+        for connection in (failing, other, in_use):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_re_auth_skips_connections_created_while_it_runs(self) -> None:
+        """
+        A connection created while the AUTH replies are awaited has
+        authenticated with the current token in its handshake.
+        """
+        node = ClusterNode(default_host, 7000)
+        free = self._re_auth_connection(False)
+        created = self._re_auth_connection(False)
+        node._free.append(free)
+        node._connections.append(free)
+
+        async def read_response(*args, **kwargs):
+            # Another task opens a connection meanwhile
+            node._connections.append(created)
+
+        free.read_response.side_effect = read_response
+
+        await node.re_auth_callback(mock.Mock())
+
+        created.set_re_auth_token.assert_not_called()
+        for connection in (free, created):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
+    async def test_acquire_runs_the_deferred_auth_without_raising(self) -> None:
+        """
+        The AUTH a token renewal deferred while a connection was in use runs
+        when it is next acquired, and a rejection does not fail the command
+        about to use it.
+        """
+        node = ClusterNode(default_host, 7000)
+        accepted = self._re_auth_connection(False)
+        rejected = self._re_auth_connection(False)
+        rejected.re_auth.side_effect = AuthenticationError("rejected")
+        disconnected = self._re_auth_connection(False, connected=False)
+
+        await node._prepare_acquired_connection(accepted)
+        await node._prepare_acquired_connection(rejected)
+        await node._prepare_acquired_connection(disconnected)
+
+        accepted.re_auth.assert_awaited_once()
+        rejected.re_auth.assert_awaited_once()
+        # It authenticates when it connects
+        disconnected.re_auth.assert_not_awaited()
+        for connection in (accepted, rejected):
+            connection.is_connected = False
 
     @pytest.mark.fixed_client
     async def test_re_auth_survives_topology_refresh_during_iteration(

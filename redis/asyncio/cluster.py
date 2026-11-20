@@ -131,6 +131,7 @@ from redis.event import (
     AsyncAfterSlotsCacheRefreshEvent,
     AsyncEventListenerInterface,
     EventDispatcher,
+    _log_re_auth_failure,
 )
 from redis.exceptions import (
     AskError,
@@ -2585,6 +2586,15 @@ class ClusterNode:
             # The socket is dead or dirty, so there is no clean close to wait
             # for, and a close that times out must not fail the caller
             await connection.disconnect(nowait=True)
+            return
+
+        # The AUTH a token renewal deferred while the connection was in use,
+        # if any. A failure must not fail the command about to use the
+        # connection, so it is logged instead, and the token stays pending.
+        try:
+            await connection.re_auth()
+        except Exception as e:
+            _log_re_auth_failure(connection, e)
 
     def release(self, connection: Connection) -> None:
         """
@@ -2831,12 +2841,31 @@ class ClusterNode:
                 self.release(connection)
 
     async def re_auth_callback(self, token: TokenInterface):
+        """
+        Send AUTH with ``token`` on every connected free connection, and defer
+        it to the next acquire of every in-use one.
+
+        A free connection whose AUTH fails keeps ``token`` pending, like an
+        in-use one. The first error is raised after every connection is
+        handled, an ``AuthenticationError`` first.
+        """
+        auth_error = None
         first_error = None
         tmp_queue = collections.deque()
+        # A connection created while this awaits authenticates with the
+        # current token in its handshake, so only these need it deferred
+        existing = list(self._connections)
         try:
+            # Send every AUTH before reading any reply, so the free
+            # connections are out of the queue for about one round trip
+            # instead of one per connection
+            sent = []
             while self._free:
                 conn = self._free.popleft()
                 tmp_queue.append(conn)
+                # This AUTH replaces any deferred one, so the prepare below
+                # does not send that one first
+                conn.set_re_auth_token(None)
                 if conn.should_reconnect() or not conn.is_connected:
                     # Not connected, or marked for reconnect: it authenticates
                     # with fresh credentials when it (re)connects on acquire,
@@ -2856,6 +2885,14 @@ class ClusterNode:
                         ),
                         lambda error: self._mock(error),
                     )
+                except Exception as e:
+                    conn.set_re_auth_token(token)
+                    if first_error is None:
+                        first_error = e
+                else:
+                    sent.append(conn)
+            for conn in sent:
+                try:
                     await conn.retry.call_with_retry(
                         lambda: conn.read_response(),
                         lambda error: self._mock(error),
@@ -2863,16 +2900,25 @@ class ClusterNode:
                             error, AuthenticationError
                         ),
                     )
-                except AuthenticationError:
-                    raise
+                except AuthenticationError as e:
+                    conn.set_re_auth_token(token)
+                    if auth_error is None:
+                        auth_error = e
                 except Exception as e:
+                    conn.set_re_auth_token(token)
                     if first_error is None:
                         first_error = e
+            free = set(tmp_queue)
+            for conn in existing:
+                if conn not in free:
+                    conn.set_re_auth_token(token)
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised
             while tmp_queue:
                 self._free.append(tmp_queue.popleft())
+        if auth_error is not None:
+            raise auth_error
         if first_error is not None:
             raise first_error
 

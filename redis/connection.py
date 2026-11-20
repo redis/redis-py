@@ -330,7 +330,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         pass
 
     @abstractmethod
@@ -1343,6 +1343,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 conn_error = None
 
         self._sock = sock
+        # A new socket authenticates in the handshake below with current
+        # credentials, which replaces any AUTH deferred on the old one
+        self._re_auth_token = None
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
@@ -1864,17 +1867,25 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
         self._handshake_metadata = value
 
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         self._re_auth_token = token
 
     def re_auth(self):
-        if self._re_auth_token is not None:
-            self.send_command(
-                "AUTH",
-                self._re_auth_token.try_get("oid"),
-                self._re_auth_token.get_value(),
-            )
-            self.read_response()
+        """
+        Send the pending AUTH, if any.
+
+        The token stays pending until this socket accepts it, or until the
+        connection opens a new socket, whose handshake authenticates with
+        current credentials. A disconnected connection is skipped for that
+        reason: an AUTH would first reconnect it. A token set while the AUTH is
+        in flight stays pending.
+        """
+        token = self._re_auth_token
+        if token is None or self._sock is None:
+            return
+        self.send_command("AUTH", token.try_get("oid"), token.get_value())
+        self.read_response()
+        if self._re_auth_token is token:
             self._re_auth_token = None
 
     def _get_socket(self) -> Optional[socket.socket]:
@@ -2734,7 +2745,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         return self._conn.handshake_metadata
 
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         self._conn.set_re_auth_token(token)
 
     def re_auth(self):
@@ -4432,6 +4443,20 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
+        try:
+            # Run the listeners, such as a deferred AUTH, while the connection
+            # is still in use, so no other thread can take it, and outside the
+            # pool lock, so their I/O does not block the pool
+            if connection in self._in_use_connections and self.owns_connection(
+                connection
+            ):
+                self._event_dispatcher.dispatch(
+                    AfterConnectionReleasedEvent(connection)
+                )
+        finally:
+            self._release(connection)
+
+    def _release(self, connection: "Connection") -> None:
         with self._lock:
             try:
                 self._in_use_connections.remove(connection)
@@ -4449,9 +4474,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         )
                     connection.disconnect()
                 self._available_connections.append(connection)
-                self._event_dispatcher.dispatch(
-                    AfterConnectionReleasedEvent(connection)
-                )
 
                 # Record state transition: USED -> IDLE
                 pool_name = get_pool_name(self)
@@ -4533,9 +4555,28 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
+        """
+        Send AUTH with ``token`` on every connected free connection, and defer
+        it to the next release of every in-use one.
+
+        A free connection whose AUTH fails keeps ``token`` pending, like an
+        in-use one. The first error is raised after every connection is
+        handled, an ``AuthenticationError`` first.
+        """
+        auth_error = None
         first_error = None
         with self._lock:
+            # Send every AUTH before reading any reply, so the pool lock is
+            # held for about one round trip instead of one per connection
+            sent = []
             for conn in self._available_connections:
+                if not conn.is_connected:
+                    # It authenticates with current credentials when it
+                    # connects. Sending AUTH would connect it here, under the
+                    # pool lock.
+                    continue
+                # Pending until the AUTH below succeeds
+                conn.set_re_auth_token(token)
                 try:
                     conn.retry.call_with_retry(
                         lambda: conn.send_command(
@@ -4543,6 +4584,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         ),
                         lambda error: self._mock(error),
                     )
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
+                else:
+                    sent.append(conn)
+            for conn in sent:
+                try:
                     conn.retry.call_with_retry(
                         lambda: conn.read_response(),
                         lambda error: self._mock(error),
@@ -4550,13 +4598,18 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                             error, AuthenticationError
                         ),
                     )
-                except AuthenticationError:
-                    raise
+                except AuthenticationError as e:
+                    if auth_error is None:
+                        auth_error = e
                 except Exception as e:
                     if first_error is None:
                         first_error = e
+                else:
+                    conn.set_re_auth_token(None)
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if auth_error is not None:
+            raise auth_error
         if first_error is not None:
             raise first_error
 
