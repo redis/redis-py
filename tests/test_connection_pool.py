@@ -269,6 +269,31 @@ class TestConnectionPool:
         disconnected.send_command.assert_not_called()
         disconnected.set_re_auth_token.assert_not_called()
 
+    @pytest.mark.fixed_client
+    def test_interrupted_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ):
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply.
+        """
+
+        class Interrupt(BaseException):
+            pass
+
+        pool = self.get_pool(connection_class=DummyConnection)
+        first = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        first.read_response.side_effect = Interrupt()
+        second = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        pool._available_connections.extend([first, second])
+
+        with pytest.raises(Interrupt):
+            pool.re_auth_callback(mock.Mock())
+
+        first.disconnect.assert_called_once()
+        second.disconnect.assert_called_once()
+        second.read_response.assert_not_called()
+
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
@@ -1669,6 +1694,19 @@ class TestDeferredReAuthOnRelease:
         pool.release(connection)
 
         connection.send_command.assert_not_called()
+        assert connection._re_auth_token is token
+
+    def test_connection_marked_for_reconnect_skips_the_auth(self):
+        """Its socket is about to be replaced, and may be slow or gone."""
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.mark_for_reconnect()
+        connection.disconnect = mock.Mock()
+
+        pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
         assert connection._re_auth_token is token
 
     def test_new_socket_replaces_the_pending_auth(self):

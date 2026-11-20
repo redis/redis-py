@@ -2860,6 +2860,8 @@ class ClusterNode:
             # connections are out of the queue for about one round trip
             # instead of one per connection
             sent = []
+            # Replies read so far, in send order
+            done = 0
             while self._free:
                 conn = self._free.popleft()
                 tmp_queue.append(conn)
@@ -2908,10 +2910,17 @@ class ClusterNode:
                     conn.set_re_auth_token(token)
                     if first_error is None:
                         first_error = e
+                done += 1
             free = set(tmp_queue)
             for conn in existing:
                 if conn not in free:
                     conn.set_re_auth_token(token)
+        except BaseException:
+            # Interrupted, for example cancelled: the replies not read yet
+            # would be read by the next command on those connections
+            for conn in sent[done:]:
+                conn._force_disconnect()
+            raise
         finally:
             # Return every popped connection to the free queue, also when a
             # re-authentication raised

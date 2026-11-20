@@ -1876,12 +1876,13 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
         The token stays pending until this socket accepts it, or until the
         connection opens a new socket, whose handshake authenticates with
-        current credentials. A disconnected connection is skipped for that
-        reason: an AUTH would first reconnect it. A token set while the AUTH is
-        in flight stays pending.
+        current credentials. A connection that is disconnected, or marked for
+        reconnect, is skipped for that reason: the AUTH would go to a socket
+        that is about to be replaced. A token set while the AUTH is in flight
+        stays pending.
         """
         token = self._re_auth_token
-        if token is None or self._sock is None:
+        if token is None or self._sock is None or self.should_reconnect():
             return
         self.send_command("AUTH", token.try_get("oid"), token.get_value())
         self.read_response()
@@ -4569,43 +4570,53 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             # Send every AUTH before reading any reply, so the pool lock is
             # held for about one round trip instead of one per connection
             sent = []
-            for conn in self._available_connections:
-                if not conn.is_connected:
-                    # It authenticates with current credentials when it
-                    # connects. Sending AUTH would connect it here, under the
-                    # pool lock.
-                    continue
-                # Pending until the AUTH below succeeds
-                conn.set_re_auth_token(token)
-                try:
-                    conn.retry.call_with_retry(
-                        lambda: conn.send_command(
-                            "AUTH", token.try_get("oid"), token.get_value()
-                        ),
-                        lambda error: self._mock(error),
-                    )
-                except Exception as e:
-                    if first_error is None:
-                        first_error = e
-                else:
-                    sent.append(conn)
-            for conn in sent:
-                try:
-                    conn.retry.call_with_retry(
-                        lambda: conn.read_response(),
-                        lambda error: self._mock(error),
-                        is_retryable=lambda error: not isinstance(
-                            error, AuthenticationError
-                        ),
-                    )
-                except AuthenticationError as e:
-                    if auth_error is None:
-                        auth_error = e
-                except Exception as e:
-                    if first_error is None:
-                        first_error = e
-                else:
-                    conn.set_re_auth_token(None)
+            # Replies read so far, in send order
+            done = 0
+            try:
+                for conn in self._available_connections:
+                    if not conn.is_connected:
+                        # It authenticates with current credentials when it
+                        # connects. Sending AUTH would connect it here, under the
+                        # pool lock.
+                        continue
+                    # Pending until the AUTH below succeeds
+                    conn.set_re_auth_token(token)
+                    try:
+                        conn.retry.call_with_retry(
+                            lambda: conn.send_command(
+                                "AUTH", token.try_get("oid"), token.get_value()
+                            ),
+                            lambda error: self._mock(error),
+                        )
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        sent.append(conn)
+                for conn in sent:
+                    try:
+                        conn.retry.call_with_retry(
+                            lambda: conn.read_response(),
+                            lambda error: self._mock(error),
+                            is_retryable=lambda error: not isinstance(
+                                error, AuthenticationError
+                            ),
+                        )
+                    except AuthenticationError as e:
+                        if auth_error is None:
+                            auth_error = e
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        conn.set_re_auth_token(None)
+                    done += 1
+            except BaseException:
+                # Interrupted, for example cancelled: the replies not read yet
+                # would be read by the next command on those connections
+                for conn in sent[done:]:
+                    conn.disconnect()
+                raise
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
         if auth_error is not None:

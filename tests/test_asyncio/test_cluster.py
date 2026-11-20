@@ -8412,6 +8412,31 @@ class TestNodesManager:
             connection.is_connected = False
 
     @pytest.mark.fixed_client
+    async def test_cancelled_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ) -> None:
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply. Every connection still goes back
+        to the free queue.
+        """
+        node = ClusterNode(default_host, 7000)
+        first = self._re_auth_connection(False)
+        first.read_response.side_effect = asyncio.CancelledError()
+        second = self._re_auth_connection(False)
+        node._free.extend([first, second])
+
+        with pytest.raises(asyncio.CancelledError):
+            await node.re_auth_callback(mock.Mock())
+
+        first._force_disconnect.assert_called_once()
+        second._force_disconnect.assert_called_once()
+        second.read_response.assert_not_awaited()
+        assert sorted(map(id, node._free)) == sorted(map(id, [first, second]))
+        for connection in (first, second):
+            connection.is_connected = False
+
+    @pytest.mark.fixed_client
     async def test_acquire_runs_the_deferred_auth_without_raising(self) -> None:
         """
         The AUTH a token renewal deferred while a connection was in use runs
