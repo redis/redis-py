@@ -4988,6 +4988,13 @@ class BlockingConnectionPool(ConnectionPool):
         # Make sure we haven't changed process.
         self._checkpid()
 
+        # Run the listeners, such as a deferred AUTH, while the connection is
+        # still out of the queue, so no other thread can take it, and outside
+        # the pool lock, so their I/O does not block the pool. A connection
+        # the pool no longer owns is disconnected below, so it gets no AUTH.
+        if self.owns_connection(connection):
+            self._event_dispatcher.dispatch(AfterConnectionReleasedEvent(connection))
+
         locked = False
         try:
             if self._in_maintenance:
@@ -5027,37 +5034,21 @@ class BlockingConnectionPool(ConnectionPool):
             # Put the connection back into the pool.
             pool_name = get_pool_name(self)
             try:
-                # Dispatch while the connection is still out of the queue:
-                # get_connection() does not take the lock, so a deferred
-                # re-auth would otherwise race the next checkout.
-                self._event_dispatcher.dispatch(
-                    AfterConnectionReleasedEvent(connection)
-                )
-            except Exception:
-                # Don't raise: the connection goes back in the queue below, and
-                # a caller still holding it (Pipeline.reset() drops it only
-                # after release() returns) would release it again and queue it
-                # twice. Drop the token and the socket instead, so the next
-                # checkout reconnects with fresh credentials.
-                connection.set_re_auth_token(None)
-                connection.disconnect()
-            finally:
-                try:
-                    self.pool.put_nowait(connection)
+                self.pool.put_nowait(connection)
 
-                    # Record state transition: USED -> IDLE
-                    record_connection_count(
-                        pool_name=pool_name,
-                        connection_state=ConnectionState.USED,
-                        counter=-1,
-                    )
-                    record_connection_count(
-                        pool_name=pool_name,
-                        connection_state=ConnectionState.IDLE,
-                        counter=1,
-                    )
-                except Full:
-                    pass
+                # Record state transition: USED -> IDLE
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.USED,
+                    counter=-1,
+                )
+                record_connection_count(
+                    pool_name=pool_name,
+                    connection_state=ConnectionState.IDLE,
+                    counter=1,
+                )
+            except Full:
+                pass
         finally:
             if locked:
                 self._lock.release()
