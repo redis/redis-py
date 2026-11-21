@@ -16,6 +16,8 @@ from redis.observability.recorder import (
 from redis.utils import check_protocol_version, deprecated_function
 
 if TYPE_CHECKING:
+    from redis.asyncio.client import PubSub as AsyncPubSub
+    from redis.client import PubSub
     from redis.maint_notifications import (
         MaintenanceNotification,
         MaintenanceState,
@@ -409,14 +411,17 @@ class AfterPubSubConnectionInstantiationEvent:
         pubsub_connection,
         connection_pool,
         client_type: ClientType,
-        connection_lock: Union[threading.RLock, asyncio.Lock],
-        pubsub=None,
+        connection_lock: "threading.RLock | asyncio.Lock",
+        pubsub: "PubSub | AsyncPubSub | None" = None,
     ):
         self._pubsub_connection = pubsub_connection
         self._connection_pool = connection_pool
         self._client_type = client_type
         self._connection_lock = connection_lock
-        self._pubsub = pubsub
+        # Held weakly, so a listener that keeps the event does not keep a
+        # dropped PubSub from being garbage collected and releasing its
+        # connection
+        self._pubsub_ref = weakref.ref(pubsub) if pubsub is not None else None
 
     @property
     def pubsub_connection(self):
@@ -435,8 +440,9 @@ class AfterPubSubConnectionInstantiationEvent:
         return self._connection_lock
 
     @property
-    def pubsub(self):
-        return self._pubsub
+    def pubsub(self) -> "PubSub | AsyncPubSub | None":
+        """The PubSub that created the connection, if it is still alive."""
+        return self._pubsub_ref() if self._pubsub_ref is not None else None
 
 
 class AfterAsyncClusterInstantiationEvent:
@@ -664,8 +670,8 @@ class RegisterReAuthForPubSub(EventListenerInterface):
             self._connection_pool = event.connection_pool
             self._client_type = event.client_type
             self._connection_lock = event.connection_lock
-            # A weak reference, so the listener does not keep a dropped PubSub
-            # from being garbage collected and releasing its connection
+            # Weak, like the event's own reference: a dropped PubSub must
+            # still be collected and release its connection
             self._pubsub = (
                 weakref.ref(event.pubsub) if event.pubsub is not None else None
             )

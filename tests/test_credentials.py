@@ -1,4 +1,5 @@
 import functools
+import gc
 import random
 import string
 import threading
@@ -642,6 +643,127 @@ class TestStreamingCredentialProvider:
         mock_pubsub_connection.send_command.assert_called_once_with(
             "SUBSCRIBE", "test", check_health=True
         )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_dropped_pub_sub_releases_connection(self, credential_provider):
+        mock_pubsub_connection = Mock(spec=ConnectionInterface)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.should_reconnect = Mock(return_value=False)
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
+        mock_pubsub_connection.db = 0
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_pubsub_connection
+        mock_pool._available_connections = []
+        mock_pool._lock = threading.RLock()
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        p.subscribe("test")
+        mock_pubsub_connection.send_command.assert_called_once_with(
+            "SUBSCRIBE", "test", check_health=True
+        )
+        # The mocks recorded on_connect, a bound method that would keep the
+        # pubsub alive on its own
+        mock_pool.reset_mock()
+        mock_pubsub_connection.reset_mock()
+
+        # The re-auth listener must not keep the pubsub alive: a pubsub dropped
+        # without close() still has to run __del__ and return its connection
+        del p
+        gc.collect()
+        mock_pool.release.assert_called_once_with(mock_pubsub_connection)
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_close_pub_sub_waits_for_in_flight_re_auth(self, credential_provider):
+        order = []
+        auth_sent = threading.Event()
+        released = threading.Event()
+
+        mock_pubsub_connection = Mock(spec=ConnectionInterface)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.should_reconnect = Mock(return_value=False)
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
+        mock_pubsub_connection.db = 0
+
+        def send_command(*args, **kwargs):
+            if args[0] == "AUTH" and not auth_sent.is_set():
+                order.append("auth sent")
+                auth_sent.set()
+                # Park mid-rotation: if close() does not wait for the lock it
+                # releases the connection here, which ends the wait early
+                released.wait(timeout=1.0)
+
+        def read_response(*args, **kwargs):
+            if auth_sent.is_set() and "auth read" not in order:
+                order.append("auth read")
+
+        mock_pubsub_connection.send_command.side_effect = send_command
+        mock_pubsub_connection.read_response.side_effect = read_response
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_pubsub_connection
+        mock_pool._available_connections = []
+        mock_pool._lock = threading.RLock()
+
+        def release(connection):
+            order.append("released")
+            released.set()
+
+        mock_pool.release.side_effect = release
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        p.subscribe("test")
+        credential_provider.get_credentials()
+        assert auth_sent.wait(timeout=5.0)
+
+        closer = threading.Thread(target=p.close)
+        closer.start()
+        closer.join(timeout=5.0)
+        assert not closer.is_alive()
+
+        # The release waits for the re-auth to finish reading its reply,
+        # instead of handing a connection mid-exchange back to the pool
+        assert order == ["auth sent", "auth read", "released"]
 
     @pytest.mark.parametrize(
         "credential_provider",

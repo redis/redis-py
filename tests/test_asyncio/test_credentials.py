@@ -1,8 +1,10 @@
 import asyncio
 import functools
+import gc
 import random
 import string
 import time
+import weakref
 from asyncio import Lock as AsyncLock
 from asyncio import sleep as async_sleep
 from typing import Optional, Tuple, Union
@@ -684,6 +686,52 @@ class TestStreamingCredentialProvider:
         mock_pubsub_connection.send_command.assert_called_once_with(
             "SUBSCRIBE", "test", check_health=True
         )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    async def test_dropped_pub_sub_is_collected(self, credential_provider):
+        mock_pubsub_connection = AsyncMock(spec=Connection)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
+
+        mock_pool = AsyncMock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection = AsyncMock(return_value=mock_pubsub_connection)
+        mock_pool._available_connections = []
+        mock_pool._lock = AsyncLock()
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        await p.subscribe("test")
+        pubsub_ref = weakref.ref(p)
+        # The mocks recorded on_connect, a bound method that would keep the
+        # pubsub alive on its own, and __del__ hands it the same method again
+        mock_pool.reset_mock()
+        mock_pool.get_connection.reset_mock()
+        mock_pubsub_connection.reset_mock()
+        mock_pubsub_connection.deregister_connect_callback = lambda *args: None
+
+        # The re-auth listener must not keep a dropped pubsub alive
+        del p
+        gc.collect()
+        assert pubsub_ref() is None
 
     @pytest.mark.parametrize(
         "credential_provider",
