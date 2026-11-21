@@ -1536,7 +1536,8 @@ class PubSub:
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it
-            self.health_check_response_counter -= 1
+            if self.health_check_response_counter > 0:
+                self.health_check_response_counter -= 1
             return None
         return response
 
