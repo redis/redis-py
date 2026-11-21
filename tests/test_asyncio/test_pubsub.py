@@ -896,6 +896,69 @@ class TestPubSubSubscribeUnsubscribe:
 class TestPubSubResubscribeMocked:
     """Resubscribe handling checked against mocked connections; no server needed."""
 
+    async def test_close_during_read_does_not_reconnect_released_connection(self):
+        # A reader blocked in get_message() gets EOF when another task closes
+        # the PubSub. Its retry must not reconnect and read from the
+        # connection aclose() has already returned to the pool.
+        pool = MagicMock()
+        pool.release = AsyncMock()
+        conn = MagicMock()
+        conn.retry = Retry(NoBackoff(), 3)
+        conn.health_check_interval = 0
+        conn.is_connected = True
+        conn.connect = AsyncMock()
+        conn.disconnect = AsyncMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        p.connection = conn
+
+        async def closed_during_read(*args, **kwargs):
+            await p.aclose()
+            raise ConnectionError("Connection closed by server.")
+
+        conn.read_response = AsyncMock(side_effect=closed_during_read)
+
+        with pytest.raises(ConnectionError):
+            await p.parse_response(block=True)
+
+        pool.release.assert_awaited_once_with(conn)
+        assert conn.read_response.await_count == 1
+        conn.connect.assert_not_awaited()
+
+    async def test_close_during_reconnect_does_not_read_released_connection(self):
+        # aclose() runs while the retry's reconnect awaits connect(), so the
+        # ownership check at the start of the reconnect already passed. The
+        # next attempt must not read the connection aclose() released.
+        pool = MagicMock()
+        pool.release = AsyncMock()
+        conn = MagicMock()
+        conn.retry = Retry(NoBackoff(), 3)
+        conn.health_check_interval = 0
+        conn.is_connected = True
+        conn.disconnect = AsyncMock()
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        p.connection = conn
+
+        async def close_on_reconnect(*args, **kwargs):
+            await p.aclose()
+
+        conn.connect = AsyncMock(side_effect=close_on_reconnect)
+        conn.read_response = AsyncMock(
+            side_effect=ConnectionError("Connection closed by server.")
+        )
+
+        with pytest.raises(ConnectionError):
+            await p.parse_response(block=True)
+
+        pool.release.assert_awaited_once_with(conn)
+        assert conn.read_response.await_count == 1
+        conn.connect.assert_awaited_once()
+
     async def test_cluster_pubsub_resubscribe_binary_shard_channel_with_handler(self):
         pool = MagicMock()
         encoder = Encoder(

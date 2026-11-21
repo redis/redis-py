@@ -1420,6 +1420,20 @@ class PubSub:
             )
         )
 
+    def _check_owns_connection(
+        self, conn, error: Optional[BaseException] = None
+    ) -> None:
+        """
+        Fail an attempt on a connection this PubSub no longer owns.
+
+        aclose() detaches the connection and releases it to the pool while a
+        reader may still be blocked on it. Reading or reconnecting it after
+        that would consume replies that now belong to another caller, so the
+        attempt fails with the error that woke the reader instead.
+        """
+        if conn is not self.connection:
+            raise error or ConnectionError("PubSub connection was released")
+
     async def _reconnect(
         self,
         conn,
@@ -1434,6 +1448,7 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
+        self._check_owns_connection(conn, error)
         if (
             error
             and failure_count is not None
@@ -1470,6 +1485,12 @@ class PubSub:
         # Track actual retry attempts for error reporting
         actual_retry_attempts = 0
 
+        async def attempt():
+            # aclose() can detach and release conn between two attempts, even
+            # from inside the reconnect itself, so check it on every one
+            self._check_owns_connection(conn)
+            return await command(*args, **kwargs)
+
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
                 add_debug_log_for_operation_failure(conn, error, args)
@@ -1479,7 +1500,7 @@ class PubSub:
 
         try:
             response = await conn.retry.call_with_retry(
-                lambda: command(*args, **kwargs),
+                attempt,
                 failure_callback,
                 with_failure_count=True,
             )
