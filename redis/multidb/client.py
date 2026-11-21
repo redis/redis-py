@@ -97,7 +97,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self._initialize_lock = threading.Lock()
         self._bg_scheduler = BackgroundScheduler()
         self._hc_lock = threading.Lock()
-        self._hc_tasks = []
         self._config = config
 
     def __del__(self):
@@ -484,19 +483,15 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Runs health checks against all databases.
         """
         task_to_db: dict[asyncio.Task, Database] = {}
-        # Map this round from hc_tasks. Another round can replace
-        # self._hc_tasks while this one is awaiting.
+        # Gather this round on a local list. close() stops the background
+        # loop, which cancels pending tasks, so the instance does not keep
+        # a second copy of them.
         hc_tasks: list[asyncio.Task] = []
 
         for database, _ in self._databases:
             task = asyncio.create_task(self._check_db_health(database))
             task_to_db[task] = database
             hc_tasks.append(task)
-
-        # Keep unfinished tasks from another round, and record this round
-        # without dropping those tasks.
-        self._hc_tasks = [task for task in self._hc_tasks if not task.done()]
-        self._hc_tasks.extend(hc_tasks)
 
         results = await asyncio.gather(*hc_tasks, return_exceptions=True)
 
