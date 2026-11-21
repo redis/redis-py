@@ -273,6 +273,137 @@ class TestMultiDbClient:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db",
+        [
+            (
+                {"hc_interval": 100},
+                {"weight": 1.0, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_concurrent_first_pings_both_succeed(
+        self, mock_multi_db_config, mock_db, mock_hc
+    ):
+        """
+        Two commands issued before initialization must both succeed.
+
+        Both used to enter initialize() together. The second health-check
+        round replaced ``_hc_tasks`` while the first was still mapping
+        results, so one command raised KeyError.
+        """
+        databases = create_weighted_list(mock_db)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.health_check_probes = 1
+        mock_hc.health_check_delay = 0
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db.client.execute_command = AsyncMock(return_value=True)
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert not client.initialized
+                results = await asyncio.gather(client.ping(), client.ping())
+                assert results == [True, True]
+                assert client.initialized
+            finally:
+                await client.aclose()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db",
+        [
+            (
+                {"hc_interval": 100},
+                {"weight": 1.0, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_concurrent_pings_after_initialize_both_succeed(
+        self, mock_multi_db_config, mock_db, mock_hc
+    ):
+        """
+        Explicit initialize() before sharing the client still lets concurrent
+        commands succeed, and the recurring health check stays scheduled.
+        """
+        databases = create_weighted_list(mock_db)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.health_check_probes = 1
+        mock_hc.health_check_delay = 0
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db.client.execute_command = AsyncMock(return_value=True)
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                await client.initialize()
+                assert client.initialized
+                assert client._recurring_hc_task is not None
+
+                results = await asyncio.gather(client.ping(), client.ping())
+                assert results == [True, True]
+            finally:
+                await client.aclose()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db",
+        [
+            (
+                {"hc_interval": 100},
+                {"weight": 1.0, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_overlapping_health_checks_do_not_raise_keyerror(
+        self, mock_multi_db_config, mock_db, mock_hc
+    ):
+        """
+        Overlapping health-check rounds must not replace each other's tasks.
+
+        The second round used to assign ``_hc_tasks = []``. The first then
+        raised KeyError while mapping its own results.
+        """
+        databases = create_weighted_list(mock_db)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.health_check_probes = 1
+        mock_hc.health_check_delay = 0
+        mock_hc.check_health.return_value = True
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def check_health(database, connection=None):
+            if not first_started.is_set():
+                first_started.set()
+                await release_first.wait()
+            return True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                await client.initialize()
+                mock_hc.check_health.side_effect = check_health
+
+                first = asyncio.create_task(client._check_databases_health())
+                await first_started.wait()
+                second = asyncio.create_task(client._check_databases_health())
+                second_result = await second
+                release_first.set()
+                first_result = await first
+
+                assert list(first_result.values()) == [True]
+                assert list(second_result.values()) == [True]
+            finally:
+                release_first.set()
+                await client.aclose()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
