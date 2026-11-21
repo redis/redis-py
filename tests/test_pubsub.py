@@ -281,6 +281,36 @@ class TestPubSubCloseServerCleanup:
         assert conn.connect.call_count == 1
 
     @pytest.mark.fixed_client
+    def test_close_during_reconnect_does_not_read_released_connection(self):
+        # close() runs while the retry's reconnect sits in connect(), so the
+        # ownership check at the start of the reconnect already passed. The
+        # next attempt must not read the connection close() released.
+        pool = mock.MagicMock()
+        conn = mock.MagicMock()
+        conn.retry = Retry(NoBackoff(), 3)
+        conn.health_check_interval = 0
+        conn.should_reconnect.return_value = False
+        encoder = Encoder(
+            encoding="utf-8", encoding_errors="strict", decode_responses=False
+        )
+        p = PubSub(connection_pool=pool, encoder=encoder)
+        p.connection = conn
+
+        def close_on_reconnect(*args, **kwargs):
+            # not the connect() try_read does before the first read
+            if conn.read_response.call_count:
+                p.close()
+
+        conn.connect.side_effect = close_on_reconnect
+        conn.read_response.side_effect = ConnectionError("Connection closed by server.")
+
+        with pytest.raises(ConnectionError):
+            p.parse_response(block=True)
+
+        pool.release.assert_called_once_with(conn)
+        assert conn.read_response.call_count == 1
+
+    @pytest.mark.fixed_client
     def test_reader_woken_by_close_disconnect_does_not_reconnect(self):
         # close() wakes a reader blocked in another thread from inside
         # disconnect(), before it releases the connection. The reader's retry
