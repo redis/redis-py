@@ -1769,6 +1769,34 @@ class TestPubSubPings:
 class TestPubSubHealthCheckResponse:
     """Tests for health check response validation with different decode_responses settings"""
 
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("protocol", [2, 3])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_unmatched_pong_keeps_health_check_counter_at_zero(
+        self, request, protocol, decode_responses
+    ):
+        client = _get_client(
+            redis.Redis,
+            request,
+            protocol=protocol,
+            decode_responses=decode_responses,
+            health_check_interval=60,
+        )
+        with client.pubsub() as pubsub:
+            pubsub.subscribe("foo")
+            assert pubsub.get_message(timeout=1)["type"] == "subscribe"
+
+            pubsub.connection.next_health_check = 0
+            pubsub.check_health()
+            assert pubsub.health_check_response_counter == 1
+            pubsub.connection.next_health_check = float("inf")
+            assert pubsub.get_message(timeout=1) is None
+            assert pubsub.health_check_response_counter == 0
+
+            pubsub.ping(pubsub.HEALTH_CHECK_MESSAGE)
+            assert pubsub.get_message(timeout=1) is None
+            assert pubsub.health_check_response_counter == 0
+
     def test_is_health_check_response_decode_false_list_format(self, r):
         """Test is_health_check_response recognizes list format with decode_responses=False"""
         p = r.pubsub()
