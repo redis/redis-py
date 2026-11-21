@@ -154,9 +154,8 @@ class TestConnectionPool:
         with closing(pool):
             pass
 
-    def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_multiple_connections(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         c2 = pool.get_connection()
         assert c1 != c2
@@ -205,7 +204,12 @@ class TestConnectionPool:
         in_use.set_re_auth_token.assert_called_once_with(token)
 
     @pytest.mark.fixed_client
-    def test_re_auth_stops_at_authentication_error(self):
+    def test_re_auth_continues_past_authentication_error(self):
+        """
+        One rejected AUTH does not stop the others: a standalone endpoint can
+        front several proxies. The rejected connection keeps the token pending,
+        in-use connections get it, and the rejection is raised at the end.
+        """
         pool = self.get_pool(connection_class=DummyConnection)
         failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 3))
         failing.read_response.side_effect = redis.AuthenticationError("expired")
@@ -221,24 +225,88 @@ class TestConnectionPool:
             pool.re_auth_callback(token)
 
         failing.read_response.assert_called_once()
-        other.send_command.assert_not_called()
-        in_use.set_re_auth_token.assert_not_called()
+        failing.set_re_auth_token.assert_called_once_with(token)
+        other.send_command.assert_called_once_with("AUTH", "oid", "value")
+        assert other.set_re_auth_token.call_args_list == [
+            mock.call(token),
+            mock.call(None),
+        ]
+        in_use.set_re_auth_token.assert_called_once_with(token)
 
-    def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    @pytest.mark.fixed_client
+    def test_re_auth_sends_every_auth_before_reading_a_reply(self):
+        """The pool lock is held for about one round trip, not one per connection."""
+        pool = self.get_pool(connection_class=DummyConnection)
+        calls = mock.Mock()
+        first = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        second = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        calls.attach_mock(first, "first")
+        calls.attach_mock(second, "second")
+        pool._available_connections.extend([first, second])
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        pool.re_auth_callback(token)
+
+        assert [
+            name for name, _, _ in calls.mock_calls if "set_re_auth" not in name
+        ] == [
+            "first.send_command",
+            "second.send_command",
+            "first.read_response",
+            "second.read_response",
+        ]
+
+    @pytest.mark.fixed_client
+    def test_re_auth_does_not_connect_a_disconnected_free_connection(self):
+        """It authenticates when it connects; connecting here would hold the lock."""
+        pool = self.get_pool(connection_class=DummyConnection)
+        disconnected = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        disconnected.is_connected = False
+        pool._available_connections.append(disconnected)
+
+        pool.re_auth_callback(mock.Mock())
+
+        disconnected.send_command.assert_not_called()
+        disconnected.set_re_auth_token.assert_not_called()
+
+    @pytest.mark.fixed_client
+    def test_interrupted_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ):
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply.
+        """
+
+        class Interrupt(BaseException):
+            pass
+
+        pool = self.get_pool(connection_class=DummyConnection)
+        first = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        first.read_response.side_effect = Interrupt()
+        second = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        pool._available_connections.extend([first, second])
+
+        with pytest.raises(Interrupt):
+            pool.re_auth_callback(mock.Mock())
+
+        first.disconnect.assert_called_once()
+        second.disconnect.assert_called_once()
+        second.read_response.assert_not_called()
+
+    def test_reuse_previously_released_connection(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         pool.release(c1)
         c2 = pool.get_connection()
         assert c1 == c2
 
-    def test_release_not_owned_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_release_not_owned_connection(self, master_connection_kwargs):
+        pool1 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool1.get_connection()
-        pool2 = self.get_pool(
-            connection_kwargs={"host": master_host[0], "port": master_host[1]}
-        )
+        pool2 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c2 = pool2.get_connection()
         pool2.release(c2)
 
@@ -271,12 +339,8 @@ class TestConnectionPool:
         expected = "path=/abc,db=1,client_name=test-client"
         assert expected in repr(pool)
 
-    def test_pool_disconnect(self, master_host):
-        connection_kwargs = {
-            "host": master_host[0],
-            "port": master_host[1],
-        }
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_pool_disconnect(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
 
         conn = pool.get_connection()
         pool.disconnect()
@@ -653,11 +717,10 @@ class TestBlockingConnectionPool:
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     @skip_if_server_version_lt("7.4.0")
-    def test_initialise_pool_with_cache(self, master_host):
+    def test_initialise_pool_with_cache(self, master_connection_kwargs):
         pool = redis.BlockingConnectionPool(
             connection_class=Connection,
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             protocol=3,
             cache_config=CacheConfig(),
         )
@@ -1421,9 +1484,13 @@ class TestConnection:
     @skip_if_redis_enterprise()
     def test_read_only_error(self, r):
         "READONLY errors get turned into ReadOnlyError exceptions"
+        # A cluster client retries a READONLY reply of a primary: only the
+        # mapping is tested here
+        r.set_retry(Retry(NoBackoff(), 0))
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
+    @skip_if_redis_enterprise()
     def test_oom_error(self, r):
         "OOM errors get turned into OutOfMemoryError exceptions"
         with pytest.raises(redis.OutOfMemoryError):
@@ -1751,3 +1818,165 @@ class TestConnectionPoolReleasedEventEmission:
 
         # Event should NOT be emitted for foreign connection
         listener.listen.assert_not_called()
+
+
+def _lock_is_free(lock) -> bool:
+    """Whether another thread could take ``lock`` (an RLock is reentrant)."""
+    result = []
+
+    def probe():
+        acquired = lock.acquire(blocking=False)
+        if acquired:
+            lock.release()
+        result.append(acquired)
+
+    thread = Thread(target=probe)
+    thread.start()
+    thread.join()
+    return result[0]
+
+
+@pytest.mark.fixed_client
+class TestDeferredReAuthOnRelease:
+    """A deferred AUTH runs on release and never fails a finished command."""
+
+    @staticmethod
+    def _in_use_connection_with_pending_auth(pool, read_response):
+        connection = Connection()
+        # Connected, as far as re_auth() can tell
+        connection._sock = mock.Mock()
+        connection.send_command = mock.Mock()
+        connection.read_response = mock.Mock(side_effect=read_response)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+        connection.set_re_auth_token(token)
+        pool._in_use_connections.add(connection)
+        return connection, token
+
+    @staticmethod
+    def _use_again(pool, connection):
+        pool._available_connections.remove(connection)
+        pool._in_use_connections.add(connection)
+
+    @pytest.mark.parametrize(
+        "error",
+        [redis.AuthenticationError("rejected"), redis.ConnectionError("closed")],
+    )
+    def test_failed_auth_keeps_the_token_pending_and_does_not_fail_the_release(
+        self, error
+    ):
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, error)
+
+        pool.release(connection)
+
+        assert connection in pool._available_connections
+        assert connection._re_auth_token is token
+
+        # The next release retries it, and clears it once accepted
+        connection.read_response.side_effect = None
+        connection.read_response.return_value = b"OK"
+        self._use_again(pool, connection)
+        pool.release(connection)
+
+        assert connection.send_command.call_count == 2
+        assert connection._re_auth_token is None
+
+    def test_disconnected_connection_is_not_reconnected_to_send_the_auth(self):
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection._sock = None
+
+        pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        assert connection._re_auth_token is token
+
+    def test_connection_marked_for_reconnect_skips_the_auth(self):
+        """Its socket is about to be replaced, and may be slow or gone."""
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.mark_for_reconnect()
+        connection.disconnect = mock.Mock()
+
+        pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
+        assert connection._re_auth_token is token
+
+    def test_connection_the_pool_no_longer_owns_skips_the_auth(self):
+        """
+        It is disconnected instead of returned, like a Sentinel connection to
+        the old master.
+        """
+        pool = redis.ConnectionPool()
+        connection, _ = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.disconnect = mock.Mock()
+
+        with mock.patch.object(pool, "owns_connection", return_value=False):
+            pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
+        assert connection not in pool._available_connections
+
+    def test_new_socket_replaces_the_pending_auth(self):
+        """The handshake of a new socket authenticates with current credentials."""
+        connection = Connection()
+        connection.set_re_auth_token(mock.Mock())
+
+        with (
+            mock.patch.object(connection, "_connect", return_value=mock.Mock()),
+            mock.patch.object(connection, "on_connect_check_health"),
+        ):
+            connection.connect()
+
+        assert connection._re_auth_token is None
+
+    def test_auth_runs_before_the_connection_is_free_and_outside_the_lock(self):
+        pool = redis.ConnectionPool()
+        observed = []
+
+        def read_response():
+            observed.append(
+                (connection in pool._available_connections, _lock_is_free(pool._lock))
+            )
+            return b"OK"
+
+        connection, _ = self._in_use_connection_with_pending_auth(pool, read_response)
+
+        pool.release(connection)
+
+        assert observed == [(False, True)]
+        assert connection in pool._available_connections
+
+    def test_token_set_during_the_auth_stays_pending(self):
+        pool = redis.ConnectionPool()
+        newer = mock.Mock()
+
+        def read_response():
+            # A token renewal that lands while the AUTH is in flight
+            connection.set_re_auth_token(newer)
+            return b"OK"
+
+        connection, _ = self._in_use_connection_with_pending_auth(pool, read_response)
+
+        pool.release(connection)
+
+        assert connection._re_auth_token is newer
+
+    def test_listener_error_still_returns_the_connection(self):
+        pool = redis.ConnectionPool()
+        connection = pool.make_connection()
+        pool._in_use_connections.add(connection)
+
+        with mock.patch.object(
+            pool._event_dispatcher, "dispatch", side_effect=RuntimeError("listener")
+        ):
+            with pytest.raises(RuntimeError, match="listener"):
+                pool.release(connection)
+
+        assert connection in pool._available_connections
+        assert connection not in pool._in_use_connections

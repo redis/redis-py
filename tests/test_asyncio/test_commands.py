@@ -226,6 +226,7 @@ class TestRedisCommands:
         assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_deluser(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -235,11 +236,13 @@ class TestRedisCommands:
         assert await r.acl_deluser(username) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_genpass(self, r: redis.Redis):
         password = await r.acl_genpass()
         assert isinstance(password, (str, bytes))
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     async def test_acl_getuser_setuser(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -340,6 +343,7 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -350,6 +354,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_acl_log(self, r_teardown, create_redis):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -386,6 +391,7 @@ class TestRedisCommands:
         assert await r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_setuser_categories_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -394,6 +400,7 @@ class TestRedisCommands:
             await r.acl_setuser(username, categories=["list"])
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_setuser_commands_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -402,6 +409,7 @@ class TestRedisCommands:
             await r.acl_setuser(username, commands=["get"])
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
+    @skip_if_redis_enterprise()
     async def test_acl_setuser_add_passwords_and_nopass_fails(self, r_teardown):
         username = "redis-py-user"
         r = r_teardown(username)
@@ -422,6 +430,7 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    @skip_if_redis_enterprise()
     async def test_acl_modules_commands(self, r_teardown):
         username = "redis-py-user"
         password = "pass-for-test-user"
@@ -482,6 +491,7 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    @skip_if_redis_enterprise()
     async def test_acl_modules_category_commands(self, r_teardown):
         username = "redis-py-user"
         password = "pass-for-test-user"
@@ -543,6 +553,7 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
     @skip_if_server_version_lt("5.0.0")
+    @skip_if_redis_enterprise()
     async def test_client_list_type(self, r: redis.Redis):
         with pytest.raises(exceptions.RedisError):
             await r.client_list(_type="not a client type")
@@ -591,6 +602,7 @@ class TestRedisCommands:
         assert info["name"] == "test=name"
 
     @skip_if_server_version_lt("7.2.0")
+    @skip_if_redis_enterprise()
     async def test_client_setinfo(self, r: redis.Redis):
         from redis.utils import get_lib_version
 
@@ -735,6 +747,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("2.9.50")
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_client_pause(self, r: redis.Redis):
         assert await r.client_pause(1)
         assert await r.client_pause(timeout=1)
@@ -749,12 +762,14 @@ class TestRedisCommands:
         with pytest.raises(TypeError):
             await r.client_no_touch()
 
+    @skip_if_redis_enterprise()
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
         assert "maxmemory" in data
         assert data["maxmemory"].isdigit()
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_config_resetstat(self, r: redis.Redis):
         await r.ping()
         prior_commands_processed = int((await r.info())["total_commands_processed"])
@@ -763,6 +778,7 @@ class TestRedisCommands:
         reset_commands_processed = int((await r.info())["total_commands_processed"])
         assert reset_commands_processed < prior_commands_processed
 
+    @skip_if_redis_enterprise()
     async def test_config_set(self, r: redis.Redis):
         await r.config_set("timeout", 70)
         assert (await r.config_get())["timeout"] == "70"
@@ -771,6 +787,7 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    @skip_if_redis_enterprise()
     async def test_config_get_for_modules(self, r: redis.Redis):
         search_module_configs = await r.config_get("search-*")
         assert "search-timeout" in search_module_configs
@@ -786,6 +803,7 @@ class TestRedisCommands:
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
+    @skip_if_redis_enterprise()
     async def test_config_set_for_search_module(self, r: redis.Redis):
         config = await r.config_get("*")
         initial_default_search_dialect = config["search-default-dialect"]
@@ -859,6 +877,7 @@ class TestRedisCommands:
             await r.config_resetstat()
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_lastsave(self, r: redis.Redis):
         assert isinstance(await r.lastsave(), datetime.datetime)
 
@@ -2794,6 +2813,7 @@ class TestRedisCommands:
         await r.set("a", "foo")
         assert await r.strlen("a") == 3
 
+    @skip_if_redis_enterprise()
     async def test_substr(self, r: redis.Redis):
         await r.set("a", "0123456789")
         assert await r.substr("a", 0) == b"0123456789"
@@ -6149,6 +6169,18 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False)
         assert await r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("6.2.0")
+    async def test_xautoclaim_negative(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+        with pytest.raises(redis.DataError):
+            await r.xautoclaim(stream, group, consumer, min_idle_time=-1)
+        with pytest.raises(ValueError):
+            await r.xautoclaim(stream, group, consumer, min_idle_time="wrong")
+        with pytest.raises(redis.DataError, match="XAUTOCLAIM count"):
+            await r.xautoclaim(stream, group, consumer, min_idle_time=0, count=-1)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xclaim(self, r: redis.Redis):
         stream = "stream"
@@ -7628,6 +7660,7 @@ class TestRedisCommands:
             await r.xcfgset(stream, idmp_maxsize="invalid")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_bitfield_operations(self, r: redis.Redis):
         # comments show affected bits
         await r.execute_command("SELECT", 10)
@@ -7711,6 +7744,7 @@ class TestRedisCommands:
         assert resp == [0, 15, 15, 14]
 
     @skip_if_server_version_lt("4.0.0")
+    @skip_if_redis_enterprise()
     async def test_memory_stats(self, r: redis.Redis):
         # put a key into the current db to make sure that "db.<current-db>"
         # has data

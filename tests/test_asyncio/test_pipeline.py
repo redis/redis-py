@@ -5,7 +5,7 @@ from unittest import mock
 import pytest
 from redis import RedisClusterException
 import redis
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing
 from .conftest import wait_for_command
@@ -346,6 +346,7 @@ class TestPipeline:
             assert await r.get("c") == b"c1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_info_in_transaction(self, decoded_r):
         async with decoded_r.pipeline() as pipe:
             pipe.info("server")
@@ -353,6 +354,7 @@ class TestPipeline:
             assert "redis_version" in info
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_info_in_transaction_with_custom_callback(self, decoded_r):
         decoded_r.set_response_callback("INFO", lambda response, **options: response)
         async with decoded_r.pipeline() as pipe:
@@ -572,6 +574,7 @@ class TestPipeline:
         assert await client.get("b") == b"b1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     async def test_exec_error_in_pipeline_redacts_credentials(self, r):
         try:
@@ -1202,6 +1205,10 @@ class TestAsyncPipelineRetryChecker:
 
         async def disconnect(self, *args, **kwargs):
             self.disconnected = True
+
+        def extract_connection_details(self):
+            # Read by the failure debug log, which runs with DEBUG logging on.
+            return f"{self.host}:{self.port}"
 
     class FakeConnectionPool:
         def __init__(self, connection):

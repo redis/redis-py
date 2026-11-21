@@ -7,7 +7,10 @@ import time
 from unittest.mock import MagicMock, Mock, PropertyMock
 
 from redis.exceptions import ConnectionError
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import (
+    skip_if_redis_enterprise_cluster,
+    skip_if_server_version_lt,
+)
 from redis.keyspace_notifications import (
     SubkeyeventChannel,
     SubkeyspaceChannel,
@@ -825,6 +828,9 @@ class TestClusterKeyspaceNotifications:
     The r_with_keyspace_notifications fixture handles this configuration automatically.
     """
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_keyspace_subscribe(self, r_with_keyspace_notifications):
         r = r_with_keyspace_notifications
         notifications = ClusterKeyspaceNotifications(r)
@@ -847,6 +853,9 @@ class TestClusterKeyspaceNotifications:
 
         notifications.close()
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_keyspace_subscribe_with_handler(self, r_with_keyspace_notifications):
         """Use a handler in a background thread with run_in_thread()."""
         r = r_with_keyspace_notifications
@@ -1835,6 +1844,9 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:hash6")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_subkeyspace_pattern_subscription(self, r_with_subkey_notifications):
         """Subscribe to a subkeyspace pattern and verify notifications are
         received for matching keys."""
@@ -1859,6 +1871,9 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:pattern:hash1", "test:pattern:hash2")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_subkeyevent_pattern_subscription(self, r_with_subkey_notifications):
         """Subscribe to a subkeyevent pattern for all hash events and
         verify notifications are received."""
@@ -1906,6 +1921,9 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:hash8")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_combined_keyspace_and_subkeyspace(self, r_with_subkey_notifications):
         """Subscribe to both keyspace and subkeyspace on the same key and
         verify that both types of notifications are received."""
@@ -1935,6 +1953,9 @@ class TestSubkeyNotifications:
         notifications.close()
         r.delete("test:hash9")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     def test_subkeyspaceitem_pattern_receives_matching_fields(
         self, r_with_subkey_notifications
     ):

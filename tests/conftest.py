@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import pytest
 import redis
@@ -389,6 +389,19 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 def skip_if_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO.get("enterprise", False) is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
+
+
+def is_redis_enterprise_cluster() -> bool:
+    # INFO reports cluster_enabled as an integer, so test it for truthiness.
+    return REDIS_INFO.get("enterprise", False) is True and bool(
+        REDIS_INFO.get("cluster_enabled", False)
+    )
+
+
+def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+    return pytest.mark.skipif(
+        is_redis_enterprise_cluster(), reason="Redis enterprise cluster"
+    )
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
@@ -803,6 +816,23 @@ def master_host(request):
     return parts.hostname, (parts.port or 6379)
 
 
+@pytest.fixture(scope="session")
+def master_connection_kwargs(request):
+    """
+    Connection kwargs for the server under test: the host and port of
+    ``master_host`` plus the username and password of ``--redis-url``, if it
+    has them, so a test that builds its own connection can authenticate.
+    """
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    kwargs = {"host": parts.hostname, "port": parts.port or 6379}
+    if parts.username:
+        kwargs["username"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    return kwargs
+
+
 @pytest.fixture()
 def cache_conf() -> CacheConfig:
     return CacheConfig(max_size=100, eviction_policy=EvictionPolicy.LRU)
@@ -867,9 +897,24 @@ def get_credential_provider(request) -> CredentialProvider:
     return get_entra_id_credentials_provider(request, cred_provider_kwargs)
 
 
+def stop_credential_provider(credential_provider: CredentialProvider | None) -> None:
+    """
+    Stop the background token renewal of a streaming credential provider.
+
+    The renewal runs on its own event loop thread, so without this it outlives
+    the test, keeps renewing for the rest of the session and reports its
+    errors after the run.
+    """
+    token_mgr = getattr(credential_provider, "_token_mgr", None)
+    if token_mgr is not None:
+        token_mgr.stop()
+
+
 @pytest.fixture()
 def credential_provider(request) -> CredentialProvider:
-    return get_credential_provider(request)
+    provider = get_credential_provider(request)
+    yield provider
+    stop_credential_provider(provider)
 
 
 def get_endpoint(endpoint_name: str):

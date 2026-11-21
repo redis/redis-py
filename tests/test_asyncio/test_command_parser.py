@@ -4,7 +4,11 @@ import pytest
 
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis.commands.metadata import RequestPolicy, ResponsePolicy
-from tests.conftest import skip_if_server_version_gte, skip_if_server_version_lt
+from tests.conftest import (
+    skip_if_redis_enterprise,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
+)
 from tests.helpers import get_expected_command_policies
 
 
@@ -12,6 +16,7 @@ from tests.helpers import get_expected_command_policies
 @skip_if_server_version_lt("8.0.0")
 class TestAsyncCommandParser:
     @pytest.mark.asyncio
+    @skip_if_redis_enterprise()
     async def test_movablekeys_commands_derive_the_keyed_defaults(self, r):
         """
         A ``movablekeys`` command reports ``first_key_pos`` 0, so the keyed default is
@@ -97,6 +102,7 @@ class TestAsyncCommandParser:
 
     @pytest.mark.asyncio
     @skip_if_server_version_gte("8.5.240")
+    @skip_if_redis_enterprise()
     async def test_get_command_policies(self, r):
         commands_parser = AsyncCommandsParser()
         await commands_parser.initialize(node=r.get_default_node())
@@ -117,6 +123,7 @@ class TestAsyncCommandParser:
     @skip_if_server_version_lt("8.5.240")
     @skip_if_server_version_gte("8.10.0")
     @pytest.mark.asyncio
+    @skip_if_redis_enterprise()
     async def test_get_command_policies_json_debug_without_its_key_stays_keyless(
         self, r
     ):
