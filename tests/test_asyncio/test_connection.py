@@ -35,6 +35,7 @@ from redis.asyncio.connection import (
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import (
+    AuthenticationError,
     ConnectionError,
     InvalidResponse,
     ResponseError,
@@ -831,6 +832,39 @@ async def test_connect_timeout_error_without_retry():
     with pytest.raises(TimeoutError, match="Timeout connecting to server"):
         await conn.connect()
     assert conn._connect.call_count == 1
+
+
+@pytest.mark.fixed_client
+async def test_connect_raises_the_handshake_error_when_the_close_hangs():
+    """
+    A rejected AUTH discards the new socket without waiting for it to close,
+    so a close that would time out does not replace the AuthenticationError
+    with a retryable TimeoutError.
+    """
+    conn = Connection(socket_connect_timeout=0.01)
+    writer = mock.Mock()
+
+    async def never_closed() -> None:
+        await asyncio.Event().wait()
+
+    writer.wait_closed = mock.AsyncMock(side_effect=never_closed)
+
+    async def connect() -> None:
+        conn._reader = mock.Mock()
+        conn._writer = writer
+
+    conn._connect = mock.AsyncMock(side_effect=connect)
+    with patch.object(
+        conn,
+        "on_connect_check_health",
+        mock.AsyncMock(side_effect=AuthenticationError("invalid password")),
+    ):
+        with pytest.raises(AuthenticationError, match="invalid password"):
+            await conn.connect()
+
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_not_awaited()
+    assert not conn.is_connected
 
 
 @pytest.mark.fixed_client

@@ -1164,8 +1164,11 @@ class AbstractConnection(AsyncMaintNotificationsAbstractConnection):
                     else self.redis_connect_func(self)
                 )
         except RedisError:
-            # clean up after any error in on_connect
-            await self.disconnect()
+            # Clean up after any error in on_connect. The socket is discarded,
+            # so the close is not waited for: a close that times out must not
+            # replace the error, for example a rejected AUTH with a retryable
+            # TimeoutError.
+            await self.disconnect(nowait=True)
             raise
         except BaseException:
             # Likewise for whatever a credential provider raises and for a
