@@ -13,7 +13,10 @@ from redis.asyncio.keyspace_notifications import (
     _ClusterNodePoolAdapter,
 )
 from redis.exceptions import ConnectionError
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import (
+    skip_if_redis_enterprise_cluster,
+    skip_if_server_version_lt,
+)
 from redis.keyspace_notifications import (
     EventType,
     KeyspaceChannel,
@@ -953,6 +956,9 @@ class TestAsyncSubkeyNotifications:
         await notifications.aclose()
         await r.delete("test:hash6")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     @pytest.mark.asyncio
     async def test_subkeyspace_pattern_subscription(
         self, async_r_with_subkey_notifications
@@ -980,6 +986,9 @@ class TestAsyncSubkeyNotifications:
         await notifications.aclose()
         await r.delete("test:pattern:hash1", "test:pattern:hash2")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     @pytest.mark.asyncio
     async def test_subkeyevent_pattern_subscription(
         self, async_r_with_subkey_notifications
@@ -1031,6 +1040,9 @@ class TestAsyncSubkeyNotifications:
         await notifications.aclose()
         await r.delete("test:hash8")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     @pytest.mark.asyncio
     async def test_combined_keyspace_and_subkeyspace(
         self, async_r_with_subkey_notifications
@@ -1063,6 +1075,9 @@ class TestAsyncSubkeyNotifications:
         await notifications.aclose()
         await r.delete("test:hash9")
 
+    # Redis Enterprise delivers keyspace notifications on every node subscription,
+    # so a cluster client receives each event once per node.
+    @skip_if_redis_enterprise_cluster()
     @pytest.mark.asyncio
     async def test_subkeyspaceitem_pattern_receives_matching_fields(
         self, async_r_with_subkey_notifications

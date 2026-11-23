@@ -15,6 +15,7 @@ from redis import AuthenticationError, DataError, RedisError, ResponseError
 from redis.asyncio import Connection, ConnectionPool, Redis
 from redis.asyncio.retry import Retry
 from redis.auth.err import RequestTokenErr
+from redis.auth.token import SimpleToken
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError
@@ -255,6 +256,7 @@ class TestCredentialsProvider:
 
         assert await r2.ping() is True
 
+    @skip_if_redis_enterprise()
     async def test_async_credential_provider_no_password_success(
         self, r_acl_teardown, create_redis
     ):
@@ -268,6 +270,7 @@ class TestCredentialsProvider:
         assert await r2.ping() is True
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_credential_provider_no_password_error(
         self, r_acl_teardown, create_redis
     ):
@@ -285,6 +288,7 @@ class TestCredentialsProvider:
 
     @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("create_redis", [(False,)], ids=["pool"], indirect=True)
+    @skip_if_redis_enterprise()
     async def test_credential_provider_error_does_not_skip_authentication(
         self, r_acl_teardown, create_redis
     ):
@@ -304,6 +308,7 @@ class TestCredentialsProvider:
 
     @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("create_redis", [(False,)], ids=["pool"], indirect=True)
+    @skip_if_redis_enterprise()
     async def test_cancelled_credential_fetch_does_not_skip_authentication(
         self, r_acl_teardown, create_redis
     ):
@@ -325,6 +330,7 @@ class TestCredentialsProvider:
         assert username in [client["user"] for client in await r.client_list()]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_password_and_username_together_with_cred_provider_raise_error(
         self, r_acl_teardown, create_redis
     ):
@@ -348,6 +354,7 @@ class TestCredentialsProvider:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_change_username_password_on_existing_connection(
         self, r_acl_teardown, create_redis
     ):
@@ -373,6 +380,7 @@ class TestCredentialsProvider:
 
 @pytest.mark.asyncio
 class TestUsernamePasswordCredentialProvider:
+    @skip_if_redis_enterprise()
     async def test_user_pass_credential_provider_acl_user_and_pass(
         self, r_acl_teardown, create_redis
     ):
@@ -387,6 +395,7 @@ class TestUsernamePasswordCredentialProvider:
         r2 = await create_redis(flushdb=False, credential_provider=provider)
         assert await r2.ping() is True
 
+    @skip_if_redis_enterprise()
     async def test_user_pass_provider_only_password(
         self, r_required_pass_teardown, create_redis
     ):
@@ -829,3 +838,51 @@ class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.cp_integration
     async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
         assert await r_credential.ping() is True
+
+
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+class TestRejectedReAuthToken:
+    """A rejected token does not stop the renewal or fail a finished command."""
+
+    USER = "re_auth_rejected_token"
+
+    async def test_rejected_token_does_not_fail_commands_or_stop_the_renewal(
+        self, request, r
+    ):
+        await r.acl_setuser(
+            self.USER, enabled=True, passwords=["+old"], commands=["+@all"]
+        )
+        pool = ConnectionPool.from_url(
+            request.config.getoption("--redis-url"), username=self.USER, password="old"
+        )
+        try:
+            free = await pool.get_connection()
+            in_use = await pool.get_connection()
+            await pool.release(free)
+            # Not valid on the server yet, as on a proxy that lags behind
+            token = SimpleToken("new", -1, time.time() * 1000, {"oid": self.USER})
+
+            with pytest.raises(AuthenticationError):
+                await pool.re_auth_callback(token)
+
+            # The rejection closed the free connection. It and the in-use one
+            # still have the token pending
+            assert not free.is_connected
+            assert free._re_auth_token is token
+            assert in_use._re_auth_token is token
+            await in_use.send_command("PING")
+            assert await in_use.read_response() == b"PONG"
+            # The deferred AUTH is rejected too, which must not fail the release
+            await pool.release(in_use)
+            assert in_use._re_auth_token is token
+
+            # A new socket authenticates in its handshake, which replaces the
+            # pending AUTH
+            client = Redis(connection_pool=pool, single_connection_client=True)
+            assert str_if_bytes(await client.acl_whoami()) == self.USER
+            assert client.connection._re_auth_token is None
+            await client.aclose()
+        finally:
+            await pool.disconnect()
+            await r.acl_deluser(self.USER)

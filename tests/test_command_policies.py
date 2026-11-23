@@ -14,6 +14,7 @@ from redis.utils import str_if_bytes
 from tests.conftest import (
     expects_resp2_shape,
     expects_unified_shape,
+    skip_if_redis_enterprise,
     skip_if_server_version_lt,
 )
 
@@ -197,6 +198,7 @@ class TestClusterWithPolicies:
             with pytest.raises(ResponseError, match="Command # 2"):
                 pipe.execute()
 
+    @skip_if_redis_enterprise()
     def test_live_tips_fold_the_replies_by_their_response_policy(self, r, monkeypatch):
         monkeypatch.setattr(
             r, "_policy_resolver", DynamicPolicyResolver(r.commands_parser)

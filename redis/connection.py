@@ -330,7 +330,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         pass
 
     @abstractmethod
@@ -1343,6 +1343,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 conn_error = None
 
         self._sock = sock
+        # A new socket authenticates in the handshake below with current
+        # credentials, which replaces any AUTH deferred on the old one
+        self._re_auth_token = None
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
@@ -1864,17 +1867,26 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
         self._handshake_metadata = value
 
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         self._re_auth_token = token
 
     def re_auth(self):
-        if self._re_auth_token is not None:
-            self.send_command(
-                "AUTH",
-                self._re_auth_token.try_get("oid"),
-                self._re_auth_token.get_value(),
-            )
-            self.read_response()
+        """
+        Send the pending AUTH, if any.
+
+        The token stays pending until this socket accepts it, or until the
+        connection opens a new socket, whose handshake authenticates with
+        current credentials. A connection that is disconnected, or marked for
+        reconnect, is skipped for that reason: the AUTH would go to a socket
+        that is about to be replaced. A token set while the AUTH is in flight
+        stays pending.
+        """
+        token = self._re_auth_token
+        if token is None or self._sock is None or self.should_reconnect():
+            return
+        self.send_command("AUTH", token.try_get("oid"), token.get_value())
+        self.read_response()
+        if self._re_auth_token is token:
             self._re_auth_token = None
 
     def _get_socket(self) -> Optional[socket.socket]:
@@ -2384,8 +2396,19 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     encode(k) if isinstance(k, (int, float)) else k for k in keys
                 )
                 break
+        # A float argument compares equal to an int or to the other signed zero
+        # (1 == 1.0, 0.0 == -0.0) but is sent as different bytes, so it is keyed by
+        # its encoded form, or HGET h 1.0 would be served the entry of HGET h 1.
+        redis_args = args
+        for arg in args:
+            if isinstance(arg, float):
+                encode = self._conn.encoder.encode
+                redis_args = tuple(
+                    encode(a) if isinstance(a, float) else a for a in args
+                )
+                break
         self._current_command_cache_key = CacheKey(
-            command=command, redis_keys=redis_keys, redis_args=args
+            command=command, redis_keys=redis_keys, redis_args=redis_args
         )
 
         is_hit = False
@@ -2734,11 +2757,15 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         return self._conn.handshake_metadata
 
-    def set_re_auth_token(self, token: TokenInterface):
+    def set_re_auth_token(self, token: TokenInterface | None):
         self._conn.set_re_auth_token(token)
 
     def re_auth(self):
-        self._conn.re_auth()
+        # A cache hit on another connection drains this socket under the pool
+        # lock, and the drain reads ordinary replies too, so the AUTH reply
+        # must not be in flight outside it
+        with self._pool_lock:
+            self._conn.re_auth()
 
     def mark_for_reconnect(self):
         self._conn.mark_for_reconnect()
@@ -4432,59 +4459,73 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
         self._checkpid()
-        with self._lock:
+        # Run the listeners, such as a deferred AUTH, while the connection is
+        # still in use, so no other thread can take it, and outside the pool
+        # lock, so their I/O does not block the pool. A listener error is
+        # raised once the connection is back.
+        listener_error = None
+        if connection in self._in_use_connections and self.owns_connection(connection):
             try:
-                self._in_use_connections.remove(connection)
-            except KeyError:
-                # Gracefully fail when a connection is returned to this pool
-                # that the pool doesn't actually own
-                return
-
-            if self.owns_connection(connection):
-                if connection.should_reconnect():
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Disconnecting released connection marked for reconnect: "
-                            f"{connection}, {connection.extract_connection_details()}"
-                        )
-                    connection.disconnect()
-                self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
                 )
+            except BaseException as e:
+                listener_error = e
+        try:
+            with self._lock:
+                try:
+                    self._in_use_connections.remove(connection)
+                except KeyError:
+                    # Gracefully fail when a connection is returned to this pool
+                    # that the pool doesn't actually own
+                    return
 
-                # Record state transition: USED -> IDLE
-                pool_name = get_pool_name(self)
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.USED,
-                    counter=-1,
-                )
-                record_connection_count(
-                    pool_name=pool_name,
-                    connection_state=ConnectionState.IDLE,
-                    counter=1,
-                )
-            else:
-                # Pool doesn't own this connection, do not add it back
-                # to the pool.
-                connection.disconnect()
-                # Subclasses such as SentinelConnectionPool can override
-                # owns_connection() with a comparison different from local PID
-                # ownership. When such a subclass rejects a connection, also require
-                # connection.pid == self.pid before reclaiming its slot.
-                if connection.pid == self.pid:
-                    self._created_connections -= 1
-                    # The connection was checked out by this process, so
-                    # decrement USED, which was counted in get_connection().
-                    # Connections inherited across a fork are skipped here,
-                    # their accounting belongs to the parent process.
+                if self.owns_connection(connection):
+                    if connection.should_reconnect():
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "Disconnecting released connection marked for "
+                                f"reconnect: {connection}, "
+                                f"{connection.extract_connection_details()}"
+                            )
+                        connection.disconnect()
+                    self._available_connections.append(connection)
+
+                    # Record state transition: USED -> IDLE
+                    pool_name = get_pool_name(self)
                     record_connection_count(
-                        pool_name=get_pool_name(self),
+                        pool_name=pool_name,
                         connection_state=ConnectionState.USED,
                         counter=-1,
                     )
-                return
+                    record_connection_count(
+                        pool_name=pool_name,
+                        connection_state=ConnectionState.IDLE,
+                        counter=1,
+                    )
+                else:
+                    # Pool doesn't own this connection, do not add it back
+                    # to the pool.
+                    connection.disconnect()
+                    # Subclasses such as SentinelConnectionPool can override
+                    # owns_connection() with a comparison different from local PID
+                    # ownership. When such a subclass rejects a connection, also require
+                    # connection.pid == self.pid before reclaiming its slot.
+                    if connection.pid == self.pid:
+                        self._created_connections -= 1
+                        # The connection was checked out by this process, so
+                        # decrement USED, which was counted in get_connection().
+                        # Connections inherited across a fork are skipped here,
+                        # their accounting belongs to the parent process.
+                        record_connection_count(
+                            pool_name=get_pool_name(self),
+                            connection_state=ConnectionState.USED,
+                            counter=-1,
+                        )
+                    return
+        finally:
+            if listener_error is not None:
+                raise listener_error
 
     def owns_connection(self, connection: "Connection") -> int:
         return connection.pid == self.pid
@@ -4533,30 +4574,71 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
+        """
+        Send AUTH with ``token`` on every connected free connection, and defer
+        it to the next release of every in-use one.
+
+        A free connection whose AUTH fails keeps ``token`` pending, like an
+        in-use one. The first error is raised after every connection is
+        handled, an ``AuthenticationError`` first.
+        """
+        auth_error = None
         first_error = None
         with self._lock:
-            for conn in self._available_connections:
-                try:
-                    conn.retry.call_with_retry(
-                        lambda: conn.send_command(
-                            "AUTH", token.try_get("oid"), token.get_value()
-                        ),
-                        lambda error: self._mock(error),
-                    )
-                    conn.retry.call_with_retry(
-                        lambda: conn.read_response(),
-                        lambda error: self._mock(error),
-                        is_retryable=lambda error: not isinstance(
-                            error, AuthenticationError
-                        ),
-                    )
-                except AuthenticationError:
-                    raise
-                except Exception as e:
-                    if first_error is None:
-                        first_error = e
+            # Send every AUTH before reading any reply, so the pool lock is
+            # held for about one round trip instead of one per connection
+            sent = []
+            # Replies read so far, in send order
+            done = 0
+            try:
+                for conn in self._available_connections:
+                    if not conn.is_connected:
+                        # It authenticates with current credentials when it
+                        # connects. Sending AUTH would connect it here, under the
+                        # pool lock.
+                        continue
+                    # Pending until the AUTH below succeeds
+                    conn.set_re_auth_token(token)
+                    try:
+                        conn.retry.call_with_retry(
+                            lambda: conn.send_command(
+                                "AUTH", token.try_get("oid"), token.get_value()
+                            ),
+                            lambda error: self._mock(error),
+                        )
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        sent.append(conn)
+                for conn in sent:
+                    try:
+                        conn.retry.call_with_retry(
+                            lambda: conn.read_response(),
+                            lambda error: self._mock(error),
+                            is_retryable=lambda error: not isinstance(
+                                error, AuthenticationError
+                            ),
+                        )
+                    except AuthenticationError as e:
+                        if auth_error is None:
+                            auth_error = e
+                    except Exception as e:
+                        if first_error is None:
+                            first_error = e
+                    else:
+                        conn.set_re_auth_token(None)
+                    done += 1
+            except BaseException:
+                # Interrupted, for example cancelled: the replies not read yet
+                # would be read by the next command on those connections
+                for conn in sent[done:]:
+                    conn.disconnect()
+                raise
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+        if auth_error is not None:
+            raise auth_error
         if first_error is not None:
             raise first_error
 
