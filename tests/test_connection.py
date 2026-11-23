@@ -361,6 +361,29 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
 
 
 @pytest.mark.fixed_client
+def test_import_raises_no_byteswarning_under_bb():
+    # ``redis/connection.py`` used to build frozensets mixing ``str`` and ``bytes``
+    # first characters (``"c"`` and ``b"c"`` hash equal), so importing redis under
+    # ``python -bb`` raised ``BytesWarning``. The sets are split by type now;
+    # importing in a child interpreter keeps the ``-bb`` flag out of this process.
+    env = dict(os.environ)
+    redis_root = os.path.dirname(os.path.dirname(redis.__file__))
+    env["PYTHONPATH"] = os.pathsep.join(
+        filter(None, [redis_root, env.get("PYTHONPATH")])
+    )
+    result = subprocess.run(
+        [sys.executable, "-bb", "-c", "import redis; import redis.asyncio"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.fixed_client
 @pytest.mark.skipif(
     not hasattr(select, "poll"), reason="select.poll not available on this platform"
 )

@@ -2089,14 +2089,18 @@ _NO_PENDING_HIT = object()
 
 # A command name that does not start with one of these cannot be ``CLIENT`` or ``RESET``,
 # so ``_cache_owned_command`` rejects nearly every command before it allocates anything.
-_CLIENT_FIRST_CHARS = frozenset(("c", "C", b"c", b"C"))
-_RESET_FIRST_CHARS = frozenset(("r", "R", b"r", b"R"))
+# The ``str`` and ``bytes`` spellings live in separate sets: ``"c"`` and ``b"c"`` hash
+# equal, so one mixed set would compare ``str`` with ``bytes`` and raise
+# ``BytesWarning`` under ``python -bb``.
+_CLIENT_FIRST_CHARS = frozenset(("c", "C"))
+_CLIENT_FIRST_CHARS_BYTES = frozenset((b"c", b"C"))
+_RESET_FIRST_CHARS = frozenset(("r", "R"))
+_RESET_FIRST_CHARS_BYTES = frozenset((b"r", b"R"))
 # ``pack`` splits the command name on whitespace, so a name padded with it still reaches
 # the server as ``CLIENT ...`` or ``RESET``. It encodes a ``str`` name before splitting,
 # so ASCII whitespace is the only kind that splits.
-_WHITESPACE_CHARS = frozenset(
-    (*" \t\n\r\x0b\x0c", *(bytes((c,)) for c in b" \t\n\r\x0b\x0c"))
-)
+_WHITESPACE_CHARS = frozenset(" \t\n\r\x0b\x0c")
+_WHITESPACE_CHARS_BYTES = frozenset(bytes((c,)) for c in b" \t\n\r\x0b\x0c")
 
 # The ``CLIENT`` subcommands the cache owns. ``TRACKINGINFO`` and ``GETREDIR`` only read the
 # tracking state, so they are not here.
@@ -2117,13 +2121,21 @@ def _cache_owned_command(args) -> str | None:
             return None
         command = bytes(command)
     first_char = command[:1]
-    if first_char in _RESET_FIRST_CHARS:
+    if isinstance(first_char, bytes):
+        reset_first_chars = _RESET_FIRST_CHARS_BYTES
+        client_first_chars = _CLIENT_FIRST_CHARS_BYTES
+        whitespace_chars = _WHITESPACE_CHARS_BYTES
+    else:
+        reset_first_chars = _RESET_FIRST_CHARS
+        client_first_chars = _CLIENT_FIRST_CHARS
+        whitespace_chars = _WHITESPACE_CHARS
+    if first_char in reset_first_chars:
         # ``RESET`` takes no arguments, so only a five-character name, or one followed by
         # whitespace, can match. The check keeps the many other ``R`` commands (``RPOP``,
         # ``RENAME``, ...) allocation-free.
-        if len(command) != 5 and command[5:6] not in _WHITESPACE_CHARS:
+        if len(command) != 5 and command[5:6] not in whitespace_chars:
             return None
-    elif first_char not in _CLIENT_FIRST_CHARS and first_char not in _WHITESPACE_CHARS:
+    elif first_char not in client_first_chars and first_char not in whitespace_chars:
         return None
     words = str_if_bytes(command).upper().split()
     if not words:
