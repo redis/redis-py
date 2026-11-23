@@ -310,6 +310,43 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_equal_int_and_float_args_do_not_share_an_entry(self, r):
+        # 1 == 1.0 and 0.0 == -0.0, but they are sent as the different fields
+        # "1", "1.0", "0.0" and "-0.0", so a read of one must not be served the
+        # entry of the other.
+        cache = r.get_cache()
+        r.hset("h", 1, "int")
+        r.hset("h", 1.0, "float")
+        r.hset("h", 0.0, "zero")
+        r.hset("h", -0.0, "negzero")
+        size = cache.size
+        assert r.hget("h", 1) in [b"int", "int"]
+        assert r.hget("h", 1.0) in [b"float", "float"]
+        assert r.hget("h", 0.0) in [b"zero", "zero"]
+        assert r.hget("h", -0.0) in [b"negzero", "negzero"]
+        assert cache.size == size + 4
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
         ],
         ids=["single", "pool"],
         indirect=True,

@@ -2873,7 +2873,9 @@ class TestPubSubTimeoutPropagation:
         p.subscribe("partly-received")
         assert wait_for_message(p, timeout=1.0) is not None
         r.publish("partly-received", "hello")
-        assert p.connection.can_read(timeout=1.0)
+        assert p.connection.can_read(
+            timeout=5.0 if is_redis_enterprise_cluster() else 1.0
+        )
 
         # What the parser raises when the rest of the message does not arrive
         # within the read timeout; the unread data stays on the connection.
@@ -2894,7 +2896,9 @@ class TestPubSubTimeoutPropagation:
         """
         p = r.pubsub(push_handler_func=lambda message: None)
         p.subscribe("partly-received")
-        assert p.connection.can_read(timeout=1.0)
+        assert p.connection.can_read(
+            timeout=5.0 if is_redis_enterprise_cluster() else 1.0
+        )
 
         with (
             mock.patch.object(p.connection, "read_response", side_effect=TimeoutError),

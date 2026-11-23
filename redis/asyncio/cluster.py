@@ -91,6 +91,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     _error_to_raise,
     _fill_missing_redirect_host,
+    _is_demoted_primary,
     _keep_target_replies,
     _merge_multi_shard_replies,
     _MultiShardSplit,
@@ -148,6 +149,7 @@ from redis.exceptions import (
     MaxClientsReachedError,
     MaxConnectionsError,
     MovedError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -442,7 +444,8 @@ class RedisCluster(
 
           Number of times to retry before raising an error when :class:`~.TimeoutError`,
           :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError`
-          or :class:`~.ClusterDownError` are encountered
+          or :class:`~.ClusterDownError` are encountered, or when a node cached as a
+          primary answers with :class:`~.ReadOnlyError`
     :param retry:
         | A retry object that defines the retry strategy and the number of
           retries for the cluster client. Its backoff sets the delay before each
@@ -961,8 +964,13 @@ class RedisCluster(
                         # the current topology, which every other task is using,
                         # and leaves _initialize set so the next command retries.
                         if first_initialize:
-                            await self.nodes_manager.aclose()
-                            await self.nodes_manager.aclose("startup_nodes")
+                            # Every node is closed, and the refresh error is
+                            # raised: a close failure of a client that never
+                            # initialized must not hide why it failed
+                            try:
+                                await self.nodes_manager._aclose_all()
+                            except Exception:
+                                pass
                             raise
                         if isinstance(e, RedisClusterException):
                             # No node answered, or nodes answered with a
@@ -1052,8 +1060,7 @@ class RedisCluster(
                         for task in tasks:
                             task.cancel()
                         await asyncio.gather(*tasks, return_exceptions=True)
-                    await self.nodes_manager.aclose()
-                    await self.nodes_manager.aclose("startup_nodes")
+                    await self.nodes_manager._aclose_all()
 
     @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -1876,7 +1883,10 @@ class RedisCluster(
                     **kwargs,
                 )
             except Exception as e:
-                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
+                if retry_attempts > 0 and (
+                    type(e) in self.__class__.ERRORS_ALLOW_RETRY
+                    or getattr(e, "demoted_primary", False)
+                ):
                     if is_default_node:
                         # Replace the default cluster node
                         self.replace_default_node()
@@ -2206,6 +2216,11 @@ class RedisCluster(
                     connection=target_node,
                 )
             except ResponseError as e:
+                if _is_demoted_primary(e, target_node):
+                    e.demoted_primary = True
+                    # Ask for a topology refresh, run by the next attempt, of
+                    # any command, once due; the caller retries this one
+                    self._request_refresh()
                 e.connection = target_node
                 await self._record_command_metric(
                     command_name=command,
@@ -2501,7 +2516,7 @@ class ClusterNode:
             ),
             return_exceptions=True,
         )
-        exc = next((res for res in ret if isinstance(res, Exception)), None)
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
         if exc:
             raise exc
 
@@ -2537,6 +2552,11 @@ class ClusterNode:
         Disconnect a connection if it's marked for reconnect.
         This implements lazy disconnection to avoid race conditions.
         The connection will auto-reconnect on next use.
+
+        The old socket is closed without waiting for the close to finish. The
+        caller never needs it again, so a slow close must not fail the command,
+        and after a reply was read it must not turn a finished command into a
+        retried one.
         """
         if connection.should_reconnect():
             # Render the connection before disconnecting: extract_connection_details()
@@ -2549,7 +2569,7 @@ class ClusterNode:
                     "Disconnecting acquired connection marked for reconnect: "
                     f"{connection}, {connection.extract_connection_details()}"
                 )
-            await connection.disconnect()
+            await connection.disconnect(nowait=True)
 
     async def _prepare_acquired_connection(self, connection: Connection) -> None:
         """
@@ -3633,12 +3653,36 @@ class NodesManager:
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-        await asyncio.gather(
+        # Wait for every node to close before raising, so one node's close
+        # failure does not return while the others are still closing
+        ret = await asyncio.gather(
             *(
                 asyncio.create_task(node.disconnect())
                 for node in getattr(self, attr).values()
-            )
+            ),
+            return_exceptions=True,
         )
+        exc = next((res for res in ret if isinstance(res, BaseException)), None)
+        if exc:
+            raise exc
+
+    async def _aclose_all(self) -> None:
+        """
+        Close the nodes of the topology, then the startup nodes.
+
+        The startup nodes are closed even when closing the topology nodes fails
+        or is cancelled. The first error is the one raised, so a later close
+        failure cannot replace it, or turn a cancellation into an error.
+        """
+        try:
+            await self.aclose()
+        except BaseException:
+            try:
+                await self.aclose("startup_nodes")
+            except Exception:
+                pass
+            raise
+        await self.aclose("startup_nodes")
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
@@ -4141,7 +4185,8 @@ class PipelineStrategy(AbstractStrategy):
         self, raise_on_error: bool = True, allow_redirections: bool = True
     ) -> List[Any]:
         """
-        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY as many
+        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
+        a READONLY reply of a node cached as a primary, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -4181,7 +4226,11 @@ class PipelineStrategy(AbstractStrategy):
 
                 except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                     raise
-                except RedisCluster.ERRORS_ALLOW_RETRY as e:
+                except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
+                    if isinstance(e, ReadOnlyError) and not getattr(
+                        e, "demoted_primary", False
+                    ):
+                        raise
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
                         # should be raised.
@@ -4237,6 +4286,8 @@ class PipelineStrategy(AbstractStrategy):
                 Optional[List[_MultiShardSplit]],
             ]
         ] = []
+        # The nodes the caller named for a command, by its position
+        named_targets: Dict[int, Any] = {}
         # Routing does not suspend either, so a large batch yields to the event loop
         # while it is routed, as the reply loops do. A cancellation at the yield comes
         # before anything is sent, and execute() resets the pipeline.
@@ -4257,6 +4308,7 @@ class PipelineStrategy(AbstractStrategy):
             splits = None
             if target_nodes_specified:
                 target_nodes = client._parse_target_nodes(passed_targets)
+                named_targets[cmd.position] = passed_targets
             else:
                 request_policy = command_policies.request_policy
                 if request_policy == RequestPolicy.MULTI_SHARD:
@@ -4358,6 +4410,35 @@ class PipelineStrategy(AbstractStrategy):
         # Let every node task settle before raising, so a retry never resends
         # commands that a sibling task is still executing
         errors = await asyncio.gather(*tasks, return_exceptions=True)
+        # A primary that answered READONLY was demoted: ask for a topology refresh, run
+        # by the next attempt once due. Marked before the replies are merged and before
+        # a node error is raised below, so a retry resends the command either way.
+        demoted = False
+        for (node, commands), failed in zip(nodes.values(), errors):
+            if failed is not True:
+                # Only a node whose replies hold an error can hold a READONLY
+                continue
+            node_demoted = False
+            for cmd in commands:
+                if _is_demoted_primary(cmd.result, node):
+                    node_demoted = True
+                    named = named_targets.get(cmd.position)
+                    if named is None:
+                        cmd.result.demoted_primary = True
+                    else:
+                        # Not retried, as RedisCluster does not retry a command with
+                        # target nodes, and resent to them if the attempt is retried
+                        # for another command
+                        cmd.target_nodes = named
+            if node_demoted:
+                demoted = True
+                if node == client.get_default_node():
+                    # Replace it now, as a command does: the refresh runs
+                    # only once due
+                    client.replace_default_node()
+        if demoted:
+            client._request_refresh()
+
         if fanned_out:
             # A node whose task raised answered none of its commands, so its copies are
             # not taken for successes when they are merged - and the slots of a split
@@ -4994,8 +5075,10 @@ class TransactionStrategy(AbstractStrategy):
             error, self.SLOT_REDIRECT_ERRORS + self.CONNECTION_ERRORS
         ):
             if self._transaction_connection and self._transaction_node:
-                # Disconnect and release back to pool
-                await self._transaction_connection.disconnect()
+                # Disconnect and release back to pool. The socket is discarded,
+                # so the close is not waited for: a close that times out must
+                # not replace the error and stop the retry.
+                await self._transaction_connection.disconnect(nowait=True)
                 self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
 

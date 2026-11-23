@@ -84,6 +84,7 @@ from redis.exceptions import (
     MaxClientsReachedError,
     MaxConnectionsError,
     MovedError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -795,6 +796,22 @@ def _should_request_refresh(reinitialize_steps: int, reinitialize_counter: int) 
     return bool(reinitialize_steps) and reinitialize_counter % reinitialize_steps == 0
 
 
+def _is_demoted_primary(error: Any, node: "ClusterNode") -> bool:
+    """
+    Return whether :error:, read from :node:, shows that the node is no longer
+    the primary the client takes it for. Only a replica answers READONLY, so a
+    node cached as a primary that does was demoted by a failover the client has
+    not seen yet, and a command without keys gets no MOVED to learn that from.
+
+    The caller sets ``demoted_primary`` on the error and asks for a topology
+    refresh, and the retry loops of the commands and pipelines retry such an
+    error like one of ``ERRORS_ALLOW_RETRY``. A READONLY from a node cached as a
+    replica does not count: the write was sent there, and no refresh changes
+    its answer.
+    """
+    return isinstance(error, ReadOnlyError) and node.server_type == PRIMARY
+
+
 def _error_to_raise(
     last_refresh_unreachable_args: Optional[Tuple[Any, ...]],
     error: Exception,
@@ -1240,7 +1257,8 @@ class RedisCluster(
 
             Number of times to retry before raising an error when
             :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
-            :class:`~.ClusterDownError` are encountered
+            :class:`~.ClusterDownError` are encountered, or when a node cached as a
+            primary answers with :class:`~.ReadOnlyError`
         :param retry:
             A retry object that defines the retry strategy and the number of
             retries for the cluster client. Its backoff sets the delay before
@@ -2537,7 +2555,10 @@ class RedisCluster(
                     **kwargs,
                 )
             except Exception as e:
-                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
+                if retry_attempts > 0 and (
+                    type(e) in self.__class__.ERRORS_ALLOW_RETRY
+                    or getattr(e, "demoted_primary", False)
+                ):
                     if is_default_node:
                         # Replace the default cluster node
                         self.replace_default_node()
@@ -2941,6 +2962,11 @@ class RedisCluster(
                 )
                 raise
             except ResponseError as e:
+                if _is_demoted_primary(e, target_node):
+                    e.demoted_primary = True
+                    # Ask for a topology refresh, run by the next attempt, of
+                    # any command, once due; the caller retries this one
+                    self.nodes_manager._request_refresh()
                 # this is used to report the metrics based on host and port info
                 # ResponseError typically happens after get_connection() succeeds,
                 # so connection should be available
@@ -6403,7 +6429,8 @@ class PipelineStrategy(AbstractStrategy):
         self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
-        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY as many
+        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
+        a READONLY reply of a node cached as a primary, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -6439,7 +6466,11 @@ class PipelineStrategy(AbstractStrategy):
                 )
             except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                 raise
-            except RedisCluster.ERRORS_ALLOW_RETRY as e:
+            except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
+                if isinstance(e, ReadOnlyError) and not getattr(
+                    e, "demoted_primary", False
+                ):
+                    raise
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -6508,6 +6539,8 @@ class PipelineStrategy(AbstractStrategy):
                 Optional[List[_MultiShardSplit]],
             ]
         ] = []
+        # The nodes the caller named for a command, by its position
+        named_targets: Dict[int, Any] = {}
         nodes_written = 0
         nodes_read = 0
 
@@ -6526,6 +6559,7 @@ class PipelineStrategy(AbstractStrategy):
                 slot = None
                 if passed_targets and not self._is_nodes_flag(passed_targets):
                     target_nodes = self._parse_target_nodes(passed_targets)
+                    named_targets[c.position] = passed_targets
 
                     # The caller named its targets, so the command's own aggregation must
                     # not apply to their replies - see
@@ -6734,7 +6768,8 @@ class PipelineStrategy(AbstractStrategy):
                 nodes_written += 1
                 n.write()
 
-            for n in node_commands:
+            demoted = False
+            for node_name, n in nodes.items():
                 n.read()
 
                 # Find the first error in this node's commands, if any
@@ -6743,6 +6778,27 @@ class PipelineStrategy(AbstractStrategy):
                     if isinstance(cmd.result, Exception):
                         node_error = cmd.result
                         break
+
+                if node_error is not None:
+                    # A primary that answered READONLY was demoted
+                    node_demoted = False
+                    for cmd in n.commands:
+                        if _is_demoted_primary(cmd.result, node_objs[node_name]):
+                            node_demoted = True
+                            named = named_targets.get(cmd.position)
+                            if named is None:
+                                cmd.result.demoted_primary = True
+                            else:
+                                # Not retried, as RedisCluster does not retry a
+                                # command with target nodes, and resent to them
+                                # if the attempt is retried for another command
+                                cmd.target_nodes = named
+                    if node_demoted:
+                        demoted = True
+                        if node_objs[node_name] == self._pipe.get_default_node():
+                            # Replace it now, as a command does: the refresh
+                            # runs only once due
+                            self._pipe.replace_default_node()
 
                 record_operation_duration(
                     command_name="PIPELINE",
@@ -6753,6 +6809,10 @@ class PipelineStrategy(AbstractStrategy):
                     error=node_error,
                 )
                 nodes_read += 1
+
+            if demoted:
+                # Ask for a topology refresh, run by the next attempt once due
+                self._nodes_manager._request_refresh()
         finally:
             # release all the redis connections we allocated earlier
             # back into the connection pool.
