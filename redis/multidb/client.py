@@ -257,8 +257,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 database,
                 timeout=self._sync_health_check_timeout((database,)),
             )
-        except UnhealthyDatabaseException:
-            if not skip_initial_health_check:
+        except BaseException as e:
+            if not skip_initial_health_check or not isinstance(
+                e, UnhealthyDatabaseException
+            ):
                 # The rejected database is never used, but its client and
                 # health checks hold resources: they are closed with the
                 # others on close()
