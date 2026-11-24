@@ -55,9 +55,10 @@ def decode_list(b, *, decoder=nativestr):
     Given a non-deserializable object, make a best effort to
     return a useful set of results.
 
-    ``decoder`` converts each item to a string; pass :func:`decodestr`
-    when the items are key names rather than JSON values, so a literal
-    ``"null"`` is kept instead of becoming ``None``.
+    ``decoder`` converts each item to a string; pass
+    :func:`redis.utils.str_if_bytes` when the items are key names rather
+    than JSON values, so a literal ``"null"`` is kept instead of becoming
+    ``None``.
     """
     if isinstance(b, list):
         return [decoder(obj) for obj in b]

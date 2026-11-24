@@ -13,6 +13,7 @@ from typing import (
 
 import redis
 from redis.typing import ChannelT, PubSubHandler, Subscription
+from redis.utils import str_if_bytes
 
 
 def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
@@ -55,23 +56,14 @@ def pubsub_subscription_args(
     ]
 
 
-def decodestr(x):
-    """Return the decoded binary string, or a string, depending on type.
-
-    Unlike :func:`nativestr`, the string ``"null"`` is returned as-is:
-    this is for key and label names, where ``null`` is an ordinary string
-    rather than a JSON null value.
-    """
-    return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
-
-
 def nativestr(x):
     """Return the decoded binary string, or a string, depending on type.
 
     The string ``"null"`` decodes to ``None``: a decoded JSON value.
-    Key and label names must use :func:`decodestr` instead.
+    Key and label names must use :func:`redis.utils.str_if_bytes`
+    instead, so a literal ``"null"`` stays ``"null"``.
     """
-    r = decodestr(x)
+    r = str_if_bytes(x)
     if r == "null":
         return
     return r
@@ -87,9 +79,10 @@ def delist(x):
 def parse_to_list(response, *, decoder=nativestr):
     """Optimistically parse the response to a list.
 
-    ``decoder`` converts each item to a string; pass :func:`decodestr`
-    when the items are key names rather than JSON values, so a literal
-    ``"null"`` is kept instead of becoming ``None``.
+    ``decoder`` converts each item to a string; pass
+    :func:`redis.utils.str_if_bytes` when the items are key names rather
+    than JSON values, so a literal ``"null"`` is kept instead of becoming
+    ``None``.
     """
     res = []
 

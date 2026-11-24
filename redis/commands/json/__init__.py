@@ -4,11 +4,11 @@ from json import JSONDecodeError, JSONDecoder, JSONEncoder, loads
 from typing import Literal
 
 import redis
+from redis.utils import str_if_bytes
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
     apply_module_callbacks,
-    decodestr,
     get_legacy_responses,
     get_protocol_version,
     nativestr,
@@ -90,7 +90,7 @@ class _JSONBase(JSONCommands):
             "JSON.TYPE": lambda r: None if r == [None] else r,
         }
         # RESP3 wire normalised back to today's RESP2 Python shapes:
-        # keep ``decodestr`` for OBJKEYS, unwrap JSON.TYPE one level so
+        # keep ``str_if_bytes`` for OBJKEYS, unwrap JSON.TYPE one level so
         # legacy paths return scalars and missing keys return ``None``,
         # and re-encode native floats inside JSON.RESP back to string
         # form. NUMINCRBY/NUMMULTBY use the command path captured at the
@@ -151,7 +151,7 @@ class _JSONBase(JSONCommands):
         """
         if obj is None:
             return obj
-        return decode_list(obj, decoder=decodestr)
+        return decode_list(obj, decoder=str_if_bytes)
 
     def _decode_json_numop(self, obj, **kwargs):
         """Decode a JSON.NUMINCRBY / JSON.NUMMULTBY result and normalise
