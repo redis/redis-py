@@ -594,7 +594,7 @@ class SearchCommands:
         rows = []
         for result_item in data.get("results", []):
             result_item = {str_if_bytes(k): v for k, v in result_item.items()}
-            extra_attrs = result_item.get("extra_attributes", {})
+            extra_attrs = result_item.get("extra_attributes") or {}
             # Convert dict to flat list [key, value, key, value, ...]
             # to match RESP2 row format consumers expect.
             flat = []

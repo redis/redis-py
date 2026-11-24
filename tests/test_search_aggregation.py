@@ -65,3 +65,26 @@ class TestReducerAlias:
     def test_fieldname_alias_without_field(self):
         with pytest.raises(ValueError, match="Cannot use FIELDNAME alias"):
             reducers.count().alias(FIELDNAME)
+
+
+@pytest.mark.fixed_client
+class TestAggregateResp3ExpiredDocument:
+    def test_null_extra_attributes_gives_empty_row(self):
+        from unittest.mock import patch
+
+        import redis
+
+        client = redis.Redis(protocol=3, legacy_responses=False)
+        reply = {
+            b"total_results": 2,
+            b"results": [
+                {b"extra_attributes": {b"title": b"still here"}},
+                {b"extra_attributes": None},
+            ],
+        }
+
+        with patch.object(client, "execute_command", return_value=reply):
+            result = client.ft("idx").aggregate(AggregateRequest("*"))
+
+        assert result.total == 2
+        assert result.rows == [[b"title", b"still here"], []]
