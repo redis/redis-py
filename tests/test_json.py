@@ -3,6 +3,7 @@ import json
 import pytest
 import redis
 from redis import Redis, exceptions
+from redis.commands.helpers import decodestr
 from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
@@ -1623,6 +1624,20 @@ def test_decoders_and_unstring():
     assert decode_list(b"45.55") == 45.55
     assert decode_list("45.55") == 45.55
     assert decode_list(["hello", b"world"]) == ["hello", "world"]
+
+
+@pytest.mark.fixed_client
+def test_objkeys_keeps_null_key_name():
+    # Server-free: a key literally named "null" stays "null" instead of
+    # becoming None (the JSON null mapping applies to values, not names).
+    assert decode_list([b"null", b"a"], decoder=decodestr) == ["null", "a"]
+    # The JSON null value mapping itself is unchanged.
+    assert decode_list([b"null", b"a"]) == [None, "a"]
+
+    r = redis.Redis(protocol=2)
+    r.json()  # registers the JSON callbacks
+    assert r.response_callbacks["JSON.OBJKEYS"]([b"null", b"a"]) == ["null", "a"]
+    assert r.response_callbacks["JSON.OBJKEYS"](None) is None
 
 
 @pytest.mark.fixed_client

@@ -1,4 +1,4 @@
-from ..helpers import nativestr
+from ..helpers import decodestr, nativestr, parse_to_list
 
 # With GROUPBY and WITHLABELS, RESP2 reports the reducer and the sources as
 # these labels. RESP3 reports them outside the labels.
@@ -8,7 +8,7 @@ _REDUCE_PSEUDO_LABELS = frozenset(
 
 
 def list_to_dict(aList):
-    return {nativestr(aList[i][0]): nativestr(aList[i][1]) for i in range(len(aList))}
+    return {decodestr(aList[i][0]): decodestr(aList[i][1]) for i in range(len(aList))}
 
 
 def _pairs_to_dict(pairs):
@@ -16,16 +16,27 @@ def _pairs_to_dict(pairs):
     return {pairs[i][0]: pairs[i][1] for i in range(len(pairs))}
 
 
-def _nativestr_dict(d):
-    """Apply ``nativestr`` to every key and string-typed value of ``d``.
+def _decodestr_dict(d):
+    """Apply ``decodestr`` to every key and string-typed value of ``d``.
 
     Used by the RESP3-to-RESP2-legacy adapters so labels coming from a
     RESP3 native map match today's RESP2 ``list_to_dict`` semantics.
+    A label literally named ``"null"`` stays ``"null"``.
     """
     return {
-        nativestr(k): nativestr(v) if isinstance(v, (bytes, str)) else v
+        decodestr(k): decodestr(v) if isinstance(v, (bytes, str)) else v
         for k, v in d.items()
     }
+
+
+def parse_queryindex(response, **kwargs):
+    """Normalize the TS.QUERYINDEX reply to a list of key names.
+
+    Key names are decoded without the JSON ``null`` mapping that
+    ``parse_to_list`` applies to values, so a key literally named
+    ``"null"`` stays ``"null"``.
+    """
+    return parse_to_list(response, decoder=decodestr)
 
 
 def parse_query_labels(response, **kwargs):
@@ -102,11 +113,11 @@ def parse_m_get(response):
     res = []
     for item in response:
         if not item[2]:
-            res.append({nativestr(item[0]): [list_to_dict(item[1]), None, None]})
+            res.append({decodestr(item[0]): [list_to_dict(item[1]), None, None]})
         else:
             res.append(
                 {
-                    nativestr(item[0]): [
+                    decodestr(item[0]): [
                         list_to_dict(item[1]),
                         int(item[2][0]),
                         float(item[2][1]),
@@ -149,12 +160,12 @@ def parse_m_get_resp3_to_resp2_legacy(response, **kwargs):
     """RESP3 wire → today's RESP2 legacy shape for TS.MGET."""
     res = []
     for key, item in response.items():
-        labels = _nativestr_dict(item[0]) if item[0] else {}
+        labels = _decodestr_dict(item[0]) if item[0] else {}
         sample = item[1] if len(item) > 1 else []
         if not sample:
-            res.append({nativestr(key): [labels, None, None]})
+            res.append({decodestr(key): [labels, None, None]})
         else:
-            res.append({nativestr(key): [labels, int(sample[0]), float(sample[1])]})
+            res.append({decodestr(key): [labels, int(sample[0]), float(sample[1])]})
     return sorted(res, key=lambda d: list(d.keys()))
 
 
@@ -162,7 +173,7 @@ def parse_m_range(response, **kwargs):
     """Parse multi range response (RESP2 wire)."""
     res = []
     for item in response:
-        res.append({nativestr(item[0]): [list_to_dict(item[1]), parse_range(item[2])]})
+        res.append({decodestr(item[0]): [list_to_dict(item[1]), parse_range(item[2])]})
     return sorted(res, key=lambda d: list(d.keys()))
 
 
@@ -224,7 +235,7 @@ def parse_m_range_resp3_to_resp2_legacy(response, **kwargs):
     """RESP3 wire → today's RESP2 legacy shape for TS.MRANGE / TS.MREVRANGE."""
     res = []
     for key, item in response.items():
-        labels = _nativestr_dict(item[0]) if item[0] else {}
+        labels = _decodestr_dict(item[0]) if item[0] else {}
         samples = item[-1]
-        res.append({nativestr(key): [labels, parse_range(samples)]})
+        res.append({decodestr(key): [labels, parse_range(samples)]})
     return sorted(res, key=lambda d: list(d.keys()))

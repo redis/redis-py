@@ -3,6 +3,7 @@ import string
 import pytest
 
 from redis.commands.helpers import (
+    decodestr,
     delist,
     list_or_args,
     nativestr,
@@ -33,6 +34,23 @@ def test_nativestr():
     assert nativestr("teststr") == "teststr"
     assert nativestr(b"teststr") == "teststr"
     assert nativestr("null") is None
+
+
+@pytest.mark.fixed_client
+def test_decodestr_keeps_null():
+    # decodestr() is for key and label names, where "null" is an
+    # ordinary string rather than a JSON null value.
+    assert decodestr("null") == "null"
+    assert decodestr(b"null") == "null"
+    assert decodestr(b"teststr") == "teststr"
+    assert decodestr(None) is None
+
+
+@pytest.mark.fixed_client
+def test_parse_to_list_with_decodestr_decoder():
+    # A key literally named "null" stays "null"; numeric coercion is kept.
+    assert parse_to_list([b"null", b"cpu"], decoder=decodestr) == ["null", "cpu"]
+    assert parse_to_list([b"2"], decoder=decodestr) == [2]
 
 
 @pytest.mark.fixed_client

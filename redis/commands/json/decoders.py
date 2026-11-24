@@ -50,15 +50,19 @@ def unstring(obj):
     return obj
 
 
-def decode_list(b):
+def decode_list(b, *, decoder=nativestr):
     """
     Given a non-deserializable object, make a best effort to
     return a useful set of results.
+
+    ``decoder`` converts each item to a string; pass :func:`decodestr`
+    when the items are key names rather than JSON values, so a literal
+    ``"null"`` is kept instead of becoming ``None``.
     """
     if isinstance(b, list):
-        return [nativestr(obj) for obj in b]
+        return [decoder(obj) for obj in b]
     elif isinstance(b, bytes):
-        return unstring(nativestr(b))
+        return unstring(decoder(b))
     elif isinstance(b, str):
         return unstring(b)
     return b

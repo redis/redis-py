@@ -5,7 +5,15 @@ import pytest
 import redis
 from redis.commands.timeseries.commands import TimeSeriesCommands
 from redis.commands.timeseries.info import TSInfo, parse_info_unified
-from redis.commands.timeseries.utils import parse_m_range_unified
+from redis.commands.timeseries.utils import (
+    list_to_dict,
+    parse_m_get,
+    parse_m_get_resp3_to_resp2_legacy,
+    parse_m_range,
+    parse_m_range_resp3_to_resp2_legacy,
+    parse_m_range_unified,
+    parse_queryindex,
+)
 from redis.utils import SENTINEL
 
 from .conftest import (
@@ -1356,6 +1364,44 @@ def test_info_resp3_keeps_null_labels():
     # Server-free: a decoded RESP3 map keeps a literal "null" label as is.
     info = TSInfo({"labels": {"null": "null", "currentLabel": "currentData"}})
     assert info.labels == {"null": "null", "currentLabel": "currentData"}
+
+
+@pytest.mark.fixed_client
+def test_info_resp2_keeps_null_labels():
+    # Server-free: the RESP2 path must match — a label literally named
+    # "null" (or with the value "null") stays "null" instead of None.
+    info = TSInfo(
+        [b"labels", [[b"region", b"null"], [b"env", b"prod"]], b"totalSamples", 0]
+    )
+    assert info.labels == {"region": "null", "env": "prod"}
+    assert list_to_dict([[b"region", b"null"]]) == {"region": "null"}
+
+
+@pytest.mark.fixed_client
+def test_queryindex_keeps_null_key_name():
+    # Server-free: a time series key literally named "null" stays "null".
+    assert parse_queryindex([b"null", b"cpu"]) == ["null", "cpu"]
+    assert parse_queryindex(None) == []
+    # Numeric key names keep the existing int coercion.
+    assert parse_queryindex([b"2"]) == [2]
+
+
+@pytest.mark.fixed_client
+def test_mget_mrange_keep_null_key_name():
+    # Server-free: a series key literally named "null" stays "null" in
+    # the MGET/MRANGE result dicts, on both wire formats.
+    assert parse_m_get([[b"null", [[b"region", b"null"]], []]]) == [
+        {"null": [{"region": "null"}, None, None]}
+    ]
+    assert parse_m_range([[b"null", [[b"region", b"null"]], []]]) == [
+        {"null": [{"region": "null"}, []]}
+    ]
+    assert parse_m_get_resp3_to_resp2_legacy({b"null": [{b"region": b"null"}, []]}) == [
+        {"null": [{"region": "null"}, None, None]}
+    ]
+    assert parse_m_range_resp3_to_resp2_legacy(
+        {b"null": [{b"region": b"null"}, [], [[1000, 1.5]]]}
+    ) == [{"null": [{"region": "null"}, [(1000, 1.5)]]}]
 
 
 @pytest.mark.fixed_client

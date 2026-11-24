@@ -55,9 +55,23 @@ def pubsub_subscription_args(
     ]
 
 
+def decodestr(x):
+    """Return the decoded binary string, or a string, depending on type.
+
+    Unlike :func:`nativestr`, the string ``"null"`` is returned as-is:
+    this is for key and label names, where ``null`` is an ordinary string
+    rather than a JSON null value.
+    """
+    return x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+
+
 def nativestr(x):
-    """Return the decoded binary string, or a string, depending on type."""
-    r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
+    """Return the decoded binary string, or a string, depending on type.
+
+    The string ``"null"`` decodes to ``None``: a decoded JSON value.
+    Key and label names must use :func:`decodestr` instead.
+    """
+    r = decodestr(x)
     if r == "null":
         return
     return r
@@ -70,8 +84,13 @@ def delist(x):
     return [nativestr(obj) for obj in x]
 
 
-def parse_to_list(response):
-    """Optimistically parse the response to a list."""
+def parse_to_list(response, *, decoder=nativestr):
+    """Optimistically parse the response to a list.
+
+    ``decoder`` converts each item to a string; pass :func:`decodestr`
+    when the items are key names rather than JSON values, so a literal
+    ``"null"`` is kept instead of becoming ``None``.
+    """
     res = []
 
     special_values = {"infinity", "nan", "-infinity"}
@@ -87,7 +106,7 @@ def parse_to_list(response):
             res.append(item)
             continue
         try:
-            item_str = nativestr(item)
+            item_str = decoder(item)
         except TypeError:
             res.append(None)
             continue

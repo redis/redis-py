@@ -8,7 +8,6 @@ from ..helpers import (
     apply_module_callbacks,
     get_legacy_responses,
     get_protocol_version,
-    parse_to_list,
 )
 from .commands import (
     ALTER_CMD,
@@ -42,6 +41,7 @@ from .utils import (
     parse_m_range_unified,
     parse_n_range,
     parse_query_labels,
+    parse_queryindex,
     parse_range,
     parse_range_unified,
 )
@@ -76,7 +76,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
             MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
-            QUERYINDEX_CMD: parse_to_list,
+            QUERYINDEX_CMD: parse_queryindex,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
         }
@@ -109,7 +109,7 @@ class _TimeSeriesBase(TimeSeriesCommands):
             MGET_CMD: parse_m_get_resp3_to_resp2_legacy,
             MRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
             MREVRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
-            QUERYINDEX_CMD: parse_to_list,
+            QUERYINDEX_CMD: parse_queryindex,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
         }
