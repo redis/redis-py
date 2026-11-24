@@ -66,6 +66,7 @@ class CallbacksOptions(Enum):
     WITHATTRIBS = "WITHATTRIBS"
     ALLOW_DECODING = "ALLOW_DECODING"
     RESP3 = "RESP3"
+    ENCODING = "ENCODING"
 
 
 class VectorSetCommands(CommandsProtocol):
@@ -181,6 +182,14 @@ class VectorSetCommands(CommandsProtocol):
 
         return self.execute_command(VADD_CMD, key, *pieces)
 
+    def _attributes_encoding(self) -> str:
+        # Dictionary attributes are serialized and stored with the connection
+        # encoding, so the callbacks that parse them back need the same one.
+        get_connection_kwargs = getattr(self.client, "get_connection_kwargs", None)
+        if get_connection_kwargs is None:
+            return "utf-8"
+        return get_connection_kwargs().get("encoding", "utf-8")
+
     @overload
     def vsim(
         self: SyncClientProtocol,
@@ -281,6 +290,7 @@ class VectorSetCommands(CommandsProtocol):
             if with_attribs:
                 pieces.append("WITHATTRIBS")
                 options[CallbacksOptions.WITHATTRIBS.value] = True
+                options[CallbacksOptions.ENCODING.value] = self._attributes_encoding()
 
         if count:
             pieces.extend(["COUNT", count])
@@ -527,7 +537,12 @@ class VectorSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/vgetattr.
         """
-        return self.execute_command(VGETATTR_CMD, key, element)
+        return self.execute_command(
+            VGETATTR_CMD,
+            key,
+            element,
+            **{CallbacksOptions.ENCODING.value: self._attributes_encoding()},
+        )
 
     @overload
     def vrandmember(

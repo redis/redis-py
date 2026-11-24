@@ -548,6 +548,20 @@ def test_vsim_filter_unicode_attributes(d_client, command):
 
 
 @skip_if_server_version_lt("7.9.0")
+def test_unicode_attributes_round_trip_with_custom_encoding(request):
+    attributes = {"name": "Zürich"}
+    r = _get_client(redis.Redis, request, encoding="latin-1", decode_responses=False)
+    r.delete("cities")
+    vset = r.vset()
+
+    assert vset.vadd("cities", [1.0, 0.0], "elem", attributes=attributes) == 1
+    assert vset.vgetattr("cities", "elem") == attributes
+    assert vset.vsetattr("cities", "elem", attributes) == 1
+    assert vset.vsim("cities", [1.0, 0.0], with_attribs=True) == {b"elem": attributes}
+    assert set(vset.vsim("cities", [1.0, 0.0], filter='.name == "Zürich"')) == {b"elem"}
+
+
+@skip_if_server_version_lt("7.9.0")
 def test_vsim_truth_no_thread_enabled(d_client):
     elements_count = 100
     vector_dim = 50
