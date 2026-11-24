@@ -282,6 +282,10 @@ class HealthCheckPolicy(ABC):
         """
         pass
 
+    async def close_client(self, database) -> None:
+        """Close the health check client of the given database, if there is one."""
+        pass
+
     @abstractmethod
     async def close(self) -> None:
         """Close all health check clients."""
@@ -514,6 +518,13 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
             self._clients[db_id] = client
 
         return client
+
+    async def close_client(self, database) -> None:
+        db_id = id(database)
+        self._maintenance_trackers.pop(db_id, None)
+        client = self._clients.pop(db_id, None)
+        if client is not None:
+            await client.aclose()
 
     async def close(self) -> None:
         """Close all health check clients."""

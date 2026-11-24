@@ -1006,12 +1006,51 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
-    async def test_add_database_rejected_database_is_released_on_close(
+    async def test_database_without_health_checks_keeps_open_circuit(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         """
-        A database rejected by its initial health check is never used, but its
-        client and health checks hold resources that close() has to release.
+        Nothing proves a database without health checks healthy, so a recurring
+        health check run leaves a circuit opened by the failure detector open.
+        It is closed only when the grace period ends (HALF_OPEN).
+        """
+        databases = create_weighted_list(mock_db, mock_db1)
+        mock_db1.health_checks = []
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert mock_db1.circuit.state == CBState.CLOSED
+
+                mock_db1.circuit.state = CBState.OPEN
+                results = await client._check_databases_health()
+                assert results[mock_db1] is False
+                assert mock_db1.circuit.state == CBState.OPEN
+
+                mock_db1.circuit.state = CBState.HALF_OPEN
+                assert await client._check_db_health(mock_db1)
+                assert mock_db1.circuit.state == CBState.CLOSED
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_add_database_rejected_database_is_released(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A database rejected by its initial health check is released right
+        away: retrying add_database() must not collect clients until close().
+        Health checks given through DatabaseConfig.health_checks stay open for
+        the retry.
         """
         databases = create_weighted_list(mock_db, mock_db2)
         rejected_hc = MagicMock()
@@ -1035,13 +1074,21 @@ class TestMultiDbClient:
             ),
         ):
             async with MultiDBClient(mock_multi_db_config) as client:
-                with pytest.raises(UnhealthyDatabaseException):
+                with (
+                    patch.object(
+                        client._health_check_policy, "close_client", AsyncMock()
+                    ) as close_probe_client,
+                    pytest.raises(UnhealthyDatabaseException),
+                ):
                     await client.add_database(
                         new_db_config, skip_initial_health_check=False
                     )
                 assert len(client.get_databases()) == 2
+                mock_new_client.aclose.assert_awaited_once()
+                close_probe_client.assert_awaited_once()
+                assert close_probe_client.await_args.args[0].client is mock_new_client
 
-        rejected_hc.close.assert_awaited_once()
+        rejected_hc.close.assert_not_awaited()
         mock_new_client.aclose.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1057,20 +1104,19 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
-    async def test_add_database_failed_health_check_run_is_released_on_close(
+    async def test_add_database_failed_health_check_run_is_released(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         """
         A database whose initial health check run fails with anything but
         UnhealthyDatabaseException (a cancellation, for example) is released
-        on close() too, even with skip_initial_health_check=True.
+        too, even with skip_initial_health_check=True. The health checks built
+        for it by the factory are closed with it.
         """
         databases = create_weighted_list(mock_db, mock_db2)
         new_hc = MagicMock()
         new_hc.close = AsyncMock()
-        new_db_config = DatabaseConfig(
-            weight=0.8, from_url="redis://localhost:6379", health_checks=[new_hc]
-        )
+        new_db_config = DatabaseConfig(weight=0.8, from_url="redis://localhost:6379")
         mock_new_client = AsyncMock()
         mock_new_client.connection_pool = Mock()
 
@@ -1080,6 +1126,11 @@ class TestMultiDbClient:
                 mock_multi_db_config.client_class,
                 "from_url",
                 return_value=mock_new_client,
+            ),
+            patch.object(
+                mock_multi_db_config,
+                "health_checks_factory",
+                Mock(return_value=[new_hc]),
             ),
         ):
             async with MultiDBClient(mock_multi_db_config) as client:
@@ -1095,6 +1146,8 @@ class TestMultiDbClient:
                         new_db_config, skip_initial_health_check=True
                     )
                 assert len(client.get_databases()) == 2
+                new_hc.close.assert_awaited_once()
+                mock_new_client.aclose.assert_awaited_once()
 
         new_hc.close.assert_awaited_once()
         mock_new_client.aclose.assert_awaited_once()

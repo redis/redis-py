@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional
 
 from redis._parsers import Encoder
 from redis.asyncio.multidb.healthcheck import (
+    HealthCheck,
     HealthCheckPolicy,
     database_maint_notifications_config,
     relaxed_health_check_budget,
@@ -210,6 +211,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Args:
             config: DatabaseConfig object that contains the database configuration.
             skip_initial_health_check: If True, adds the database even if it is unhealthy.
+                If False, an unhealthy database is rejected and released. Health
+                checks given through ``DatabaseConfig.health_checks`` are left
+                open, so the same configuration can be added again.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
@@ -261,15 +265,46 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             if not skip_initial_health_check or not isinstance(
                 e, UnhealthyDatabaseException
             ):
-                # The rejected database is never used, but its client and
-                # health checks hold resources: they are closed with the
-                # others on close()
-                self._removed_databases.append(database)
+                self._release_rejected_database(database, config)
                 raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.add(database, database.weight)
         self._change_active_database(database, highest_weighted_db)
+
+    def _release_rejected_database(
+        self, database: SyncDatabase, config: DatabaseConfig
+    ):
+        """
+        Releases a database that was not added. It is never used, so nothing
+        is in flight: its client, its health check client and the health checks
+        built for it are closed. Health checks given through
+        ``DatabaseConfig.health_checks`` belong to the caller's configuration,
+        which can be added again, and stay open.
+        """
+        health_checks = (
+            () if config.health_checks is not None else database.health_checks
+        )
+        # A failing release must not hide the error the database was rejected for
+        try:
+            self._bg_scheduler.run_coro_sync(
+                self._close_rejected_database_checks, database, health_checks
+            )
+        except Exception:
+            pass
+        try:
+            database.client.close()
+        except Exception:
+            pass
+
+    async def _close_rejected_database_checks(
+        self, database: SyncDatabase, health_checks: Iterable[HealthCheck]
+    ):
+        await asyncio.gather(
+            self._health_check_policy.close_client(database),
+            *(health_check.close() for health_check in health_checks),
+            return_exceptions=True,
+        )
 
     def _change_active_database(
         self, new_database: SyncDatabase, highest_weight_database: SyncDatabase
@@ -433,6 +468,14 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         Runs health checks on the given database until first failure.
         """
+        if not database.health_checks:
+            # Nothing proves a database without health checks healthy, so a
+            # recurring run must not close a circuit the failure detector
+            # opened: only the end of the grace period (HALF_OPEN) does
+            if database.circuit.state == CBState.HALF_OPEN:
+                database.circuit.state = CBState.CLOSED
+            return database.circuit.state == CBState.CLOSED
+
         # Health check will setup circuit state. A copy is executed, so a check
         # added from another thread does not change the list while it is run.
         is_healthy = await self._health_check_policy.execute(

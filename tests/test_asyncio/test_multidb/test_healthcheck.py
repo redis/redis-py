@@ -1493,6 +1493,24 @@ class TestAbstractHealthCheckPolicy:
             await policy.close()
 
     @pytest.mark.asyncio
+    async def test_close_client_closes_only_the_given_database_client(self):
+        """close_client() releases the client of one database and keeps the others."""
+        policy = HealthyAllPolicy()
+        mock_db1, mock_db2 = Mock(), Mock()
+        mock_redis1 = AsyncMock()
+        mock_redis2 = AsyncMock()
+        policy._clients[id(mock_db1)] = mock_redis1
+        policy._clients[id(mock_db2)] = mock_redis2
+
+        await policy.close_client(mock_db1)
+        # A database without a client is a no-op
+        await policy.close_client(mock_db1)
+
+        mock_redis1.aclose.assert_awaited_once()
+        mock_redis2.aclose.assert_not_awaited()
+        assert policy._clients == {id(mock_db2): mock_redis2}
+
+    @pytest.mark.asyncio
     async def test_close_closes_all_clients(self):
         """
         Verify that close() closes all cached clients.

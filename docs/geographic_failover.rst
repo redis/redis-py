@@ -336,7 +336,7 @@ uses only those, the factory is not called for it and no default ping is added.
 The other databases keep the factory's health checks, or the default ping when
 there is no factory. An empty list (`health_checks=[]`) leaves that database
 without health checks: it is then considered healthy until the failure detector
-reports otherwise.
+reports otherwise, and healthy again once the grace period of its circuit ends.
 
 .. code-block:: python
 
