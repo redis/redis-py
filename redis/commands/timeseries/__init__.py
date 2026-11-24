@@ -1,7 +1,14 @@
+from typing import Literal
+
 import redis
 from redis._parsers.helpers import bool_ok
 
-from ..helpers import get_protocol_version, parse_to_list
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+    parse_to_list,
+)
 from .commands import (
     ALTER_CMD,
     CREATE_CMD,
@@ -13,16 +20,33 @@ from .commands import (
     MGET_CMD,
     MRANGE_CMD,
     MREVRANGE_CMD,
+    NRANGE_CMD,
+    NREVRANGE_CMD,
     QUERYINDEX_CMD,
+    QUERYLABELS_CMD,
     RANGE_CMD,
+    READ_CMD,
     REVRANGE_CMD,
     TimeSeriesCommands,
 )
-from .info import TSInfo
-from .utils import parse_get, parse_m_get, parse_m_range, parse_range
+from .info import TSInfo, parse_info_unified
+from .utils import (
+    parse_get,
+    parse_get_unified,
+    parse_m_get,
+    parse_m_get_resp3_to_resp2_legacy,
+    parse_m_get_unified,
+    parse_m_range,
+    parse_m_range_resp3_to_resp2_legacy,
+    parse_m_range_unified,
+    parse_n_range,
+    parse_query_labels,
+    parse_range,
+    parse_range_unified,
+)
 
 
-class TimeSeries(TimeSeriesCommands):
+class _TimeSeriesBase(TimeSeriesCommands):
     """
     This class subclasses redis-py's `Redis` and implements RedisTimeSeries's
     commands (prefixed with "ts").
@@ -33,11 +57,15 @@ class TimeSeries(TimeSeriesCommands):
     def __init__(self, client=None, **kwargs):
         """Create a new RedisTimeSeries client."""
         # Set the module commands' callbacks
-        self._MODULE_CALLBACKS = {
+        _MODULE_CALLBACKS = {
             ALTER_CMD: bool_ok,
             CREATE_CMD: bool_ok,
             CREATERULE_CMD: bool_ok,
             DELETERULE_CMD: bool_ok,
+            READ_CMD: parse_range_unified,
+            NRANGE_CMD: parse_n_range,
+            NREVRANGE_CMD: parse_n_range,
+            QUERYLABELS_CMD: parse_query_labels,
         }
 
         _RESP2_MODULE_CALLBACKS = {
@@ -47,19 +75,57 @@ class TimeSeries(TimeSeriesCommands):
             MGET_CMD: parse_m_get,
             MRANGE_CMD: parse_m_range,
             MREVRANGE_CMD: parse_m_range,
+            QUERYINDEX_CMD: parse_to_list,
             RANGE_CMD: parse_range,
             REVRANGE_CMD: parse_range,
-            QUERYINDEX_CMD: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get_unified,
+            INFO_CMD: parse_info_unified,
+            MGET_CMD: parse_m_get_unified,
+            MRANGE_CMD: parse_m_range_unified,
+            MREVRANGE_CMD: parse_m_range_unified,
+            RANGE_CMD: parse_range_unified,
+            READ_CMD: parse_range_unified,
+            REVRANGE_CMD: parse_range_unified,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get_unified,
+            INFO_CMD: parse_info_unified,
+            MGET_CMD: parse_m_get_unified,
+            MRANGE_CMD: parse_m_range_unified,
+            MREVRANGE_CMD: parse_m_range_unified,
+            RANGE_CMD: parse_range_unified,
+            REVRANGE_CMD: parse_range_unified,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            DEL_CMD: int,
+            GET_CMD: parse_get,
+            INFO_CMD: TSInfo,
+            MGET_CMD: parse_m_get_resp3_to_resp2_legacy,
+            MRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
+            MREVRANGE_CMD: parse_m_range_resp3_to_resp2_legacy,
+            QUERYINDEX_CMD: parse_to_list,
+            RANGE_CMD: parse_range,
+            REVRANGE_CMD: parse_range,
+        }
 
         self.client = client
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            self._MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            self._MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        self._MODULE_CALLBACKS = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
         for k, v in self._MODULE_CALLBACKS.items():
             self.client.set_response_callback(k, v)
@@ -106,3 +172,11 @@ class ClusterPipeline(TimeSeriesCommands, redis.cluster.ClusterPipeline):
 
 class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
     """Pipeline for the module."""
+
+
+class TimeSeries(_TimeSeriesBase):
+    _is_async_client: Literal[False] = False
+
+
+class AsyncTimeSeries(_TimeSeriesBase):
+    _is_async_client: Literal[True] = True

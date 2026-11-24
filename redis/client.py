@@ -3,29 +3,37 @@ import logging
 import re
 import threading
 import time
+from functools import cached_property, lru_cache
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Literal,
     Mapping,
     Optional,
+    Self,
+    Sequence,
     Set,
     Type,
     Union,
 )
 
-from redis._parsers.encoders import Encoder
-from redis._parsers.helpers import (
-    _RedisCallbacks,
-    _RedisCallbacksRESP2,
-    _RedisCallbacksRESP3,
-    bool_ok,
+from redis import _himport_exec
+from redis._defaults import (
+    DEFAULT_RETRY_BASE,
+    DEFAULT_RETRY_CAP,
+    DEFAULT_RETRY_COUNT,
+    DEFAULT_SOCKET_CONNECT_TIMEOUT,
+    DEFAULT_SOCKET_READ_SIZE,
+    DEFAULT_SOCKET_TIMEOUT,
 )
-from redis._parsers.socket import SENTINEL
+from redis._parsers.encoders import Encoder
+from redis._parsers.helpers import bool_ok, decode_info, get_response_callbacks
+from redis._parsers.response_callbacks import _get_response_callback
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
@@ -35,6 +43,8 @@ from redis.commands import (
     list_or_args,
 )
 from redis.commands.core import Script
+from redis.commands.helpers import parse_pubsub_subscriptions, pubsub_subscription_args
+from redis.commands.metadata import MetadataResolver
 from redis.connection import (
     AbstractConnection,
     Connection,
@@ -42,7 +52,7 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
-from redis.credentials import CredentialProvider
+from redis.credentials import CredentialProvider, StreamingCredentialProvider
 from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
@@ -57,8 +67,10 @@ from redis.exceptions import (
     PubSubError,
     RedisError,
     ResponseError,
+    TimeoutError,
     WatchError,
 )
+from redis.himport import HImportRegistry, parse_himport_set_args
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
@@ -71,10 +83,19 @@ from redis.observability.recorder import (
     record_pubsub_message,
 )
 from redis.retry import Retry
+from redis.typing import (
+    ChannelT,
+    FieldT,
+    PubSubHandler,
+    Subscription,
+)
 from redis.utils import (
+    SENTINEL,
     _set_info_logger,
     check_protocol_version,
+    command_text,
     deprecated_args,
+    experimental_method,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -84,6 +105,8 @@ if TYPE_CHECKING:
     import ssl
 
     import OpenSSL
+
+    from redis.keyspace_notifications import KeyspaceNotifications
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -99,10 +122,21 @@ def is_debug_log_enabled():
     return logger.isEnabledFor(logging.DEBUG)
 
 
-def add_debug_log_for_operation_failure(connection: "AbstractConnection"):
+def add_debug_log_for_operation_failure(
+    connection: AbstractConnection,
+    error: BaseException | None = None,
+    args: Sequence[Any] | None = None,
+):
+    details = connection.extract_connection_details() if connection else "no connection"
+    prefix = (
+        f"{type(error).__name__} received" if error is not None else "Operation failed"
+    )
+    # Log only the command name - argument values can carry secrets
+    # (AUTH, CONFIG SET requirepass, ACL SETUSER) or user data.
+    command = f" for command {safe_str(args[0])}" if args else ""
+    suffix = f", error: {error}" if error is not None else ""
     logger.debug(
-        f"Operation failed, "
-        f"with connection: {connection}, details: {connection.extract_connection_details() if connection else 'no connection'}",
+        f"{prefix}{command}, with connection: {connection}, details: {details}{suffix}",
     )
 
 
@@ -131,6 +165,48 @@ class CaseInsensitiveDict(dict):
     def update(self, data):
         data = CaseInsensitiveDict(data)
         super().update(data)
+
+    def copy(self) -> "CaseInsensitiveDict":
+        # Keys are already upper-cased; bypass __init__/__setitem__ so the
+        # copy does not re-run ``str.upper`` on every entry.
+        new = type(self).__new__(type(self))
+        dict.update(new, self)
+        return new
+
+
+@lru_cache(maxsize=None)
+def _cached_default_response_callbacks(
+    user_protocol: int | str | None,
+    legacy_responses: bool,
+) -> CaseInsensitiveDict:
+    """Build the canonical response-callback table for a given
+    ``(protocol, legacy_responses)`` combination exactly once.
+
+    The returned mapping is shared by every caller and MUST NOT be mutated or
+    handed to a client directly. Clients must use
+    :func:`default_response_callbacks`, which returns a per-client copy.
+    """
+    return CaseInsensitiveDict(
+        get_response_callbacks(
+            user_protocol=user_protocol,
+            legacy_responses=legacy_responses,
+        )
+    )
+
+
+def default_response_callbacks(
+    user_protocol: int | str | None,
+    legacy_responses: bool,
+) -> CaseInsensitiveDict:
+    """Return the default response-callback table for a given
+    ``(protocol, legacy_responses)`` combination.
+
+    This is the helper clients should use. It returns an independent, mutable
+    per-client table copied from the cached canonical one, so the table is not
+    rebuilt and re-upper-cased on every client construction, and changes such
+    as :meth:`Redis.set_response_callback` stay local to the client.
+    """
+    return _cached_default_response_callbacks(user_protocol, legacy_responses).copy()
 
 
 class AbstractRedis:
@@ -174,9 +250,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
 
-        The username, password, hostname, path and all querystring values
-        are passed through urllib.parse.unquote in order to replace any
-        percent-encoded values with their corresponding characters.
+        The username, password, hostname and path are passed through
+        urllib.parse.unquote in order to replace any percent-encoded values
+        with their corresponding characters. Querystring values are decoded
+        by urllib.parse.parse_qs and are not unquoted again.
 
         There are several ways to specify a database number. The first value
         found will be used:
@@ -215,6 +292,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         Return a Redis client from the given connection pool.
         The Redis client will take ownership of the connection pool and
         close it when the Redis client is closed.
+
+        Because the client closes (disconnects all connections in) the pool
+        when it is closed or garbage-collected, the pool must not be shared
+        with other clients. Constructing multiple clients from the same pool
+        via ``from_pool`` -- for example one per request across threads -- is
+        not thread safe: when one client is closed it will disconnect
+        connections still in use by the others.
+
+        To share a single pool across clients, construct the pool explicitly
+        and manage its lifecycle instead. Unlike ``from_pool``, the plain
+        ``Redis(connection_pool=pool)`` constructor does not take ownership of
+        the pool and will not close it, so a pool created this way can be
+        safely shared across clients. ``ConnectionPool`` supports the context
+        manager protocol for this::
+
+            with ConnectionPool.from_url(url) as pool:
+                r = Redis(connection_pool=pool)
         """
         client = cls(
             connection_pool=connection_pool,
@@ -237,56 +331,61 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         host: str = "localhost",
         port: int = 6379,
         db: int = 0,
-        password: Optional[str] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
-        socket_keepalive: Optional[bool] = None,
-        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
-        connection_pool: Optional[ConnectionPool] = None,
-        unix_socket_path: Optional[str] = None,
+        password: str | None = None,
+        socket_timeout: float | None = DEFAULT_SOCKET_TIMEOUT,
+        socket_connect_timeout: float | None = DEFAULT_SOCKET_CONNECT_TIMEOUT,
+        socket_read_size: int = DEFAULT_SOCKET_READ_SIZE,
+        socket_keepalive: bool | None = True,
+        socket_keepalive_options: Mapping[int, int | bytes] | object | None = SENTINEL,
+        connection_pool: ConnectionPool | None = None,
+        unix_socket_path: str | None = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
         retry: Retry = Retry(
-            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            backoff=ExponentialWithJitterBackoff(
+                base=DEFAULT_RETRY_BASE, cap=DEFAULT_RETRY_CAP
+            ),
+            retries=DEFAULT_RETRY_COUNT,
         ),
-        retry_on_error: Optional[List[Type[Exception]]] = None,
+        retry_on_error: List[Type[Exception]] | None = None,
         ssl: bool = False,
-        ssl_keyfile: Optional[str] = None,
-        ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
-        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
-        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
-        ssl_ca_certs: Optional[str] = None,
-        ssl_ca_path: Optional[str] = None,
-        ssl_ca_data: Optional[str] = None,
+        ssl_keyfile: str | None = None,
+        ssl_certfile: str | None = None,
+        ssl_cert_reqs: "str | ssl.VerifyMode" = "required",
+        ssl_include_verify_flags: List["ssl.VerifyFlags"] | None = None,
+        ssl_exclude_verify_flags: List["ssl.VerifyFlags"] | None = None,
+        ssl_ca_certs: str | None = None,
+        ssl_ca_path: str | None = None,
+        ssl_ca_data: str | None = None,
         ssl_check_hostname: bool = True,
-        ssl_password: Optional[str] = None,
+        ssl_password: str | None = None,
         ssl_validate_ocsp: bool = False,
         ssl_validate_ocsp_stapled: bool = False,
-        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
-        ssl_ocsp_expected_cert: Optional[str] = None,
-        ssl_min_version: Optional["ssl.TLSVersion"] = None,
-        ssl_ciphers: Optional[str] = None,
-        max_connections: Optional[int] = None,
+        ssl_ocsp_context: "OpenSSL.SSL.Context | None" = None,
+        ssl_ocsp_expected_cert: str | None = None,
+        ssl_min_version: "ssl.TLSVersion | None" = None,
+        ssl_ciphers: str | None = None,
+        max_connections: int | None = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
-        client_name: Optional[str] = None,
-        lib_name: Optional[str] = None,
-        lib_version: Optional[str] = None,
-        driver_info: Optional["DriverInfo"] = None,
-        username: Optional[str] = None,
-        redis_connect_func: Optional[Callable[[], None]] = None,
-        credential_provider: Optional[CredentialProvider] = None,
-        protocol: Optional[int] = 2,
-        cache: Optional[CacheInterface] = None,
-        cache_config: Optional[CacheConfig] = None,
-        event_dispatcher: Optional[EventDispatcher] = None,
-        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
-        oss_cluster_maint_notifications_handler: Optional[
-            OSSMaintNotificationsHandler
-        ] = None,
+        client_name: str | None = None,
+        lib_name: str | object | None = SENTINEL,
+        lib_version: str | object | None = SENTINEL,
+        driver_info: DriverInfo | object | None = SENTINEL,
+        username: str | None = None,
+        redis_connect_func: Callable[[], None] | None = None,
+        credential_provider: CredentialProvider | None = None,
+        protocol: int | None = None,
+        legacy_responses: bool = True,
+        cache: CacheInterface | None = None,
+        cache_config: CacheConfig | None = None,
+        event_dispatcher: EventDispatcher | None = None,
+        maint_notifications_config: MaintNotificationsConfig | None = None,
+        oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
+        | None = None,
+        metadata_resolver: MetadataResolver | None = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -311,6 +410,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         Args:
 
+        socket_keepalive:
+            if `True`, TCP keepalive is enabled for TCP socket connections.
+            Argument is ignored when connection_pool is provided.
+        socket_keepalive_options:
+            mapping of TCP keepalive socket option constants to values, for
+            example `{socket.TCP_KEEPIDLE: 30}`. If left unspecified, redis-py
+            uses TCP keepalive defaults when `socket_keepalive` is enabled:
+            idle 30 seconds, interval 5 seconds, and 3 probes. Platform-specific
+            options that are not available are skipped. Pass `None` or `{}` to
+            avoid setting additional TCP keepalive options. Argument is ignored
+            when connection_pool is provided.
         single_connection_client:
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
@@ -321,6 +431,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Optional DriverInfo object to identify upstream libraries.
             If provided, lib_name and lib_version are ignored.
             If not provided, a DriverInfo will be created from lib_name and lib_version.
+            Explicit None disables CLIENT SETINFO.
             Argument is ignored when connection_pool is provided.
         lib_name:
             **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
@@ -339,16 +450,27 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
             Only supported with RESP3
             Argument is ignored when connection_pool is provided.
+        metadata_resolver:
+            decides which commands are eligible for client-side caching - see
+            `redis.commands.metadata.MetadataResolver`. Defaults to the static command
+            metadata this library ships. Resolvers chain through `with_fallback`, first match
+            wins, so one placed in front of `StaticMetadataResolver` overrides the commands it
+            carries while the static records answer for everything else.
+            The library never reads `COMMAND` on its own behalf for this, so the default adds
+            no round trips. To decide eligibility from the connected server, pass a
+            `DynamicMetadataResolver` built from a live `COMMAND` reply - use it with care,
+            because reading that reply relies on a class in the private `redis._parsers`
+            package.
+            Argument is ignored when connection_pool is provided - configure it on the pool
+            instead.
         """
-        if event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
-        else:
+        if event_dispatcher is not None:
             self._event_dispatcher = event_dispatcher
         if not connection_pool:
             if not retry_on_error:
                 retry_on_error = []
 
-            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version.
             computed_driver_info = resolve_driver_info(
                 driver_info, lib_name, lib_version
             )
@@ -358,6 +480,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "username": username,
                 "password": password,
                 "socket_timeout": socket_timeout,
+                "socket_read_size": socket_read_size,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
@@ -370,13 +493,25 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "legacy_responses": legacy_responses,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
+                if (
+                    maint_notifications_config
+                    and maint_notifications_config.enabled is True
+                ):
+                    raise RedisError(
+                        "Maintenance notifications are not supported with Unix "
+                        "domain socket connections"
+                    )
                 kwargs.update(
                     {
                         "path": unix_socket_path,
                         "connection_class": UnixDomainSocketConnection,
+                        "maint_notifications_config": MaintNotificationsConfig(
+                            enabled=False
+                        ),
                     }
                 )
             else:
@@ -413,20 +548,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and check_protocol_version(protocol, 3):
-                    kwargs.update(
-                        {
-                            "cache": cache,
-                            "cache_config": cache_config,
-                        }
-                    )
                 maint_notifications_enabled = (
                     maint_notifications_config and maint_notifications_config.enabled
                 )
-                if maint_notifications_enabled and protocol not in [
-                    3,
-                    "3",
-                ]:
+                if maint_notifications_enabled and not check_protocol_version(
+                    protocol, 3
+                ):
                     raise RedisError(
                         "Maintenance notifications handlers on connection are only supported with RESP version 3"
                     )
@@ -442,15 +569,35 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
-            self._event_dispatcher.dispatch(
-                AfterPooledConnectionsInstantiationEvent(
-                    [connection_pool], ClientType.SYNC, credential_provider
+            if (cache_config or cache) and check_protocol_version(protocol, 3):
+                kwargs.update(
+                    {
+                        "cache": cache,
+                        "cache_config": cache_config,
+                    }
                 )
-            )
+            if metadata_resolver is not None:
+                # A named ``ConnectionPool`` parameter, not a connection kwarg, so it
+                # reaches the pool without also being forwarded to every connection.
+                kwargs.update(
+                    {
+                        "metadata_resolver": metadata_resolver,
+                    }
+                )
+            connection_pool = ConnectionPool(**kwargs)
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
+
+        # A user-supplied dispatcher always gets the event, for its own
+        # listeners. The default one is private to this client, so its only
+        # listener is the built-in re-auth one, which acts on a
+        # StreamingCredentialProvider alone: skip the no-op dispatch (and
+        # building the dispatcher) for any other provider.
+        if event_dispatcher is not None or (
+            credential_provider is not None
+            and isinstance(credential_provider, StreamingCredentialProvider)
+        ):
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.SYNC, credential_provider
@@ -459,10 +606,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.connection_pool = connection_pool
 
-        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
-            3,
-            "3",
-        ]:
+        if (cache_config or cache) and not check_protocol_version(
+            self.connection_pool.get_protocol(), 3
+        ):
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.single_connection_lock = threading.RLock()
@@ -476,12 +622,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
             )
 
-        self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
+        connection_kwargs = self.connection_pool.connection_kwargs
+        self.response_callbacks = default_response_callbacks(
+            connection_kwargs.get("protocol"),
+            connection_kwargs.get("legacy_responses", True),
+        )
 
-        if self.connection_pool.connection_kwargs.get("protocol") in ["3", 3]:
-            self.response_callbacks.update(_RedisCallbacksRESP3)
-        else:
-            self.response_callbacks.update(_RedisCallbacksRESP2)
+    @cached_property
+    def _event_dispatcher(self) -> EventDispatcher:
+        # Built on first use when the client was given no dispatcher; a
+        # dispatcher passed to __init__ is stored on the instance instead.
+        return EventDispatcher()
 
     def __repr__(self) -> str:
         return (
@@ -496,6 +647,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self) -> Dict:
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+
+    @property
+    def himport_registry(self) -> HImportRegistry:
+        """The client's HIMPORT fieldset registry (contains empty
+        schema registry if none was declared).
+
+        Read-only: the registry is mutated only through the HIMPORT command methods.
+        """
+        return self.connection_pool.himport_registry
 
     def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")
@@ -648,7 +808,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             raise_on_release_error=raise_on_release_error,
         )
 
-    def pubsub(self, **kwargs):
+    def pubsub(self, **kwargs) -> "PubSub":
         """
         Return a Publish/Subscribe object. With this object, you can
         subscribe to channels and listen for messages that get published to
@@ -656,6 +816,33 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         return PubSub(
             self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
+
+    def keyspace_notifications(
+        self,
+        key_prefix: Union[str, bytes, None] = None,
+        ignore_subscribe_messages: bool = True,
+    ) -> "KeyspaceNotifications":
+        """
+        Return a :class:`~redis.keyspace_notifications.KeyspaceNotifications`
+        object for subscribing to keyspace and keyevent notifications.
+
+        Note: Keyspace notifications must be enabled on the Redis server via
+        the ``notify-keyspace-events`` configuration option.
+
+        Args:
+            key_prefix: Optional prefix to filter and strip from keys in
+                        notifications.
+            ignore_subscribe_messages: If True, subscribe/unsubscribe
+                                      confirmations are not returned by
+                                      get_message/listen.
+        """
+        from redis.keyspace_notifications import KeyspaceNotifications
+
+        return KeyspaceNotifications(
+            self,
+            key_prefix=key_prefix,
+            ignore_subscribe_messages=ignore_subscribe_messages,
         )
 
     def monitor(self):
@@ -692,14 +879,48 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.connection_pool.release(conn)
 
         if self.auto_close_connection_pool:
-            self.connection_pool.disconnect()
+            self.connection_pool.close()
 
     def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
         Send a command and parse the response
         """
+        # HIMPORT SET is the one command whose wire form depends on per-connection
+        # state: the fieldset must be PREPAREd on this connection first, and any
+        # fieldset discarded since this connection last reconciled must be dropped.
+        # Handling it here (rather than in himport_set) lets himport_set reuse the
+        # full execute_command machinery — retry, disconnect-on-error, pooling — so
+        # a failed HIMPORT SET disconnects the connection like any other command.
+        # This per-command branch in the hot dispatch path is deliberate and has no
+        # cleaner alternative: this is the only seam where the concrete borrowed
+        # connection is known, and connection-scoped session setup can only happen
+        # once that connection is chosen. The overhead is one string compare per
+        # command.
+        himport_set = parse_himport_set_args(args)
+        if himport_set is not None:
+            # ``args`` is an HIMPORT SET in either the joined ("HIMPORT SET", key,
+            # ...) or split ("HIMPORT", "SET", key, ...) raw form; the operands come
+            # back at the right offsets for the form. A command with too few operands
+            # returns None and falls through to the normal send path so the server
+            # returns its arity error instead of a client-side IndexError here.
+            key, fieldset_name, values = himport_set
+            return self._himport_execute_set(conn, key, fieldset_name, values)
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
+
+    def _himport_reconcile_discards(self, conn):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.reconcile_discards(self, conn)
+
+    def _himport_prepare_and_set(self, conn, key, fieldset_name, values, fieldset):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.prepare_and_set(
+            self, conn, key, fieldset_name, values, fieldset
+        )
+
+    def _himport_execute_set(self, conn, key, fieldset_name, values):
+        """Delegate to the shared sync HIMPORT executor."""
+        return _himport_exec.execute_set(self, conn, key, fieldset_name, values)
 
     def _close_connection(
         self,
@@ -748,7 +969,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._close_connection(conn, error, failure_count, start_time, command_name)
 
@@ -784,13 +1005,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             raise
 
         finally:
-            if conn and conn.should_reconnect():
-                self._close_connection(conn)
-                conn.connect()
-            if self._single_connection_client:
-                self.single_connection_lock.release()
-            if not self.connection:
-                pool.release(conn)
+            try:
+                if conn and conn.should_reconnect():
+                    self._close_connection(conn)
+                    conn.connect()
+            finally:
+                if self._single_connection_client:
+                    self.single_connection_lock.release()
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
@@ -798,6 +1021,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if NEVER_DECODE in options:
                 response = connection.read_response(disable_decoding=True)
                 options.pop(NEVER_DECODE)
+                if command_name == "INFO":
+                    response = decode_info(response, self.get_encoder())
             else:
                 response = connection.read_response()
         except ResponseError:
@@ -811,12 +1036,79 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         # Remove keys entry, it needs only for cache.
         options.pop("keys", None)
 
-        if command_name in self.response_callbacks:
-            return self.response_callbacks[command_name](response, **options)
+        if connection._resp2_fallback:
+            callback = _get_response_callback(
+                self.response_callbacks, command_name, connection
+            )
+        else:
+            callback = self.response_callbacks.get(command_name)
+        if callback is not None:
+            return callback(response, **options)
         return response
 
     def get_cache(self) -> Optional[CacheInterface]:
         return self.connection_pool.cache
+
+    # HIMPORT orchestration. The registry lives on the shared HImportRegistry; the
+    # server-side effect is applied lazily per connection (PREPARE bundled into the
+    # first himport_set; DISCARD reconciled when a connection is next borrowed for a
+    # himport_set). The connection carries the per-connection HIMPORT state; a
+    # CacheProxyConnection transparently delegates it to the wrapped connection, so
+    # this code never needs to know which connection type it holds.
+
+    @experimental_method()
+    def himport_prepare(self, fieldset_name: str, fields: Iterable[FieldT]) -> bool:
+        """Declare an HIMPORT fieldset for use by :meth:`himport_set`.
+
+        Registers ``fieldset_name`` (ordered ``fields``, verbatim) in the client's
+        shared registry. On a pooled client the server-side ``PREPARE`` is deferred
+        and bundled into the next ``himport_set`` per connection. On a single
+        connection client it is run immediately when the pinned connection is live;
+        while that connection is not connected there is no session state to prepare,
+        so the next ``himport_set`` prepares it lazily instead.
+        """
+        fieldset = self.himport_registry.prepare(fieldset_name, fields)
+        conn = self.connection
+        if self._single_connection_client and conn is not None and conn.is_connected:
+            self.himport_prepare_internal(fieldset_name, fieldset.fields)
+            conn._himport_prepared[fieldset_name] = fieldset.version
+        return True
+
+    @experimental_method()
+    def himport_discard(self, fieldset_name: str) -> int:
+        """Remove a fieldset from the registry.
+
+        Returns ``1`` if it was registered, ``0`` otherwise. On a pooled client the
+        server-side ``DISCARD`` is reconciled lazily when each connection is next
+        used for ``himport_set``. On a single connection client it runs immediately
+        on the pinned connection when it is live; while that connection is not
+        connected there is nothing prepared on the server to discard (its tracking is
+        reset on connect), so no server call is made.
+        """
+        removed = self.himport_registry.discard(fieldset_name)
+        conn = self.connection
+        if self._single_connection_client and conn is not None and conn.is_connected:
+            if removed:
+                self.himport_discard_internal(fieldset_name)
+            conn._himport_prepared.pop(fieldset_name, None)
+            conn._himport_reconciled_revision = self.himport_registry.revision
+        return 1 if removed else 0
+
+    @experimental_method()
+    def himport_discard_all(self) -> int:
+        """Remove all fieldsets from the registry.
+
+        Returns the number removed from the registry. Server-side removal follows the
+        same live/lazy rule as :meth:`himport_discard`.
+        """
+        count = self.himport_registry.discard_all()
+        conn = self.connection
+        if self._single_connection_client and conn is not None and conn.is_connected:
+            if count:
+                self.himport_discard_all_internal()
+            conn._himport_prepared.clear()
+            conn._himport_reconciled_revision = self.himport_registry.revision
+        return count
 
 
 StrictRedis = Redis
@@ -830,19 +1122,36 @@ class Monitor:
     """
 
     monitor_re = re.compile(r"\[(\d+) (.*?)\] (.*)")
-    command_re = re.compile(r'"(.*?)(?<!\\)"')
+    # Each argument is quoted with its backslashes and quotes escaped, so an
+    # argument ending in a backslash ends in an escaped backslash, not an
+    # escaped quote.
+    command_re = re.compile(r'"([^"\\]*+(?:\\.[^"\\]*+)*+)"')
 
     def __init__(self, connection_pool):
         self.connection_pool = connection_pool
         self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
-        self._start_monitor()
+        if self.connection is None:
+            self.connection = self.connection_pool.get_connection()
+        try:
+            self._start_monitor()
+        except BaseException:
+            try:
+                self.__exit__()
+            except Exception:
+                pass
+            raise
         return self
 
     def __exit__(self, *args):
-        self.connection.disconnect()
-        self.connection_pool.release(self.connection)
+        connection, self.connection = self.connection, None
+        if connection is None:
+            return
+        try:
+            connection.disconnect()
+        finally:
+            self.connection_pool.release(connection)
 
     def next_command(self):
         """Parse the response from a monitor command"""
@@ -951,7 +1260,7 @@ class PubSub:
             _set_info_logger()
         self.reset()
 
-    def __enter__(self) -> "PubSub":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
@@ -970,6 +1279,16 @@ class PubSub:
         if self.connection:
             self.connection.disconnect()
             self.connection.deregister_connect_callback(self.on_connect)
+            if self.push_handler_func is not None:
+                # The handler is set on the parser of a pooled connection: put
+                # the parser's own back, or the next PubSub that gets this
+                # connection has its messages handed to ours
+                parser = self.connection._get_parser()
+                if (
+                    getattr(parser, "pubsub_push_handler_func", None)
+                    is self.push_handler_func
+                ):
+                    parser.set_pubsub_push_handler(parser.handle_pubsub_push_response)
             self.connection_pool.release(self.connection)
             self.connection = None
         self.health_check_response_counter = 0
@@ -984,50 +1303,27 @@ class PubSub:
     def close(self) -> None:
         self.reset()
 
+    def _resubscribe(self, subscribed, subscribe_fn) -> None:
+        # Replay handler-backed subscriptions as positional Subscription objects
+        # so binary names never need to be decoded into keyword argument keys.
+        subscriptions = pubsub_subscription_args(subscribed)
+        if subscriptions:
+            subscribe_fn(*subscriptions)
+
+    def _resubscribe_shard_channels(self) -> None:
+        self._resubscribe(self.shard_channels, self.ssubscribe)
+
     def on_connect(self, connection) -> None:
         "Re-subscribe to any channels and patterns previously subscribed to"
-        # NOTE: for python3, we can't pass bytestrings as keyword arguments
-        # so we need to decode channel/pattern names back to unicode strings
-        # before passing them to [p]subscribe.
-        #
-        # However, channels subscribed without a callback (positional args) may
-        # have binary names that are not valid in the current encoding (e.g.
-        # arbitrary bytes that are not valid UTF-8).  These channels are stored
-        # with a ``None`` handler.  We re-subscribe them as positional args so
-        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels_with_handlers = {}
-            channels_without_handlers = []
-            for k, v in self.channels.items():
-                if v is not None:
-                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    channels_without_handlers.append(k)
-            if channels_with_handlers or channels_without_handlers:
-                self.subscribe(*channels_without_handlers, **channels_with_handlers)
+            self._resubscribe(self.channels, self.subscribe)
         if self.patterns:
-            patterns_with_handlers = {}
-            patterns_without_handlers = []
-            for k, v in self.patterns.items():
-                if v is not None:
-                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    patterns_without_handlers.append(k)
-            if patterns_with_handlers or patterns_without_handlers:
-                self.psubscribe(*patterns_without_handlers, **patterns_with_handlers)
+            self._resubscribe(self.patterns, self.psubscribe)
         if self.shard_channels:
-            shard_with_handlers = {}
-            shard_without_handlers = []
-            for k, v in self.shard_channels.items():
-                if v is not None:
-                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
-                else:
-                    shard_without_handlers.append(k)
-            if shard_with_handlers or shard_without_handlers:
-                self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
+            self._resubscribe_shard_channels()
 
     @property
     def subscribed(self) -> bool:
@@ -1129,6 +1425,8 @@ class PubSub:
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
+            if is_debug_log_enabled():
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._reconnect(conn, error, failure_count, start_time, command_name)
 
@@ -1216,10 +1514,23 @@ class PubSub:
                 read_timeout = timeout
             else:
                 conn.connect()
-                read_timeout = SENTINEL  # Use default socket timeout for blocking
-            return conn.read_response(
-                disconnect_on_error=False, push_request=True, timeout=read_timeout
-            )
+                # Block indefinitely waiting for a pubsub message. timeout=None
+                # makes the socket layer call sock.settimeout(None) for this read
+                # (and restore the original socket_timeout afterwards), so the
+                # configured socket_timeout does not abort the read.
+                read_timeout = None
+            try:
+                return conn.read_response(
+                    disconnect_on_error=False, push_request=True, timeout=read_timeout
+                )
+            except TimeoutError:
+                # Only part of a message arrived in time. The parser keeps it,
+                # so the next call resumes it, while the retry layer would
+                # reconnect and drop it. A push handler can raise TimeoutError
+                # itself, so that case still goes to the retry layer.
+                if block or self.push_handler_func is not None:
+                    raise
+                return None
 
         response = self._execute(conn, try_read)
 
@@ -1274,18 +1585,20 @@ class PubSub:
         decode = self.encoder.decode
         return {decode(encode(k)): v for k, v in data.items()}
 
-    def psubscribe(self, *args, **kwargs):
+    def psubscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channel patterns. Patterns supplied as keyword arguments
-        expect a pattern name as the key and a callable as the value. A
-        pattern's callable will be invoked automatically when a message is
-        received on that pattern rather than producing a message via
-        ``listen()``.
+        Subscribe to channel patterns.
+        Patterns supplied as keyword arguments expect a pattern name as the
+        key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A pattern's callable will be invoked automatically
+        when a message is received on that pattern rather than producing a
+        message via ``listen()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_patterns = dict.fromkeys(args)
-        new_patterns.update(kwargs)
+        new_patterns = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("PSUBSCRIBE", *new_patterns.keys())
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
@@ -1313,18 +1626,20 @@ class PubSub:
         self.pending_unsubscribe_patterns.update(patterns)
         return self.execute_command("PUNSUBSCRIBE", *args)
 
-    def subscribe(self, *args, **kwargs):
+    def subscribe(
+        self, *args: ChannelT | Subscription, **kwargs: PubSubHandler
+    ) -> None:
         """
-        Subscribe to channels. Channels supplied as keyword arguments expect
-        a channel name as the key and a callable as the value. A channel's
-        callable will be invoked automatically when a message is received on
-        that channel rather than producing a message via ``listen()`` or
-        ``get_message()``.
+        Subscribe to channels.
+        Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally with an
+        optional handler.
+        A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a
+        message via ``listen()`` or ``get_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_channels = dict.fromkeys(args)
-        new_channels.update(kwargs)
+        new_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SUBSCRIBE", *new_channels.keys())
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
@@ -1352,18 +1667,23 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *args)
 
-    def ssubscribe(self, *args, target_node=None, **kwargs):
+    def ssubscribe(
+        self,
+        *args: ChannelT | Subscription,
+        target_node: Any = None,
+        **kwargs: PubSubHandler,
+    ) -> None:
         """
         Subscribes the client to the specified shard channels.
         Channels supplied as keyword arguments expect a channel name as the key
-        and a callable as the value. A channel's callable will be invoked automatically
-        when a message is received on that channel rather than producing a message via
-        ``listen()`` or ``get_sharded_message()``.
+        and a callable as the value.
+        ``Subscription`` objects can also be supplied positionally
+        with an optional handler.
+        A channel's callable will be invoked automatically when a message
+        is received on that channel rather than producing a message
+        via ``listen()`` or ``get_sharded_message()``.
         """
-        if args:
-            args = list_or_args(args[0], args[1:])
-        new_s_channels = dict.fromkeys(args)
-        new_s_channels.update(kwargs)
+        new_s_channels = parse_pubsub_subscriptions(args, kwargs)
         ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
@@ -1392,7 +1712,13 @@ class PubSub:
         return self.execute_command("SUNSUBSCRIBE", *args)
 
     def listen(self):
-        "Listen for messages on channels this client has been subscribed to"
+        """Listen for messages on channels this client has been subscribed to.
+
+        Iteration ends once every channel and pattern has been unsubscribed
+        from. If nothing is subscribed when iteration begins it ends
+        immediately rather than waiting, so subscribe first: a listener
+        started before any subscription finishes without yielding anything.
+        """
         while self.subscribed:
             response = self.handle_message(self.parse_response(block=True))
             if response is not None:
@@ -1414,9 +1740,12 @@ class PubSub:
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
-                # waiting for the subscription
-                time_spent = time.monotonic() - start_time
-                timeout = max(0.0, timeout - time_spent)
+                # waiting for the subscription. timeout=None means "block
+                # indefinitely" and has nothing to charge against, so leave it
+                # alone rather than raising TypeError on the subtraction.
+                if timeout is not None:
+                    time_spent = time.monotonic() - start_time
+                    timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,
                 # so no messages are available
@@ -1450,6 +1779,8 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+        elif isinstance(response, str):
+            response = ["pong", response] if response != "PONG" else ["pong", ""]
 
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
@@ -1488,22 +1819,31 @@ class PubSub:
                 sharded=True,
             )
 
-        # if this is an unsubscribe message, remove it from memory
+        # if this is an unsubscribe message, remove it from memory.
+        # ``discard`` rather than ``remove``: the guard above already makes the
+        # removal conditional, so the two are equivalent for a single caller -
+        # but another writer can drop the same entry between the check and the
+        # removal, and ``remove`` would then raise ``KeyError`` out of a pubsub
+        # read that no caller catches. ``ClusterPubSub._detach_shard_channel``
+        # is such a writer: it forgets a migrating shard channel locally,
+        # deliberately without the per-node I/O lock this bookkeeping runs
+        # under, because waiting for that lock stalls reconciliation behind a
+        # poll's whole retry budget on the node being migrated away from.
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
             if message_type == "punsubscribe":
                 pattern = response[1]
                 if pattern in self.pending_unsubscribe_patterns:
-                    self.pending_unsubscribe_patterns.remove(pattern)
+                    self.pending_unsubscribe_patterns.discard(pattern)
                     self.patterns.pop(pattern, None)
             elif message_type == "sunsubscribe":
                 s_channel = response[1]
                 if s_channel in self.pending_unsubscribe_shard_channels:
-                    self.pending_unsubscribe_shard_channels.remove(s_channel)
                     self.shard_channels.pop(s_channel, None)
+                    self.pending_unsubscribe_shard_channels.discard(s_channel)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
-                    self.pending_unsubscribe_channels.remove(channel)
+                    self.pending_unsubscribe_channels.discard(channel)
                     self.channels.pop(channel, None)
             if not self.channels and not self.patterns and not self.shard_channels:
                 # There are no subscriptions anymore, set subscribed_event flag
@@ -1579,11 +1919,10 @@ class PubSubWorkerThread(threading.Thread):
         self.exception_handler = exception_handler
         self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
+        # Set before start() so run() cannot undo an early stop() request.
+        self._running.set()
 
     def run(self) -> None:
-        if self._running.is_set():
-            return
-        self._running.set()
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while self._running.is_set():
@@ -1602,11 +1941,22 @@ class PubSubWorkerThread(threading.Thread):
                 self.exception_handler(e, pubsub, self)
         pubsub.close()
 
-    def stop(self) -> None:
+    def stop(self, timeout: Optional[float] = None) -> None:
+        """Wait for the worker to finish after clearing the running flag.
+
+        timeout bounds that wait. None waits until the worker exits.
+        The wait is skipped when stop() runs on the worker thread.
+        """
         # trip the flag so the run loop exits. the run loop will
         # close the pubsub connection, which disconnects the socket
         # and returns the connection to the pool.
         self._running.clear()
+        # wait for that close before returning, so a caller that
+        # follows stop() with pubsub.close() does not disconnect the
+        # socket while get_message is still reading it. the exception
+        # handler calls stop() from this thread; joining there deadlocks.
+        if threading.current_thread() is not self and self.is_alive():
+            self.join(timeout)
 
 
 class Pipeline(Redis):
@@ -1671,8 +2021,9 @@ class Pipeline(Redis):
         self.command_stack = []
         self.scripts = set()
         # make sure to reset the connection state in the event that we were
-        # watching something
-        if self.watching and self.connection:
+        # watching something. A dropped connection has already lost its
+        # WATCHes, so skip the UNWATCH instead of reconnecting to send it.
+        if self.watching and self.connection and self.connection.is_connected:
             try:
                 # call this manually since our unwatch or
                 # immediate_execute_command methods can call reset()
@@ -1773,7 +2124,7 @@ class Pipeline(Redis):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, args)
             actual_retry_attempts[0] = failure_count
             self._disconnect_reset_raise_on_watching(
                 conn, error, failure_count, start_time, command_name
@@ -1824,9 +2175,16 @@ class Pipeline(Redis):
         self.command_stack.append((args, options))
         return self
 
+    def _himport_prepare_pipeline(self, conn, commands):
+        """Delegate to the shared sync HIMPORT executor."""
+        _himport_exec.prepare_pipeline(self, conn, [args for args, _ in commands])
+
     def _execute_transaction(
         self, connection: Connection, commands, raise_on_error
     ) -> List:
+        # Ensure fieldsets referenced by buffered HIMPORT SETs are prepared on this
+        # connection before the MULTI/EXEC block (session state, not transactional).
+        self._himport_prepare_pipeline(connection, commands)
         cmds = chain([(("MULTI",), {})], commands, [(("EXEC",), {})])
         all_cmds = connection.pack_commands(
             [args for args, options in cmds if EMPTY_RESPONSE not in options]
@@ -1890,24 +2248,59 @@ class Pipeline(Redis):
                 # Remove keys entry, it needs only for cache.
                 options.pop("keys", None)
                 command_name = args[0]
-                if command_name in self.response_callbacks:
-                    r = self.response_callbacks[command_name](r, **options)
+                if connection._resp2_fallback:
+                    callback = _get_response_callback(
+                        self.response_callbacks, command_name, connection
+                    )
+                else:
+                    callback = self.response_callbacks.get(command_name)
+                if callback is not None:
+                    r = callback(r, **options)
             data.append(r)
 
         return data
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
+        # Fold any first-use HIMPORT PREPAREs for referenced fieldsets into the same
+        # packed write as the queued commands, so a pipeline that lands on a fresh or
+        # reconnected connection stays a single round trip (the batched write bypasses
+        # the per-command lazy PREPARE path). Deferred-discard reconciliation happens
+        # inside pipeline_prepares and only touches the socket when discards are
+        # actually pending.
+        fieldsets = _himport_exec.pipeline_prepares(
+            self, connection, [args for args, _ in commands]
+        )
+        preflight = _himport_exec.prepare_wire_commands(fieldsets)
         # build up all commands into a single request to increase network perf
-        all_cmds = connection.pack_commands([args for args, _ in commands])
+        all_cmds = connection.pack_commands(preflight + [args for args, _ in commands])
         connection.send_packed_command(all_cmds)
 
-        responses = []
-        for args, options in commands:
-            try:
-                responses.append(self.parse_response(connection, args[0], **options))
-            except ResponseError as e:
-                responses.append(e)
+        # Drain the leading PREPARE replies (bookkeeping + capture the first error)
+        # before the queued replies. Everything on the wire is read before raising so
+        # the pooled socket never desyncs.
+        prep_error = _himport_exec.drain_pipeline_prepares(self, connection, fieldsets)
 
+        responses = []
+        try:
+            for args, options in commands:
+                try:
+                    responses.append(
+                        self.parse_response(connection, args[0], **options)
+                    )
+                except ResponseError as e:
+                    responses.append(e)
+        except BaseException:
+            # A response callback raised, so the replies of the rest of the batch
+            # are still on the socket. Drop the connection rather than hand them to
+            # the next caller that borrows it from the pool.
+            connection.disconnect()
+            raise
+
+        # A PREPARE failure (rare: an invalid fieldset definition) is a hard error,
+        # raised regardless of raise_on_error as it was before folding -- only now
+        # every reply has already been drained.
+        if prep_error is not None:
+            raise prep_error
         if raise_on_error:
             self.raise_first_error(commands, responses)
 
@@ -1920,7 +2313,7 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = " ".join(map(safe_str, command))
+        cmd = command_text(command)
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
@@ -2012,7 +2405,7 @@ class Pipeline(Redis):
 
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
-                add_debug_log_for_operation_failure(conn)
+                add_debug_log_for_operation_failure(conn, error, (operation_name,))
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
                 conn, error, failure_count, start_time, operation_name

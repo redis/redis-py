@@ -1,0 +1,74 @@
+name: Nightly test metrics
+
+# Once a day, run the redis-py fixed-client, standalone (modules included)
+# and cluster test suites (master, default client configuration) against the
+# released Redis version CI tests against (hardcoded below, kept in step with
+# CURRENT_REDIS_VERSION in integration.yaml), and report per-test durations
+# to Grafana for redis-py performance regression tracking.
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # nightly, staggered from the 01:00 CI run
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-metrics
+  cancel-in-progress: false
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
+jobs:
+  nightly-metrics:
+    name: Redis current release; test metrics
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Secrets can't be used in `if:` conditions, so a first step checks
+      # the token and later steps are gated on its output. Without the
+      # secret the job prints a warning and skips everything.
+      - name: Check for the metrics token
+        id: gate
+        env:
+          OTEL_TOKEN: ${{ secrets.OTEL_CI_VISIBILITY_TOKEN }}
+        run: |
+          if [ -z "$OTEL_TOKEN" ]; then
+            echo "::warning::The OTEL_CI_VISIBILITY_TOKEN secret is not set; skipping the nightly metrics run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Run tests
+        if: steps.gate.outputs.run == 'true'
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: '3.12'
+          parser-backend: 'plain'
+          # The metrics track redis-py, so the server stays on the released
+          # version CI tests against. Keep in step with CURRENT_REDIS_VERSION
+          # in integration.yaml, and with server-version below.
+          redis-version: '8.10.2'
+          # The fixed client tests, then one config that runs the standalone
+          # and the cluster suite, so each test reports one duration per
+          # suite per night. fixed_client tests are excluded from the other two.
+          run-fixed-clients: 'true'
+          test-config: 'default-legacy_responses'
+          # Test ids are `{class}.{test}`, and most tests run in both the
+          # standalone and the cluster suite. A distinct suite name per report
+          # makes the reporter qualify those ids with the suite.
+          junit-suite-names: 'true'
+
+      - name: Report test metrics
+        # Report even when tests fail, but not when the run was cancelled.
+        if: ${{ !cancelled() && steps.gate.outputs.run == 'true' }}
+        uses: redis-developer/cae-otel-ci-visibility@v4
+        with:
+          junit-xml-folder: 'junit-results'
+          otlp-endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/metrics'
+          otlp-headers: 'Authorization=Basic ${{ secrets.OTEL_CI_VISIBILITY_TOKEN }}'
+          # The reporter accepts only 'unstable' or a major.minor track.
+          server-version: '8.10'

@@ -19,6 +19,7 @@ coverage.xml
 .coverage*
 prof
 profile_output*
+junit-results/
 docker/stunnel/keys
 /dockers/*/node-*/*
 /dockers/*/tls/*

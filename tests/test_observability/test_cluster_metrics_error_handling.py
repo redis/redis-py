@@ -20,7 +20,7 @@ from redis.exceptions import (
 )
 
 
-@pytest.mark.onlycluster
+@pytest.mark.fixed_client
 class TestClusterMetricsRecordingDuringErrorHandling:
     """
     Tests for cluster metrics recording during error handling.

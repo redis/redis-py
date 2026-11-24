@@ -8,7 +8,7 @@ from redis.multidb.circuit import (
 )
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestPBCircuitBreaker:
     @pytest.mark.parametrize(
         "mock_db",

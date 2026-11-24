@@ -363,7 +363,19 @@ published messages. Message handlers take a single argument, the
 message, which is a dictionary just like the examples above. To
 subscribe to a channel or pattern with a message handler, pass the
 channel or pattern name as a keyword argument with its value being the
-callback function.
+callback function. For channel or pattern names that cannot be used as
+Python keyword arguments, including arbitrary binary names, pass a
+``redis.Subscription`` object as a positional argument instead.
+
+Subscription forms can be mixed in the same call. Assuming
+``my_handler`` is a callback, a plain channel name can be supplied
+alongside a ``Subscription`` object, and ``Subscription`` objects can
+also be used together with the existing keyword-argument handler style.
+
+.. code:: python
+
+   >>> p.subscribe('logs', redis.Subscription(b'\x80\x81', my_handler))
+   >>> p.subscribe(redis.Subscription(b'\x82\x83', my_handler), **{'my-channel': my_handler})
 
 When a message is read on a channel or pattern with a message handler,
 the message dictionary is created and passed to the message handler. In
@@ -375,6 +387,7 @@ was already handled.
    >>> def my_handler(message):
    ...     print('MY HANDLER: ', message['data'])
    >>> p.subscribe(**{'my-channel': my_handler})
+   >>> p.subscribe(redis.Subscription(b'\x80\x81', my_handler))
    # read the subscribe confirmation message
    >>> p.get_message()
    {'pattern': None, 'type': 'subscribe', 'channel': b'my-channel', 'data': 1}
@@ -442,8 +455,11 @@ caller can use the thread.stop() method to shut down the event loop and
 thread. Behind the scenes, this is simply a wrapper around get_message()
 that runs in a separate thread, essentially creating a tiny non-blocking
 event loop for you. run_in_thread() takes an optional sleep_time
-argument. If specified, the event loop will call time.sleep() with the
-value in each iteration of the loop.
+argument: how long each iteration of the loop waits on the socket for a
+message, so an idle thread notices thread.stop() within that time. A handler
+that is still running, or a reconnect in progress, delays it;
+thread.stop(timeout=...) bounds the wait.
+The default of 0 polls without waiting and keeps a CPU core busy.
 
 Note: Since we're running in a separate thread, there's no way to handle
 messages that aren't automatically handled with registered message
@@ -454,7 +470,7 @@ handlers attached.
 .. code:: python
 
    >>> p.subscribe(**{'my-channel': my_handler})
-   >>> thread = p.run_in_thread(sleep_time=0.001)
+   >>> thread = p.run_in_thread(sleep_time=0.1)
    # the event loop is now running in the background processing messages
    # when it's time to shut it down...
    >>> thread.stop()
@@ -540,6 +556,24 @@ Similarly, the same process can be used to acquire sharded pubsub messages, that
     >>> p.ssubscribe('foo')
     >>> # assume someone sends a message along the channel via a publish
     >>> message = p.get_sharded_message(target_node=second_node)
+
+The client keeps shard subscriptions attached to the node that currently owns
+their slot, so a slot migration or a lost node needs no handling in application
+code. When a poll on one node fails, or a node replies ``MOVED`` because it no
+longer owns the slot, the client re-routes the affected shard channels to their
+new owner and keeps polling the remaining nodes.
+
+**Important**: this affects what ``get_sharded_message()`` raises.
+
+- A connection failure on a single node is no longer surfaced while other nodes
+  can still deliver. ``get_sharded_message()`` returns the messages those nodes
+  hold, and raises only when every node polled in the pass failed.
+- A ``MOVED`` reply is handled internally and no longer raised. The channels the
+  former owner no longer serves are re-subscribed on the new owner.
+- Code that caught an exception from ``get_sharded_message()`` only to tear the
+  subscription down and re-subscribe is no longer needed.
+- ``get_sharded_message(target_node=...)`` is unchanged: a caller that names a
+  single node still gets its connection errors raised.
 
 
 Monitor

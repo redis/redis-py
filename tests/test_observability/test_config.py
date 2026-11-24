@@ -9,9 +9,12 @@ These tests verify the OTelConfig class behavior including:
 - Runtime configuration changes
 """
 
+import pytest
+
 from redis.observability.config import OTelConfig, MetricGroup, TelemetryOption
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigDefaults:
     """Tests for OTelConfig default values."""
 
@@ -42,6 +45,7 @@ class TestOTelConfigDefaults:
         assert config.is_enabled() is True
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigEnabledTelemetry:
     """Tests for enabled_telemetry configuration."""
 
@@ -57,6 +61,7 @@ class TestOTelConfigEnabledTelemetry:
         assert config.is_enabled() is False
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigMetricGroups:
     """Tests for metric_groups configuration."""
 
@@ -98,6 +103,7 @@ class TestOTelConfigMetricGroups:
         assert config.metric_groups == MetricGroup(0)
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigIncludeCommands:
     """Tests for include_commands configuration."""
 
@@ -117,6 +123,7 @@ class TestOTelConfigIncludeCommands:
         assert config.include_commands is None
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigExcludeCommands:
     """Tests for exclude_commands configuration."""
 
@@ -136,6 +143,7 @@ class TestOTelConfigExcludeCommands:
         assert config.exclude_commands == set()
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigShouldTrackCommand:
     """Tests for should_track_command method."""
 
@@ -187,6 +195,7 @@ class TestOTelConfigShouldTrackCommand:
         assert config.should_track_command("SET") is True
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigRepr:
     """Tests for __repr__ method."""
 
@@ -197,6 +206,7 @@ class TestOTelConfigRepr:
         assert "enabled_telemetry" in repr_str
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigPrivacyControls:
     """Tests for privacy control configuration options."""
 
@@ -230,6 +240,7 @@ class TestOTelConfigPrivacyControls:
         assert config.hide_stream_names is True
 
 
+@pytest.mark.fixed_client
 class TestOTelConfigHistogramBuckets:
     """Tests for custom histogram bucket boundary configuration."""
 
@@ -315,6 +326,7 @@ class TestOTelConfigHistogramBuckets:
         assert config.buckets_operation_duration == [1.0]
 
 
+@pytest.mark.fixed_client
 class TestDefaultBucketFunctions:
     """Tests for default bucket boundary functions."""
 
@@ -363,6 +375,7 @@ class TestDefaultBucketFunctions:
         assert all(b > 0 for b in buckets)
 
 
+@pytest.mark.fixed_client
 class TestMetricGroupEnum:
     """Tests for MetricGroup IntFlag enum."""
 

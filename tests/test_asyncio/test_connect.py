@@ -17,7 +17,14 @@ _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
 _ERROR_RESP = b"-ERR" + _CMD_SEP
-_SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
+# Minimal RESP3 map response for ``HELLO 3`` containing only ``proto: 3`` —
+# enough to satisfy ``Connection.on_connect`` when the default protocol
+# resolves to RESP3.
+_HELLO_RESP3 = b"%1\r\n$5\r\nproto\r\n:3\r\n"
+_SUPPORTED_CMDS = {
+    f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP,
+    "HELLO 3": _HELLO_RESP3,
+}
 
 
 @pytest.fixture
@@ -32,12 +39,14 @@ def uds_address(tmpdir):
     return tmpdir / "uds.sock"
 
 
+@pytest.mark.fixed_client
 async def test_tcp_connect(tcp_address):
     host, port = tcp_address
     conn = Connection(host=host, port=port, client_name=_CLIENT_NAME, socket_timeout=10)
     await _assert_connect(conn, tcp_address)
 
 
+@pytest.mark.fixed_client
 async def test_uds_connect(uds_address):
     path = str(uds_address)
     conn = UnixDomainSocketConnection(
@@ -46,16 +55,18 @@ async def test_uds_connect(uds_address):
     await _assert_connect(conn, path)
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
-    "ssl_ciphers",
+    "ssl_ciphers,connects",
     [
-        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
-        "ECDHE-ECDSA-AES256-GCM-SHA384",
-        "ECDHE-RSA-AES128-GCM-SHA256",
+        ("ECDHE-RSA-AES128-GCM-SHA256", True),
+        ("ECDHE-RSA-AES256-GCM-SHA384", True),
+        # the server certificate is RSA, so an ECDSA-only list cannot connect
+        ("ECDHE-ECDSA-AES256-GCM-SHA384", False),
     ],
 )
-async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers, connects):
     host, port = tcp_address
 
     # in order to have working hostname verification, we need to use "localhost"
@@ -73,12 +84,24 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
     )
-    await _assert_connect(
-        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    # pin the server to TLS 1.2: under TLS 1.3 the cipher list is not used at
+    # all, so only then does the list decide whether the handshake succeeds
+    connect = _assert_connect(
+        conn,
+        tcp_address,
+        certfile=server_certs.certfile,
+        keyfile=server_certs.keyfile,
+        maximum_ssl_version=ssl.TLSVersion.TLSv1_2,
     )
+    if connects:
+        await connect
+    else:
+        with pytest.raises(ConnectionError):
+            await connect
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.parametrize(
     "ssl_min_version",
@@ -116,6 +139,7 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     await conn.disconnect()
 
 
+@pytest.mark.fixed_client
 @pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 async def test_tcp_ssl_version_mismatch(tcp_address):

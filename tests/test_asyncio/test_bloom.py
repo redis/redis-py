@@ -1,4 +1,4 @@
-from math import inf
+from math import inf, isnan
 
 import pytest
 import pytest_asyncio
@@ -6,7 +6,7 @@ import redis.asyncio as redis
 from redis.exceptions import RedisError
 from tests.conftest import (
     assert_resp_response,
-    is_resp2_connection,
+    expected_response_shape,
     skip_ifmodversion_lt,
 )
 
@@ -70,19 +70,40 @@ async def test_bf_insert(decoded_r: redis.Redis):
         2,
         info.get("insertedNum"),
         info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
         decoded_r,
         1000,
         info.get("capacity"),
         info.get("Capacity"),
+        info.get("capacity"),
     )
     assert_resp_response(
         decoded_r,
         1,
         info.get("filterNum"),
         info.get("Number of filters"),
+        info.get("filterNum"),
     )
+
+
+@pytest.mark.redismod
+async def test_bf_false_flags_are_not_sent(decoded_r: redis.Redis):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert await decoded_r.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(await decoded_r.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        await decoded_r.bf().insert(
+            "bloom_ins", ["a", "b", "c"], capacity=1, noScale=False
+        )
+    )
+    assert [1] == intlist(
+        await decoded_r.bf().insert("bloom_new", ["a"], noCreate=False)
+    )
+    assert [1] == await decoded_r.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == await decoded_r.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
 
 
 @pytest.mark.redismod
@@ -93,13 +114,17 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     # test is probabilistic and might fail. It is OK to change variables if
     # certain to not break anything
     async def do_verify():
-        res = 0
+        pipe = decoded_r.pipeline(transaction=False)
+        bf = pipe.bf()
         for x in range(1000):
-            await decoded_r.bf().add("myBloom", x)
-            rv = await decoded_r.bf().exists("myBloom", x)
-            assert rv
-            rv = await decoded_r.bf().exists("myBloom", f"nonexist_{x}")
-            res += rv == x
+            bf.add("myBloom", x)
+            bf.exists("myBloom", x)
+            bf.exists("myBloom", f"nonexist_{x}")
+        replies = await pipe.execute()
+        res = 0
+        for exists, false_positive in zip(replies[1::3], replies[2::3]):
+            assert exists
+            res += false_positive
         assert res < 5
 
     await do_verify()
@@ -130,7 +155,29 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     await do_verify()
 
     await decoded_r.bf().client.delete("myBloom")
-    await decoded_r.bf().create("myBloom", "0.0001", "10000000")
+
+
+@pytest.mark.redismod
+async def test_cf_scandump_and_loadchunk(decoded_r: redis.Redis):
+    # The client decodes responses, but the dumped chunks are binary.
+    await decoded_r.cf().create("myCuckoo", 1000)
+    for x in range(100):
+        await decoded_r.cf().add("myCuckoo", x)
+
+    chunks = []
+    it = 0
+    while True:
+        it, data = await decoded_r.cf().scandump("myCuckoo", it)
+        if it == 0:
+            break
+        assert isinstance(data, bytes)
+        chunks.append((it, data))
+
+    await decoded_r.delete("myCuckoo")
+    for it, data in chunks:
+        await decoded_r.cf().loadchunk("myCuckoo", it, data)
+
+    assert all(await decoded_r.cf().mexists("myCuckoo", *range(100)))
 
 
 @pytest.mark.redismod
@@ -144,6 +191,7 @@ async def test_bf_info(decoded_r: redis.Redis):
         None,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     await decoded_r.bf().create("expanding", "0.0001", "1000", expansion=expansion)
@@ -153,6 +201,7 @@ async def test_bf_info(decoded_r: redis.Redis):
         4,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     try:
@@ -196,13 +245,25 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert [1] == await decoded_r.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = await decoded_r.cf().info("captest")
     assert_resp_response(
-        decoded_r, 5, info.get("insertedNum"), info.get("Number of items inserted")
+        decoded_r,
+        5,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
-        decoded_r, 0, info.get("deletedNum"), info.get("Number of items deleted")
+        decoded_r,
+        0,
+        info.get("deletedNum"),
+        info.get("Number of items deleted"),
+        info.get("deletedNum"),
     )
     assert_resp_response(
-        decoded_r, 1, info.get("filterNum"), info.get("Number of filters")
+        decoded_r,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
     )
 
 
@@ -250,6 +311,40 @@ async def test_cms_merge(decoded_r: redis.Redis):
     assert [9, 9, 11] == await decoded_r.cms().query("C", "foo", "bar", "baz")
     assert await decoded_r.cms().merge("C", 2, ["A", "B"], ["2", "3"])
     assert [16, 15, 21] == await decoded_r.cms().query("C", "foo", "bar", "baz")
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("8.11.0", "bf")
+async def test_cms_cell_size(decoded_r: redis.Redis):
+    for cell_size in (1, 2, 4, 8):
+        assert await decoded_r.cms().initbydim(
+            f"cell_dim{cell_size}", 1000, 5, cell_size=cell_size
+        )
+        assert (
+            cell_size
+            == (await decoded_r.cms().info(f"cell_dim{cell_size}"))["cell_size"]
+        )
+        assert await decoded_r.cms().initbyprob(
+            f"cell_prob{cell_size}", 0.01, 0.01, cell_size=cell_size
+        )
+        assert (
+            cell_size
+            == (await decoded_r.cms().info(f"cell_prob{cell_size}"))["cell_size"]
+        )
+
+    # the server uses 4-byte counters when CELL_SIZE is omitted
+    assert await decoded_r.cms().initbydim("cell_default", 1000, 5)
+    info = await decoded_r.cms().info("cell_default")
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 0 == info["count"]
+    assert 4 == info["cell_size"]
+
+    # only 1, 2, 4 and 8 are valid cell sizes
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.cms().initbydim("cell_bad", 1000, 5, cell_size=3)
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.cms().initbyprob("cell_bad", 0.01, 0.01, cell_size=16)
 
 
 @pytest.mark.redismod
@@ -389,7 +484,11 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
     # assert we have 0 unmerged nodes
     info = await decoded_r.tdigest().info("tDigest")
     assert_resp_response(
-        decoded_r, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+        decoded_r,
+        0,
+        info.get("unmerged_nodes"),
+        info.get("Unmerged nodes"),
+        info.get("unmerged_nodes"),
     )
 
 
@@ -405,10 +504,14 @@ async def test_tdigest_merge(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = await decoded_r.tdigest().info("to-tDigest")
-    if is_resp2_connection(decoded_r):
-        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
-    else:
+    if expected_response_shape(decoded_r) == "legacy_resp3":
+        # Native RESP3 map from the server (no module callback registered for
+        # ``protocol=3`` with ``legacy_responses=True``); keys are title-case.
         assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
+    else:
+        # ``TDigestInfo`` wrapper exposes snake_case keys for both the
+        # ``legacy_resp2`` and ``unified`` shapes.
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
     # test override
     assert await decoded_r.tdigest().create("from-override", 10)
     assert await decoded_r.tdigest().create("from-override-2", 10)
@@ -527,3 +630,57 @@ async def test_tdigest_byrevrank(decoded_r: redis.Redis):
     assert (await decoded_r.tdigest().byrevrank("t-digest", 100))[0] == -inf
     with pytest.raises(redis.ResponseError):
         (await decoded_r.tdigest().byrevrank("t-digest", -1))[0]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.experimental
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+async def test_tdigest_unified_responses_are_floats(create_redis, stack_url, protocol):
+    client = await create_redis(
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        url=stack_url,
+    )
+    tdigest = client.tdigest()
+    assert await tdigest.create("t-digest", 100)
+    assert await tdigest.add("t-digest", [1, 2, 3, 4, 5])
+    assert await tdigest.create("empty", 100)
+    # Redis replies with doubles, which RESP2 sends as bulk strings.
+    results = [
+        (await tdigest.quantile("t-digest", 0.5, 0.9), [3.0, 5.0]),
+        (await tdigest.cdf("t-digest", 1, 5), [0.1, 0.9]),
+        (await tdigest.byrank("t-digest", 0, 2, 100), [1.0, 3.0, inf]),
+        (await tdigest.byrevrank("t-digest", 0, 100), [5.0, -inf]),
+    ]
+    for result, expected in results:
+        assert result == expected
+        assert all(type(value) is float for value in result)
+    # An empty sketch answers nan, as a float as well
+    for result in (
+        await tdigest.quantile("empty", 0.5),
+        await tdigest.cdf("empty", 1),
+        await tdigest.byrank("empty", 0),
+        await tdigest.byrevrank("empty", 0),
+    ):
+        assert len(result) == 1
+        assert type(result[0]) is float and isnan(result[0])
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+async def test_topk_info_unified_responses(create_redis, stack_url, protocol):
+    client = await create_redis(
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        url=stack_url,
+    )
+    assert await client.topk().reserve("topk", 3, 50, 4, 0.9)
+    info = await client.topk().info("topk")
+    assert (info["k"], info["width"], info["depth"]) == (3, 50, 4)
+    # The decay is a double, which RESP2 sends as a bulk string.
+    assert info["decay"] == 0.9
+    assert type(info["decay"]) is float

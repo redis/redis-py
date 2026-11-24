@@ -6,6 +6,8 @@ from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout
 
+from tests.conftest import skip_if_redis_enterprise
+
 
 class DelayProxy:
     def __init__(self, addr, redis_addr, delay: float = 0.0):
@@ -17,6 +19,7 @@ class DelayProxy:
         self.task = None
         self.cond = asyncio.Condition()
         self.running = 0
+        self.sleeping = set()
 
     async def __aenter__(self):
         await self.start()
@@ -58,6 +61,11 @@ class DelayProxy:
         await asyncio.gather(pipe1, pipe2)
 
     async def stop(self):
+        # A pipe may still be sleeping out the delay of a request the test has
+        # already cancelled. Cancel that sleep instead of waiting it out; the
+        # pipe's finally block still closes its sockets.
+        for pipe in list(self.sleeping):
+            pipe.cancel()
         # shutdown the server
         self.task.cancel()
         try:
@@ -86,7 +94,12 @@ class DelayProxy:
                 # print(f"{name} read {len(data)} delay {self.delay}")
                 if event:
                     event.set()
-                await asyncio.sleep(self.delay)
+                task = asyncio.current_task()
+                self.sleeping.add(task)
+                try:
+                    await asyncio.sleep(self.delay)
+                finally:
+                    self.sleeping.discard(task)
                 writer.write(data)
                 await writer.drain()
         finally:
@@ -105,14 +118,15 @@ class DelayProxy:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone(delay, master_host):
+async def test_standalone(delay, master_host, master_connection_kwargs):
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
     async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
         for b in [True, False]:
             # note that we connect to proxy, rather than to Redis directly
             async with Redis(
-                host="127.0.0.1", port=5380, single_connection_client=b
+                **master_connection_kwargs | {"host": "127.0.0.1", "port": 5380},
+                single_connection_client=b,
             ) as r:
                 await r.set("foo", "foo")
                 await r.set("bar", "bar")
@@ -142,11 +156,12 @@ async def test_standalone(delay, master_host):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
-async def test_standalone_pipeline(delay, master_host):
+async def test_standalone_pipeline(delay, master_host, master_connection_kwargs):
     async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
         for b in [True, False]:
             async with Redis(
-                host="127.0.0.1", port=5380, single_connection_client=b
+                **master_connection_kwargs | {"host": "127.0.0.1", "port": 5380},
+                single_connection_client=b,
             ) as r:
                 await r.set("foo", "foo")
                 await r.set("bar", "bar")
@@ -192,6 +207,7 @@ async def test_standalone_pipeline(delay, master_host):
 
 
 @pytest.mark.onlycluster
+@skip_if_redis_enterprise()
 async def test_cluster(master_host):
     delay = 0.1
     cluster_port = 16379

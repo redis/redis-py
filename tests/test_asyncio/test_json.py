@@ -2,8 +2,13 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from redis import exceptions
+from redis.commands.json.commands import FPHAType
 from redis.commands.json.path import Path
-from tests.conftest import assert_resp_response, skip_ifmodversion_lt
+from tests.conftest import (
+    assert_resp_response,
+    skip_if_server_version_lt,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest_asyncio.fixture()
@@ -42,6 +47,116 @@ async def test_json_get_jset(decoded_r: redis.Redis):
     assert await decoded_r.json().get("baz") is None
     assert 1 == await decoded_r.json().delete("foo")
     assert await decoded_r.exists("foo") == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_json_set_fpha(decoded_r: redis.Redis):
+    """Test JSON.SET with FPHA (FP Homogeneous Array) argument."""
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert await decoded_r.json().set(
+        "fpha_key", Path.root_path(), fp_array, fpha="FP32"
+    )
+    result = await decoded_r.json().get("fpha_key", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP64
+    assert await decoded_r.json().set(
+        "fpha_key64", Path.root_path(), fp_array, fpha="FP64"
+    )
+    result = await decoded_r.json().get("fpha_key64", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP16
+    assert await decoded_r.json().set(
+        "fpha_key16", Path.root_path(), fp_array, fpha="FP16"
+    )
+    result = await decoded_r.json().get("fpha_key16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with BF16
+    assert await decoded_r.json().set(
+        "fpha_keybf16", Path.root_path(), fp_array, fpha="BF16"
+    )
+    result = await decoded_r.json().get("fpha_keybf16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_json_set_fpha_with_nx_xx(decoded_r: redis.Redis):
+    """Test JSON.SET with FPHA combined with NX/XX modifiers."""
+    fp_array = [1.5, 2.5, 3.5]
+
+    # Set with NX + FPHA (should succeed since key doesn't exist)
+    assert await decoded_r.json().set(
+        "fpha_nx", Path.root_path(), fp_array, nx=True, fpha="FP32"
+    )
+
+    # Set with NX + FPHA again (should fail since key exists)
+    assert (
+        await decoded_r.json().set(
+            "fpha_nx", Path.root_path(), [4.5, 5.5], nx=True, fpha="FP32"
+        )
+        is None
+    )
+
+    # Set with XX + FPHA (should succeed since key exists)
+    assert await decoded_r.json().set(
+        "fpha_nx", Path.root_path(), [4.5, 5.5], xx=True, fpha="FP32"
+    )
+
+
+@pytest.mark.redismod
+async def test_json_set_fpha_invalid_type(decoded_r: redis.Redis):
+    """Test JSON.SET with invalid FPHA type raises an error."""
+    fp_array = [1.1, 2.2, 3.3]
+    with pytest.raises(exceptions.DataError, match="Invalid FPHA type"):
+        await decoded_r.json().set(
+            "fpha_invalid", Path.root_path(), fp_array, fpha="INVALID"
+        )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_json_set_fpha_case_insensitive(decoded_r: redis.Redis):
+    """Test JSON.SET FPHA type is case-insensitive."""
+    fp_array = [1.1, 2.2, 3.3]
+    # Lowercase should work
+    assert await decoded_r.json().set(
+        "fpha_lower", Path.root_path(), fp_array, fpha="fp32"
+    )
+    # Mixed case should work
+    assert await decoded_r.json().set(
+        "fpha_mixed", Path.root_path(), fp_array, fpha="Fp64"
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+async def test_json_set_fpha_enum(decoded_r: redis.Redis):
+    """Test JSON.SET with FPHAType enum values."""
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert await decoded_r.json().set(
+        "fpha_enum", Path.root_path(), fp_array, fpha=FPHAType.FP32
+    )
+    result = await decoded_r.json().get("fpha_enum", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    assert await decoded_r.json().set(
+        "fpha_enum64", Path.root_path(), fp_array, fpha=FPHAType.FP64
+    )
+    assert await decoded_r.json().set(
+        "fpha_enum16", Path.root_path(), fp_array, fpha=FPHAType.FP16
+    )
+    assert await decoded_r.json().set(
+        "fpha_enumbf16", Path.root_path(), fp_array, fpha=FPHAType.BF16
+    )
 
 
 @pytest.mark.redismod
@@ -151,9 +266,8 @@ async def test_type(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_numincrby(decoded_r):
     await decoded_r.json().set("num", Path.root_path(), 1)
-    assert_resp_response(
-        decoded_r, await decoded_r.json().numincrby("num", Path.root_path(), 1), 2, [2]
-    )
+    res = await decoded_r.json().numincrby("num", Path.root_path(), 1)
+    assert_resp_response(decoded_r, res, 2, [2])
     res = await decoded_r.json().numincrby("num", Path.root_path(), 0.5)
     assert_resp_response(decoded_r, res, 2.5, [2.5])
     res = await decoded_r.json().numincrby("num", Path.root_path(), -1.25)
@@ -202,6 +316,35 @@ async def test_strlen(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+async def test_none_path_is_root_path(decoded_r: redis.Redis):
+    # path=None must address the root, not a member named "None".
+    json = decoded_r.json()
+    await json.set("arr", Path.root_path(), [0, 1])
+    assert 3 == await json.arrappend("arr", None, 2)
+    assert 3 == await json.arrlen("arr", None)
+    assert 2 == await json.arrpop("arr", None)
+    assert_resp_response(decoded_r, await json.type("arr", None), "array", ["array"])
+    assert isinstance(await json.resp("arr", None), list)
+    assert 1 == await json.clear("arr", None)
+    assert [] == await json.get("arr")
+
+    await json.set("obj", Path.root_path(), {"a": 1, "b": 2})
+    assert 2 == await json.objlen("obj", None)
+    assert ["a", "b"] == sorted(await json.objkeys("obj", None))
+    assert await json.debug("MEMORY", "obj", None) > 0
+
+    await json.set("str", Path.root_path(), "foo")
+    assert 6 == await json.strappend("str", "bar", None)
+
+    await json.set("bool", Path.root_path(), False)
+    assert await json.toggle("bool", None)
+    assert await json.get("bool") is True
+
+    assert 1 == await json.delete("str", None)
+    assert await decoded_r.exists("str") == 0
+
+
+@pytest.mark.redismod
 async def test_arrappend(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [1])
     assert 2 == await decoded_r.json().arrappend("arr", Path.root_path(), 2)
@@ -220,6 +363,14 @@ async def test_arrindex(decoded_r: redis.Redis):
     assert 4 == await decoded_r.json().arrindex("arr", r_path, 4, start=0, stop=5000)
     assert -1 == await decoded_r.json().arrindex("arr", r_path, 4, start=0, stop=-1)
     assert -1 == await decoded_r.json().arrindex("arr", r_path, 4, start=1, stop=3)
+
+
+@pytest.mark.redismod
+async def test_arrindex_stop_without_start(decoded_r: redis.Redis):
+    r_path = Path.root_path()
+    await decoded_r.json().set("arr", r_path, [0, 1, 2, 3, 4])
+    assert -1 == await decoded_r.json().arrindex("arr", r_path, 4, stop=3)
+    assert 2 == await decoded_r.json().arrindex("arr", r_path, 2, stop=3)
 
 
 @pytest.mark.redismod
@@ -254,6 +405,11 @@ async def test_arrpop(decoded_r: redis.Redis):
     # test out of bounds
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 4 == await decoded_r.json().arrpop("arr", Path.root_path(), 99)
+
+    # index=None pops the last element, like omitting it
+    await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2])
+    assert 2 == await decoded_r.json().arrpop("arr", Path.root_path(), None)
+    assert [0, 1] == await decoded_r.json().get("arr")
 
     # none test
     await decoded_r.json().set("arr", Path.root_path(), [])
@@ -519,13 +675,11 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
         await decoded_r.json().numincrby("non_existing_doc", "$..a", 2)
         await decoded_r.json().nummultby("non_existing_doc", "$..a", 2)
 
-    # Test legacy NUMINCRBY
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
     )
-    assert_resp_response(
-        decoded_r, await decoded_r.json().numincrby("doc1", ".b[0].a", 3), 5, [5]
-    )
+    res = await decoded_r.json().numincrby("doc1", ".b[0].a", 3)
+    assert_resp_response(decoded_r, res, 5, [5])
 
     # Test legacy NUMMULTBY
     await decoded_r.json().set(
@@ -533,9 +687,8 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     )
 
     with pytest.deprecated_call():
-        assert_resp_response(
-            decoded_r, await decoded_r.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
-        )
+        res = await decoded_r.json().nummultby("doc1", ".b[0].a", 3)
+        assert_resp_response(decoded_r, res, 6, [6])
 
 
 @pytest.mark.redismod
@@ -944,7 +1097,11 @@ async def test_type_dollar(decoded_r: redis.Redis):
 
     # Test missing key
     assert_resp_response(
-        decoded_r, await decoded_r.json().type("non_existing_doc", "..a"), None, [None]
+        decoded_r,
+        await decoded_r.json().type("non_existing_doc", "..a"),
+        None,
+        [None],
+        None,
     )
 
 
@@ -1027,3 +1184,35 @@ async def test_toggle_dollar(decoded_r: redis.Redis):
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().toggle("non_existing_doc", "$..a")
+
+
+async def test_set_path_key_strips_only_extension(tmp_path, monkeypatch):
+    # Regression test: JSON.set_path must strip only the extension of the final
+    # path component when deriving the key. A dot in a directory (a versioned
+    # "v1.2" folder), a file with no extension, a dotfile, and a multi-part
+    # extension must all be handled correctly. set_file is stubbed so this runs
+    # without a server.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    # Map each file to the key set_path is expected to derive for it.
+    expected_keys = {
+        dotted_dir / "data.json": dotted_dir / "data",
+        dotted_dir / "report.tar.gz": dotted_dir / "report.tar",
+        dotted_dir / "README": dotted_dir / "README",
+        dotted_dir / ".env": dotted_dir / ".env",
+    }
+    for file_path in expected_keys:
+        file_path.write_text("{}")
+
+    json_client = redis.Redis().json()
+    captured = []
+
+    async def fake_set_file(name, *args, **kwargs):
+        captured.append(name)
+        return True
+
+    monkeypatch.setattr(json_client, "set_file", fake_set_file)
+
+    await json_client.set_path(Path.root_path(), str(tmp_path))
+
+    assert set(captured) == {str(key) for key in expected_keys.values()}

@@ -1,13 +1,22 @@
 import contextlib
+import gc
 import multiprocessing
 import platform
+import select
+import uuid
+import weakref
+from collections import Counter
 
 import pytest
 import redis
-from redis.connection import Connection, ConnectionPool
+from redis.cache import CacheConfig
+from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.exceptions import ConnectionError
+from redis.maint_notifications import MaintNotificationsConfig
+from redis.observability.attributes import ConnectionState, get_pool_name
 
-from .conftest import _get_client
+from .conftest import _get_client, skip_if_server_version_lt
+from .test_cache import wait_for_invalidated_value
 
 
 @contextlib.contextmanager
@@ -18,6 +27,9 @@ def exit_callback(callback, *args):
         callback(*args)
 
 
+_has_fork = "fork" in multiprocessing.get_all_start_methods()
+
+
 @pytest.mark.skipif(
     platform.python_implementation() == "PyPy",
     reason=(
@@ -25,13 +37,21 @@ def exit_callback(callback, *args):
         "Causes processes to hang quite often"
     ),
 )
+@pytest.mark.skipif(
+    not _has_fork,
+    reason="These tests require the fork start method, which is not "
+    "available on this platform (e.g. Windows)",
+)
 class TestMultiprocessing:
     # On macOS and newly non-macOS POSIX systems (since Python 3.14),
     # the default method has been changed to forkserver.
     # The code in this module does not work with it,
     # hence the explicit change to 'fork'
     # See https://github.com/python/cpython/issues/125714
-    if multiprocessing.get_start_method() in ["forkserver", "spawn"]:
+    if not _has_fork:
+        # The class is skipped above; avoid raising at import time.
+        _mp_context = None
+    elif multiprocessing.get_start_method() in ["forkserver", "spawn"]:
         _mp_context = multiprocessing.get_context(method="fork")
     else:
         _mp_context = multiprocessing.get_context()
@@ -45,12 +65,12 @@ class TestMultiprocessing:
     def r(self, request):
         return _get_client(redis.Redis, request=request, single_connection_client=False)
 
-    def test_close_connection_in_child(self, master_host):
+    def test_close_connection_in_child(self, master_connection_kwargs):
         """
         A connection owned by a parent and closed by a child doesn't
         destroy the file descriptors so a parent can still use it.
         """
-        conn = Connection(host=master_host[0], port=master_host[1])
+        conn = Connection(**master_connection_kwargs)
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
@@ -71,12 +91,12 @@ class TestMultiprocessing:
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
-    def test_close_connection_in_parent(self, master_host):
+    def test_close_connection_in_parent(self, master_connection_kwargs):
         """
         A connection owned by a parent is unusable by a child if the parent
         (the owning process) closes the connection.
         """
-        conn = Connection(host=master_host[0], port=master_host[1])
+        conn = Connection(**master_connection_kwargs)
         conn.send_command("ping")
         assert conn.read_response() == b"PONG"
 
@@ -100,7 +120,7 @@ class TestMultiprocessing:
 
     @pytest.mark.parametrize("max_connections", [2, None])
     def test_release_parent_connection_from_pool_in_child_process(
-        self, max_connections, master_host
+        self, max_connections, request
     ):
         """
         A connection owned by a parent should not decrease the _created_connections
@@ -109,7 +129,7 @@ class TestMultiprocessing:
         """
 
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -133,13 +153,13 @@ class TestMultiprocessing:
         assert proc.exitcode == 0
 
     @pytest.mark.parametrize("max_connections", [1, 2, None])
-    def test_pool(self, max_connections, master_host):
+    def test_pool(self, max_connections, request):
         """
         A child will create its own connections when using a pool created
         by a parent.
         """
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -170,13 +190,13 @@ class TestMultiprocessing:
             assert conn.read_response() == b"PONG"
 
     @pytest.mark.parametrize("max_connections", [1, 2, None])
-    def test_close_pool_in_main(self, max_connections, master_host):
+    def test_close_pool_in_main(self, max_connections, request):
         """
         A child process that uses the same pool as its parent isn't affected
         when the parent disconnects all connections within the pool.
         """
         pool = ConnectionPool.from_url(
-            f"redis://{master_host[0]}:{master_host[1]}",
+            request.config.getoption("--redis-url"),
             max_connections=max_connections,
         )
 
@@ -217,3 +237,183 @@ class TestMultiprocessing:
         assert proc.exitcode == 0
 
         assert r.ping() is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.4.0")
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_child_does_not_serve_parent_cache_entries(
+        self, pool_class, master_connection_kwargs
+    ):
+        """
+        A child does not serve client-side cache entries filled by its parent's
+        connections: their invalidations are delivered to the parent.
+        """
+        key = f"fork-cache-{uuid.uuid4()}"
+        writer = redis.Redis(**master_connection_kwargs)
+        pool = pool_class(
+            **master_connection_kwargs,
+            protocol=3,
+            cache_config=CacheConfig(),
+        )
+        r = redis.Redis(connection_pool=pool)
+        writer.set(key, "before")
+        assert r.get(key) == b"before"
+
+        def target(client, ev):
+            ev.wait()
+            assert client.get(key) == b"after"
+
+        ev = multiprocessing.Event()
+        proc = self._mp_context.Process(target=target, args=(r, ev))
+        proc.start()
+        try:
+            writer.set(key, "after")
+            # The parent reads the invalidation off its own connection.
+            assert wait_for_invalidated_value(r, key, [b"after"]) == b"after"
+            ev.set()
+            proc.join(5)
+            assert proc.exitcode == 0
+        finally:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
+            writer.delete(key)
+            pool.disconnect()
+            writer.close()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.4.0")
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_child_cache_hit_does_not_read_parent_socket(
+        self, pool_class, master_connection_kwargs
+    ):
+        """
+        A child's cache lookup does not read a reply pending on a connection
+        its parent is using.
+        """
+        key = f"fork-cache-{uuid.uuid4()}"
+        writer = redis.Redis(**master_connection_kwargs)
+        pool = pool_class(
+            **master_connection_kwargs,
+            protocol=3,
+            cache_config=CacheConfig(),
+            socket_timeout=2,
+        )
+        r = redis.Redis(connection_pool=pool)
+        writer.set(key, "value")
+        assert r.get(key) == b"value"
+        # The connection the cached entry was filled on.
+        conn = pool.get_connection()
+
+        def target(client, ev):
+            ev.wait()
+            assert client.get(key) == b"value"
+
+        ev = multiprocessing.Event()
+        proc = self._mp_context.Process(target=target, args=(r, ev))
+        proc.start()
+        try:
+            conn.send_command("PING")
+            # Wait for the reply to arrive on the socket without reading it.
+            assert select.select([conn._conn._sock], [], [], 5)[0]
+            ev.set()
+            proc.join(5)
+            assert proc.exitcode == 0
+            assert conn.read_response() == b"PONG"
+        finally:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
+            pool.release(conn)
+            writer.delete(key)
+            pool.disconnect()
+            writer.close()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    @pytest.mark.parametrize("child_action", ["reuse", "reset", "delete"])
+    def test_pool_connection_counts_after_fork(
+        self, pool_class, child_action, master_connection_kwargs, monkeypatch
+    ):
+        counts = Counter()
+
+        def record(pool_name, connection_state, counter=1):
+            counts[pool_name, connection_state] += counter
+
+        def pool_counts(pool_name):
+            # GC may also collect unrelated pools from earlier tests.
+            return (
+                counts[pool_name, ConnectionState.IDLE],
+                counts[pool_name, ConnectionState.USED],
+            )
+
+        monkeypatch.setattr(redis.connection, "record_connection_count", record)
+        pool = pool_class(
+            **master_connection_kwargs,
+            max_connections=2,
+            maint_notifications_config=MaintNotificationsConfig(enabled=False),
+        )
+        parent_name = get_pool_name(pool)
+        parent_idle = pool.get_connection()
+        parent_used = pool.get_connection()
+        pool.release(parent_idle)
+        assert pool_counts(parent_name) == (1, 1)
+
+        # A mutable holder leaves no extra pool reference in the inherited
+        # parent frame or Process arguments when the child collects its copy.
+        pool_holder = [pool]
+        del pool
+
+        def target(holder):
+            child_pool = holder.pop()
+            counts.clear()
+            child_name = parent_name
+            if child_action != "delete":
+                if child_action == "reset":
+                    child_pool.reset()
+                    assert pool_counts(parent_name) == (0, 0)
+                    assert pool_counts(get_pool_name(child_pool)) == (0, 0)
+                child_idle = child_pool.get_connection()
+                child_used = child_pool.get_connection()
+                child_pool.release(child_idle)
+                assert child_pool.get_connection() is child_idle
+                child_pool.release(child_idle)
+                child_used.send_command("PING")
+                assert child_used.read_response() == b"PONG"
+                child_name = get_pool_name(child_pool)
+                assert child_name != parent_name
+                assert pool_counts(parent_name) == (0, 0)
+                assert pool_counts(child_name) == (1, 1)
+                child_pool.disconnect()
+
+            pool_ref = weakref.ref(child_pool)
+            del child_pool
+            gc.collect()
+            assert pool_ref() is None
+            assert pool_counts(parent_name) == (0, 0)
+            assert pool_counts(child_name) == (0, 0)
+
+        proc = self._mp_context.Process(target=target, args=(pool_holder,))
+        proc.start()
+        try:
+            proc.join(5)
+            assert proc.exitcode == 0
+        finally:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
+
+        pool = pool_holder.pop()
+        assert get_pool_name(pool) == parent_name
+        assert pool_counts(parent_name) == (1, 1)
+        assert pool.get_connection() is parent_idle
+        pool.release(parent_idle)
+        parent_used.send_command("PING")
+        assert parent_used.read_response() == b"PONG"
+        pool.disconnect()
+        pool_ref = weakref.ref(pool)
+        del pool
+        gc.collect()
+        assert pool_ref() is None
+        assert pool_counts(parent_name) == (0, 0)

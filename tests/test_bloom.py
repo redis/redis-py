@@ -1,13 +1,16 @@
-from math import inf
+from math import inf, isnan
+from unittest.mock import Mock
 
 import pytest
 import redis.commands.bf
+from redis.client import NEVER_DECODE
 from redis.exceptions import RedisError
 
 from .conftest import (
     _get_client,
     assert_resp_response,
-    is_resp2_connection,
+    expected_response_shape,
+    skip_if_redis_enterprise,
     skip_ifmodversion_lt,
 )
 
@@ -101,22 +104,42 @@ def test_bf_insert(client):
         2,
         info.get("insertedNum"),
         info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
         client,
         1000,
         info.get("capacity"),
         info.get("Capacity"),
+        info.get("capacity"),
     )
     assert_resp_response(
         client,
         1,
         info.get("filterNum"),
         info.get("Number of filters"),
+        info.get("filterNum"),
     )
 
 
 @pytest.mark.redismod
+def test_bf_false_flags_are_not_sent(client):
+    # noScale=False and noCreate=False must behave like omitting the flag,
+    # not send NONSCALING / NOCREATE.
+    assert client.bf().create("bloom", 0.01, 1, noScale=False)
+    assert [1, 1, 1] == intlist(client.bf().madd("bloom", "a", "b", "c"))
+    assert [1, 1, 1] == intlist(
+        client.bf().insert("bloom_ins", ["a", "b", "c"], capacity=1, noScale=False)
+    )
+    assert [1] == intlist(client.bf().insert("bloom_new", ["a"], noCreate=False))
+    assert [1] == client.cf().insert("cuckoo_new", ["a"], nocreate=False)
+    assert [1] == client.cf().insertnx("cuckoo_nx_new", ["a"], nocreate=False)
+
+
+@pytest.mark.redismod
+# BF.SCANDUMP/LOADCHUNK does not complete against Redis Enterprise's bloom module
+# (the scandump cursor loop times out).
+@skip_if_redis_enterprise()
 def test_bf_scandump_and_loadchunk(client):
     # Store a filter
     client.bf().create("myBloom", "0.0001", "1000")
@@ -124,13 +147,17 @@ def test_bf_scandump_and_loadchunk(client):
     # test is probabilistic and might fail. It is OK to change variables if
     # certain to not break anything
     def do_verify():
-        res = 0
+        pipe = client.pipeline(transaction=False)
+        bf = pipe.bf()
         for x in range(1000):
-            client.bf().add("myBloom", x)
-            rv = client.bf().exists("myBloom", x)
-            assert rv
-            rv = client.bf().exists("myBloom", f"nonexist_{x}")
-            res += rv == x
+            bf.add("myBloom", x)
+            bf.exists("myBloom", x)
+            bf.exists("myBloom", f"nonexist_{x}")
+        replies = pipe.execute()
+        res = 0
+        for exists, false_positive in zip(replies[1::3], replies[2::3]):
+            assert exists
+            res += false_positive
         assert res < 5
 
     do_verify()
@@ -161,7 +188,38 @@ def test_bf_scandump_and_loadchunk(client):
     do_verify()
 
     client.bf().client.delete("myBloom")
-    client.bf().create("myBloom", "0.0001", "10000000")
+
+
+@pytest.mark.redismod
+@skip_if_redis_enterprise()
+def test_cf_scandump_and_loadchunk(client):
+    # The client decodes responses, but the dumped chunks are binary.
+    client.cf().create("myCuckoo", 1000)
+    for x in range(100):
+        client.cf().add("myCuckoo", x)
+
+    chunks = []
+    it = 0
+    while True:
+        it, data = client.cf().scandump("myCuckoo", it)
+        if it == 0:
+            break
+        assert isinstance(data, bytes)
+        chunks.append((it, data))
+
+    client.delete("myCuckoo")
+    for it, data in chunks:
+        client.cf().loadchunk("myCuckoo", it, data)
+
+    assert all(client.cf().mexists("myCuckoo", *range(100)))
+
+
+def test_cf_scandump_does_not_decode_response():
+    mock_client = Mock()
+    redis.commands.bf.CFBloom(mock_client).scandump("myCuckoo", 0)
+    mock_client.execute_command.assert_called_once_with(
+        "CF.SCANDUMP", "myCuckoo", 0, **{NEVER_DECODE: []}
+    )
 
 
 @pytest.mark.redismod
@@ -175,6 +233,7 @@ def test_bf_info(client):
         None,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     client.bf().create("expanding", "0.0001", "1000", expansion=expansion)
@@ -184,6 +243,7 @@ def test_bf_info(client):
         4,
         info.get("expansionRate"),
         info.get("Expansion rate"),
+        info.get("expansionRate"),
     )
 
     try:
@@ -227,13 +287,25 @@ def test_cf_add_and_insert(client):
     assert [1] == client.cf().insertnx("empty2", ["bar"], capacity=1000)
     info = client.cf().info("captest")
     assert_resp_response(
-        client, 5, info.get("insertedNum"), info.get("Number of items inserted")
+        client,
+        5,
+        info.get("insertedNum"),
+        info.get("Number of items inserted"),
+        info.get("insertedNum"),
     )
     assert_resp_response(
-        client, 0, info.get("deletedNum"), info.get("Number of items deleted")
+        client,
+        0,
+        info.get("deletedNum"),
+        info.get("Number of items deleted"),
+        info.get("deletedNum"),
     )
     assert_resp_response(
-        client, 1, info.get("filterNum"), info.get("Number of filters")
+        client,
+        1,
+        info.get("filterNum"),
+        info.get("Number of filters"),
+        info.get("filterNum"),
     )
 
 
@@ -282,6 +354,34 @@ def test_cms_merge(client):
     assert [9, 9, 11] == client.cms().query("C", "foo", "bar", "baz")
     assert client.cms().merge("C", 2, ["A", "B"], ["2", "3"])
     assert [16, 15, 21] == client.cms().query("C", "foo", "bar", "baz")
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("8.11.0", "bf")
+def test_cms_cell_size(client):
+    for cell_size in (1, 2, 4, 8):
+        assert client.cms().initbydim(
+            f"cell_dim{cell_size}", 1000, 5, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_dim{cell_size}")["cell_size"]
+        assert client.cms().initbyprob(
+            f"cell_prob{cell_size}", 0.01, 0.01, cell_size=cell_size
+        )
+        assert cell_size == client.cms().info(f"cell_prob{cell_size}")["cell_size"]
+
+    # the server uses 4-byte counters when CELL_SIZE is omitted
+    assert client.cms().initbydim("cell_default", 1000, 5)
+    info = client.cms().info("cell_default")
+    assert 1000 == info["width"]
+    assert 5 == info["depth"]
+    assert 0 == info["count"]
+    assert 4 == info["cell_size"]
+
+    # only 1, 2, 4 and 8 are valid cell sizes
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbydim("cell_bad", 1000, 5, cell_size=3)
+    with pytest.raises(redis.ResponseError):
+        client.cms().initbyprob("cell_bad", 0.01, 0.01, cell_size=16)
 
 
 @pytest.mark.redismod
@@ -419,7 +519,11 @@ def test_tdigest_reset(client):
     # assert we have 0 unmerged
     info = client.tdigest().info("tDigest")
     assert_resp_response(
-        client, 0, info.get("unmerged_nodes"), info.get("Unmerged nodes")
+        client,
+        0,
+        info.get("unmerged_nodes"),
+        info.get("Unmerged nodes"),
+        info.get("unmerged_nodes"),
     )
 
 
@@ -435,10 +539,14 @@ def test_tdigest_merge(client):
     assert client.tdigest().merge("to-tDigest", 1, "from-tDigest")
     # we should now have 110 weight on to-histogram
     info = client.tdigest().info("to-tDigest")
-    if is_resp2_connection(client):
-        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
-    else:
+    if expected_response_shape(client) == "legacy_resp3":
+        # Native RESP3 map from the server (no module callback registered for
+        # ``protocol=3`` with ``legacy_responses=True``); keys are title-case.
         assert 20 == float(info["Merged weight"]) + float(info["Unmerged weight"])
+    else:
+        # ``TDigestInfo`` wrapper exposes snake_case keys for both the
+        # ``legacy_resp2`` and ``unified`` shapes.
+        assert 20 == float(info["merged_weight"]) + float(info["unmerged_weight"])
     # test override
     assert client.tdigest().create("from-override", 10)
     assert client.tdigest().create("from-override-2", 10)
@@ -566,3 +674,63 @@ def test_tdigest_byrevrank(client):
 #
 #     for i in range(100):
 #         assert client.bf().exists("pipeline", i)
+
+
+@pytest.mark.fixed_client
+@pytest.mark.experimental
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_tdigest_unified_responses_are_floats(request, stack_url, protocol):
+    with _get_client(
+        redis.Redis,
+        request,
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        from_url=stack_url,
+    ) as client:
+        client.flushdb()
+        tdigest = client.tdigest()
+        assert tdigest.create("t-digest", 100)
+        assert tdigest.add("t-digest", [1, 2, 3, 4, 5])
+        assert tdigest.create("empty", 100)
+        # Redis replies with doubles, which RESP2 sends as bulk strings.
+        results = [
+            (tdigest.quantile("t-digest", 0.5, 0.9), [3.0, 5.0]),
+            (tdigest.cdf("t-digest", 1, 5), [0.1, 0.9]),
+            (tdigest.byrank("t-digest", 0, 2, 100), [1.0, 3.0, inf]),
+            (tdigest.byrevrank("t-digest", 0, 100), [5.0, -inf]),
+        ]
+        for result, expected in results:
+            assert result == expected
+            assert all(type(value) is float for value in result)
+        # An empty sketch answers nan, as a float as well
+        for result in (
+            tdigest.quantile("empty", 0.5),
+            tdigest.cdf("empty", 1),
+            tdigest.byrank("empty", 0),
+            tdigest.byrevrank("empty", 0),
+        ):
+            assert len(result) == 1
+            assert type(result[0]) is float and isnan(result[0])
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
+@pytest.mark.parametrize("protocol", [2, 3])
+def test_topk_info_unified_responses(request, stack_url, protocol):
+    with _get_client(
+        redis.Redis,
+        request,
+        protocol=protocol,
+        legacy_responses=False,
+        decode_responses=True,
+        from_url=stack_url,
+    ) as client:
+        client.flushdb()
+        assert client.topk().reserve("topk", 3, 50, 4, 0.9)
+        info = client.topk().info("topk")
+        assert (info["k"], info["width"], info["depth"]) == (3, 50, 4)
+        # The decay is a double, which RESP2 sends as a bulk string.
+        assert info["decay"] == 0.9
+        assert type(info["decay"]) is float

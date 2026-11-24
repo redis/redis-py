@@ -1,5 +1,23 @@
+from redis.utils import str_if_bytes
+
 from ..helpers import nativestr
 from .utils import list_to_dict
+
+# Mapping from RESP3 camelCase field names to the legacy snake_case
+# attribute names. Used so callers can fetch the same value with either
+# spelling regardless of which wire format produced the ``TSInfo``.
+_FIELD_ALIASES = {
+    "sourceKey": "source_key",
+    "chunkCount": "chunk_count",
+    "memoryUsage": "memory_usage",
+    "totalSamples": "total_samples",
+    "retentionTime": "retention_msecs",
+    "lastTimestamp": "last_timestamp",
+    "firstTimestamp": "first_timestamp",
+    "maxSamplesPerChunk": "max_samples_per_chunk",
+    "chunkSize": "chunk_size",
+    "duplicatePolicy": "duplicate_policy",
+}
 
 
 class TSInfo:
@@ -7,6 +25,8 @@ class TSInfo:
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command
     https://redis.io/docs/latest/commands/ts.info/
+
+    Handles both RESP2 (flat list) and RESP3 (dict) responses.
     """
 
     rules = []
@@ -23,14 +43,15 @@ class TSInfo:
     chunk_size = None
     duplicate_policy = None
 
-    def __init__(self, args):
+    def __init__(self, args, unified=False):
         """
         Hold information and statistics on the time-series.
 
         The supported params that can be passed as args:
 
         rules:
-            A list of compaction rules of the time series.
+            A list of compaction rules of the time series, or a dict keyed
+            by destination key when ``unified`` is set.
         sourceKey:
             Key name for source time series in case the current series
             is a target of a rule.
@@ -59,13 +80,31 @@ class TSInfo:
         Can read more about on
         https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
-        self.rules = response.get("rules")
+        if isinstance(args, dict):
+            # RESP3 wire: response is a native map (bytes keys when not decoded).
+            response = {nativestr(k): v for k, v in args.items()}
+            rules = response.get("rules") or {}
+            if unified:
+                self.rules = rules
+            else:
+                # Match the RESP2 list of [dest_key, bucket, aggregator, alignment].
+                self.rules = [[key, *rule] for key, rule in rules.items()]
+            labels = response.get("labels") or {}
+            self.labels = {str_if_bytes(k): str_if_bytes(v) for k, v in labels.items()}
+        else:
+            # RESP2 wire: flat list of alternating key-value pairs.
+            response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+            rules = response.get("rules")
+            if unified:
+                # Key the rules by destination key, like the RESP3 map.
+                self.rules = {rule[0]: rule[1:] for rule in rules or []}
+            else:
+                self.rules = rules
+            self.labels = list_to_dict(response.get("labels"))
         self.source_key = response.get("sourceKey")
         self.chunk_count = response.get("chunkCount")
         self.memory_usage = response.get("memoryUsage")
         self.total_samples = response.get("totalSamples")
-        self.labels = list_to_dict(response.get("labels"))
         self.retention_msecs = response.get("retentionTime")
         self.last_timestamp = response.get("lastTimestamp")
         self.first_timestamp = response.get("firstTimestamp")
@@ -88,4 +127,13 @@ class TSInfo:
             return None
 
     def __getitem__(self, item):
-        return getattr(self, item)
+        return getattr(self, _FIELD_ALIASES.get(item, item))
+
+
+def parse_info_unified(response, **kwargs):
+    """Unified parser for TS.INFO.
+
+    Emits a :class:`TSInfo` whose ``rules`` are ``{dest_key: [bucket,
+    aggregator, alignment]}`` on both wire formats, the shape of the RESP3 map.
+    """
+    return TSInfo(response, unified=True)

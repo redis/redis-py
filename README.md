@@ -2,7 +2,7 @@
 
 The Python interface to the Redis key-value store.
 
-[![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster)
+[![CI](https://github.com/redis/redis-py/actions/workflows/integration.yaml/badge.svg?branch=master)](https://github.com/redis/redis-py/actions/workflows/integration.yaml)
 [![docs](https://readthedocs.org/projects/redis/badge/?version=stable&style=flat)](https://redis.readthedocs.io/en/stable/)
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/redis/redis-py/blob/master/LICENSE)
 [![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/)
@@ -10,11 +10,6 @@ The Python interface to the Redis key-value store.
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 
 [Installation](#installation) |  [Usage](#usage) | [Advanced Topics](#advanced-topics) | [Contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md)
-
----------------------------------------------
-
-**Note:** redis-py 5.0 is the last version of redis-py that supports Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 supports Python 3.8+.<br>
-**Note:** redis-py 6.1.0 is the last version of redis-py that supports Python 3.8, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 6.2.0 supports Python 3.9+.
 
 ---------------------------------------------
 
@@ -60,7 +55,9 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 ## Supported Redis Versions
 
-The most recent version of this library supports Redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES), [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES) and [8.2](https://github.com/redis/redis/blob/8.2/00-RELEASENOTES).
+The most recent version of this library supports Redis 7.2 and every later
+release, up to the latest stable Redis version. CI tests each of these Redis
+release lines.
 
 The table below highlights version compatibility of the most-recent library versions and redis versions.
 
@@ -70,6 +67,21 @@ The table below highlights version compatibility of the most-recent library vers
 | >= 4.5.0 | Version 5.0 to 7.0 |
 | >= 5.0.0 | Version 5.0 to 7.4 |
 | >= 6.0.0 | Version 7.2 to current |
+
+### Supported Python Versions
+
+redis-py supports every CPython version that has not reached
+[end of life](https://devguide.python.org/versions/), and PyPy.
+`requires-python` in `pyproject.toml` states the minimum Python version for each
+release. If you are on an older Python version, use the last redis-py release
+that supports it:
+
+| Python version | Last supporting redis-py releases |
+|----------------|-----------------------------------|
+| 3.7 | 5.0.x |
+| 3.8 | 6.1.x |
+| 3.9 | 7.0.x |
+| 3.10 | 8.1.x |
 
 
 ## Usage
@@ -89,12 +101,42 @@ The above code connects to localhost on port 6379, sets a value in Redis, and re
 
 
 #### RESP3 Support
-To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
+redis-py supports RESP3 starting with version 5.0. Starting with redis-py 8.0,
+clients use RESP3 on the wire by default while preserving legacy
+RESP2-compatible Python response shapes for existing applications.
+
+When *protocol* is left unset, a server or proxy that rejects `HELLO` with
+an unknown-command or `NOPROTO` error triggers a fallback to RESP2 and a warning.
+Authentication and other server errors still propagate. Automatic fallback is
+disabled when *protocol=3* is explicit, client-side caching is configured, or
+maintenance notifications are explicitly enabled.
+
+Automatic fallback adapts core command response callbacks only. Module commands
+(JSON, Search, TimeSeries, Bloom, and vector sets) still select their response
+parsers from the configured protocol and can return incorrect results after a
+fallback, including empty results from `FT.SEARCH`. When using these commands
+with a server or proxy that does not support `HELLO`, set *protocol=2* explicitly
+when creating the client.
+
+Set *protocol=3* explicitly when your application should receive
+RESP3-specific response shapes or when you want the wire protocol choice to be
+visible in code. To force RESP2 on the wire, set *protocol=2*. To opt in to
+protocol-independent response shapes, set *legacy_responses=False*.
+
+For new projects, we recommend opting out of legacy response compatibility by
+setting *legacy_responses=False*. This makes redis-py return unified Python
+response shapes for affected commands whether the connection uses RESP2 or
+RESP3. Existing applications can keep the default legacy-compatible behavior
+while they migrate response handling at their own pace.
 
 ``` python
 >>> import redis
->>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
+>>> r = redis.Redis(host='localhost', port=6379, db=0, legacy_responses=False)
 ```
+
+See the [unified responses migration guide](https://redis.readthedocs.io/en/stable/unified_responses.html)
+for activation instructions and command-by-command response differences. For
+RESP3-specific behavior, see the [RESP3 features guide](https://redis.readthedocs.io/en/stable/resp3_features.html).
 
 ### Connection Pools
 
@@ -106,6 +148,29 @@ By default, redis-py uses a connection pool to manage connections. Each instance
 ```
 
 Alternatively, you might want to look at [Async connections](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html), or [Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#cluster-client), or even [Async Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#async-cluster-client).
+
+### Cluster and Sentinel
+
+Connect to a Redis Cluster through any of its nodes. The client discovers the
+rest of the cluster and routes each command to the right node.
+
+``` python
+>>> from redis import RedisCluster
+>>> rc = RedisCluster(host='localhost', port=6379)
+>>> rc.set('foo', 'bar')
+True
+```
+
+Connect to a primary that Redis Sentinel monitors by naming the service and
+listing the sentinels.
+
+``` python
+>>> from redis import Sentinel
+>>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
+>>> primary = sentinel.master_for('mymaster', socket_timeout=0.1)
+>>> primary.set('foo', 'bar')
+True
+```
 
 ### Redis Commands
 
@@ -202,11 +267,88 @@ This is useful when:
 1. You have more than one Redis deployment. This might include two independent Redis servers or two or more Redis databases replicated across multiple [active-active Redis Enterprise](https://redis.io/docs/latest/operate/rs/databases/active-active/) clusters.
 2. You want your application to connect to one deployment at a time and to fail over to the next available deployment if the first deployment becomes unavailable.
 
-For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/multi_database.html).
+For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/geographic_failover.html).
+
+### Bulk hash ingestion (HIMPORT)
+
+Redis 8.10 adds the `HIMPORT` command family for loading many hashes that share
+the same set of field names: register the field names once with `himport_prepare`,
+then create each hash by sending only its values. Keys written this way are regular
+hashes — every hash command works on them.
+
+``` python
+r.himport_prepare("users", ["name", "email", "age"])
+r.himport_set("user:1", "users", ["alice", "alice@example.com", "25"])
+r.himport_set("user:2", "users", ["bob", "bob@example.com", "30"])
+r.himport_discard("users")  # => 1
+```
+
+Values pair positionally with the prepared fields. Hash enumeration order
+(`HGETALL`, `HKEYS`) is not guaranteed to match the prepare order.
+
+**Fieldsets are connection state.** A prepared fieldset lives in the server-side
+session of the physical connection that prepared it: it is invisible to other
+connections and destroyed by a disconnect or `RESET`. redis-py handles this for you —
+`himport_prepare` records the fieldset in a client-level registry, and the `PREPARE`
+is applied lazily on whatever pooled connection serves each `himport_set` (and
+re-applied automatically after a reconnect, `RESET`, or Sentinel/cluster failover).
+You declare each fieldset once per client with `himport_prepare`; there is no
+constructor argument for it.
+
+For the highest ingestion throughput, send the `PREPARE` and its `SET`s in one
+pipeline — a single batch always executes on one connection:
+
+``` python
+with r.pipeline(transaction=False) as pipe:
+    pipe.himport_prepare("users", ["name", "email", "age"])
+    for uid, row in rows:
+        pipe.himport_set(f"user:{uid}", "users", row)
+    pipe.execute()
+```
+
+The automatic re-prepare applies to direct calls only, not to commands inside
+`pipeline`/`transaction` blocks: a batched `himport_set` relies on the single
+pre-flight `PREPARE` in that batch.
+
+With `RedisCluster`, `himport_prepare` / `himport_discard` / `himport_discard_all`
+update the client's shared, cluster-wide registry and return immediately — like the
+standalone API, they perform no server I/O of their own. The server-side `PREPARE`
+(and, after a discard, `DISCARD`) is applied lazily on each node's connection the
+next time it serves an `himport_set`, and re-applied after reconnects or failover;
+`himport_set` itself routes by the key's hash slot. A discard is therefore not
+removed from every server session at once: each connection drops the fieldset on its
+next `himport_set` (or on disconnect). With Sentinel, call
+`himport_prepare` on the long-lived client returned by `master_for(...)`; the fieldset
+survives failover automatically. HIMPORT is not supported on the multi-database
+(Active-Active) client.
+
+The async client mirrors this exactly:
+
+``` python
+await r.himport_prepare("users", ["name", "email", "age"])
+await r.himport_set("user:1", "users", ["alice", "alice@example.com", "25"])
+```
 
 ---------------------------------------------
 
-### Author
+## Documentation
+
+-   [redis-py documentation](https://redis.readthedocs.io/en/stable/), with the API reference and examples.
+-   [Redis Python client guide](https://redis.io/docs/latest/develop/clients/redis-py/) in the Redis documentation.
+-   [Redis command reference](https://redis.io/commands).
+
+## Getting Help and Contributing
+
+-   Ask questions in [GitHub Discussions](https://github.com/redis/redis-py/discussions) or on the [Redis Discord server](https://discord.gg/redis).
+-   Report bugs and request features in [GitHub Issues](https://github.com/redis/redis-py/issues).
+-   To contribute code or docs, read [CONTRIBUTING.md](CONTRIBUTING.md).
+-   Report security vulnerabilities as described in [SECURITY.md](SECURITY.md), not in public issues.
+
+## License
+
+redis-py is licensed under the [MIT License](LICENSE).
+
+## Author
 
 redis-py is developed and maintained by [Redis Inc](https://redis.io). It can be found [here](
 https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).

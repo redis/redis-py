@@ -2,8 +2,9 @@ from typing import Any, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, ResponseError
 from ..typing import EncodableT
-from .base import _AsyncRESPBase, _RESPBase
-from .socket import SENTINEL, SERVER_CLOSED_CONNECTION_ERROR
+from ..utils import SENTINEL
+from .base import _AsyncRESPBase, _parse_int, _RESPBase
+from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
 
 class _RESP2Parser(_RESPBase):
@@ -52,19 +53,19 @@ class _RESP2Parser(_RESPBase):
             pass
         # int value
         elif byte == b":":
-            return int(response)
+            return _parse_int(response, raw)
         # bulk response
         elif byte == b"$" and response == b"-1":
             return None
         elif byte == b"$":
-            response = self._buffer.read(int(response), timeout=timeout)
+            response = self._buffer.read(_parse_int(response, raw), timeout=timeout)
         # multi-bulk response
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
             response = [
                 self._read_response(disable_decoding=disable_decoding, timeout=timeout)
-                for i in range(int(response))
+                for i in range(_parse_int(response, raw))
             ]
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -116,19 +117,19 @@ class _AsyncRESP2Parser(_AsyncRESPBase):
             pass
         # int value
         elif byte == b":":
-            return int(response)
+            return _parse_int(response, raw)
         # bulk response
         elif byte == b"$" and response == b"-1":
             return None
         elif byte == b"$":
-            response = await self._read(int(response))
+            response = await self._read(_parse_int(response, raw))
         # multi-bulk response
         elif byte == b"*" and response == b"-1":
             return None
         elif byte == b"*":
             response = [
                 (await self._read_response(disable_decoding))
-                for _ in range(int(response))  # noqa
+                for _ in range(_parse_int(response, raw))  # noqa
             ]
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")

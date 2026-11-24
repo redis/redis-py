@@ -4,9 +4,10 @@ from unittest.mock import patch, Mock
 import pybreaker
 import pytest
 
-from redis.client import Pipeline
+from redis.client import NEVER_DECODE, Pipeline
+from redis.exceptions import DataError
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
-from redis.multidb.client import MultiDBClient
+from redis.multidb.client import MultiDBClient, Pipeline as MultiDBPipeline
 from redis.multidb.config import InitialHealthCheck
 from redis.multidb.failover import (
     WeightBasedFailoverStrategy,
@@ -22,7 +23,7 @@ def mock_pipe() -> Pipeline:
     return mock_pipe
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestPipeline:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -160,11 +161,14 @@ class TestPipeline:
         db2_became_unhealthy = threading.Event()
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
+        # Keep every database in round 0 until the first call has run, so a
+        # slow runner can't start round 1 (mock_db1 unhealthy) before it.
+        first_call_done = threading.Event()
 
         async def mock_check_health(database, connection=None):
             with counter_lock:
                 db_probes_in_round[id(database)] += 1
-                if db_probes_in_round[id(database)] > 3:
+                if db_probes_in_round[id(database)] > 3 and first_call_done.is_set():
                     db_rounds[id(database)] += 1
                     db_probes_in_round[id(database)] = 1
                 current_round = db_rounds[id(database)]
@@ -236,6 +240,7 @@ class TestPipeline:
 
                     # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
                     assert pipe.execute() == ["OK1", "value"]
+                    first_call_done.set()
 
                     # Wait for mock_db1 to become unhealthy
                     assert db1_became_unhealthy.wait(timeout=1.0), (
@@ -243,7 +248,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb1.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb1 to open",
                     )
 
@@ -256,7 +261,7 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb2.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb2 to open",
                     )
 
@@ -269,14 +274,14 @@ class TestPipeline:
                     )
                     wait_for_condition(
                         lambda: cb.state == CBState.OPEN,
-                        timeout=0.5,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb to open",
                     )
 
                     # Wait for mock_db1 to recover (circuit breaker to close)
                     wait_for_condition(
                         lambda: cb1.state == CBState.CLOSED,
-                        timeout=1.0,
+                        timeout=5.0,
                         error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                     )
 
@@ -285,8 +290,59 @@ class TestPipeline:
             finally:
                 client.close()
 
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_pipeline_slowlog_get_before_first_command(
+        self,
+        mock_multi_db_config,
+        mock_db,
+        mock_db1,
+        mock_db2,
+        mock_hc,
+        decode_responses,
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-@pytest.mark.onlynoncluster
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            pipe = mock_pipe()
+            pipe.execute.return_value = [[]]
+            mock_db1.client.pipeline.return_value = pipe
+            mock_db1.client.get_connection_kwargs.return_value = {
+                "decode_responses": decode_responses
+            }
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                assert not client.initialized
+                multi_db_pipe = client.pipeline()
+                multi_db_pipe.slowlog_get()
+                assert multi_db_pipe.execute() == [[]]
+
+                expected = {NEVER_DECODE: []} if decode_responses else {}
+                pipe.execute_command.assert_called_once_with("SLOWLOG GET", **expected)
+            finally:
+                client.close()
+
+
+@pytest.mark.fixed_client
 class TestTransaction:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -328,6 +384,57 @@ class TestTransaction:
                 assert client.transaction(callback) == ["OK1", "value1"]
                 # 3 databases × 3 probes = 9 calls minimum
                 assert len(mock_hc.check_health.call_args_list) >= 9
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_transaction_forwards_watches_and_options(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
+            ),
+        ):
+            mock_db1.client.transaction.return_value = ["OK1", "value1"]
+
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+
+                def callback(pipe: Pipeline):
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
+
+                assert client.transaction(
+                    callback,
+                    "watched-key",
+                    value_from_callable=True,
+                    watch_delay=2.5,
+                ) == ["OK1", "value1"]
+                # watched keys must stay positional; transaction options
+                # must reach the active client as keyword arguments
+                mock_db1.client.transaction.assert_called_once_with(
+                    callback,
+                    "watched-key",
+                    value_from_callable=True,
+                    watch_delay=2.5,
+                )
             finally:
                 client.close()
 
@@ -422,11 +529,14 @@ class TestTransaction:
         db2_became_unhealthy = threading.Event()
         db_became_unhealthy = threading.Event()
         counter_lock = threading.Lock()
+        # Keep every database in round 0 until the first call has run, so a
+        # slow runner can't start round 1 (mock_db1 unhealthy) before it.
+        first_call_done = threading.Event()
 
         async def mock_check_health(database, connection=None):
             with counter_lock:
                 db_probes_in_round[id(database)] += 1
-                if db_probes_in_round[id(database)] > 3:
+                if db_probes_in_round[id(database)] > 3 and first_call_done.is_set():
                     db_rounds[id(database)] += 1
                     db_probes_in_round[id(database)] = 1
                 current_round = db_rounds[id(database)]
@@ -491,6 +601,7 @@ class TestTransaction:
 
                 # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
                 assert client.transaction(callback) == ["OK1", "value"]
+                first_call_done.set()
 
                 # Wait for mock_db1 to become unhealthy
                 assert db1_became_unhealthy.wait(timeout=1.0), (
@@ -498,7 +609,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb1.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to open",
                 )
 
@@ -511,7 +622,7 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb2.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb2 to open",
                 )
 
@@ -524,14 +635,14 @@ class TestTransaction:
                 )
                 wait_for_condition(
                     lambda: cb.state == CBState.OPEN,
-                    timeout=0.5,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb to open",
                 )
 
                 # Wait for mock_db1 to recover (circuit breaker to close)
                 wait_for_condition(
                     lambda: cb1.state == CBState.CLOSED,
-                    timeout=1.0,
+                    timeout=5.0,
                     error_message="Timeout waiting for cb1 to close (mock_db1 to recover)",
                 )
 
@@ -539,3 +650,21 @@ class TestTransaction:
                 assert client.transaction(callback) == ["OK1", "value"]
             finally:
                 client.close()
+
+
+@pytest.mark.fixed_client
+class TestPipelineHImportUnsupported:
+    """HIMPORT is unsupported on the multi-database client. The lifecycle methods
+    are blocked on ``MultiDBClient``; the pipeline inherits ``himport_set`` from
+    ``CoreCommands`` and would otherwise queue it silently, so it must be blocked
+    there too. The overrides raise before touching the client, so no config or
+    server is needed."""
+
+    @pytest.mark.parametrize(
+        "method",
+        ["himport_prepare", "himport_set", "himport_discard", "himport_discard_all"],
+    )
+    def test_pipeline_himport_methods_raise(self, method):
+        pipe = MultiDBPipeline(Mock(spec=MultiDBClient))
+        with pytest.raises(DataError, match="not supported on the multi-database"):
+            getattr(pipe, method)("users", ["a"])

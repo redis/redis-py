@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import pytest
 import redis
@@ -28,11 +28,14 @@ from redis.credentials import CredentialProvider
 from redis.event import EventDispatcherInterface
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from redis.utils import DEFAULT_RESP_VERSION
 from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
-default_protocol = "2"
+# Empty string means "do not override": clients fall back to the library
+# default (which is RESP3 on the wire as of the RESP3-default change).
+default_protocol = ""
 default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
@@ -88,16 +91,29 @@ class BooleanOptionalAction(argparse.Action):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def enable_tracemalloc():
+def enable_tracemalloc(request):
     """
-    Enable tracemalloc while tests are being executed.
+    Enable tracemalloc while tests are being executed, if ``--tracemalloc``
+    is given.
+
+    Tracing every allocation makes allocation-heavy code, such as parsing the
+    ``COMMAND`` reply during cluster client setup, several times slower, so it
+    is off by default. Turn it on to get allocation tracebacks in
+    ``ResourceWarning`` messages.
     """
+    if not request.config.getoption("--tracemalloc"):
+        yield
+        return
     try:
         import tracemalloc
 
-        tracemalloc.start()
+        # Leave tracing started by PYTHONTRACEMALLOC or -X tracemalloc running.
+        started = not tracemalloc.is_tracing()
+        if started:
+            tracemalloc.start()
         yield
-        tracemalloc.stop()
+        if started:
+            tracemalloc.stop()
     except ImportError:
         yield
 
@@ -124,6 +140,16 @@ def pytest_addoption(parser):
         help="Protocol version, defaults to `%(default)s`",
     )
     parser.addoption(
+        "--legacy-responses",
+        default="default",
+        action="store",
+        help=(
+            "Override the ``legacy_responses`` argument on test clients. "
+            "Use 'true' or 'false' to force the value; 'default' leaves it "
+            "unset so the client constructor's default applies."
+        ),
+    )
+    parser.addoption(
         "--redis-ssl-url",
         default=default_redis_ssl_url,
         action="store",
@@ -141,6 +167,13 @@ def pytest_addoption(parser):
 
     parser.addoption(
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
+    )
+
+    parser.addoption(
+        "--tracemalloc",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Trace memory allocations with tracemalloc while tests run",
     )
 
     parser.addoption(
@@ -171,6 +204,60 @@ def pytest_addoption(parser):
     )
 
 
+def _redis_url_from_endpoints_config():
+    """Build a connection URL for a Redis Enterprise database.
+
+    Reads the database named by ``RE_DB_NAME`` (default ``standalone``) from the
+    endpoints config at ``REDIS_ENDPOINTS_CONFIG_PATH`` and returns a redis URL
+    carrying the resolved host, port, credentials and (for ``rediss``) TLS. This
+    is the same endpoints-config shape consumed by ``tests/test_scenario``.
+    ``RE_SOCKET_CONNECT_TIMEOUT``, when set, is passed as the URL's
+    ``socket_connect_timeout`` (seconds), for runners whose DNS lookups of the
+    database endpoints can stall past the client default.
+    """
+    db_name = os.getenv("RE_DB_NAME", "standalone")
+    config_path = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH")
+    if not (config_path and os.path.exists(config_path)):
+        raise FileNotFoundError(f"Endpoints config file not found: {config_path}")
+
+    with open(config_path, "r") as f:
+        data = json.load(f)
+    db = data[db_name]
+
+    parsed = urlparse(db["endpoints"][0])
+    scheme = parsed.scheme or "redis"
+    host = parsed.hostname
+    port = parsed.port or 6379
+    username = db.get("username") or ""
+    password = db.get("password")
+
+    userinfo = ""
+    if password is not None:
+        userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
+
+    query = []
+    connect_timeout = os.getenv("RE_SOCKET_CONNECT_TIMEOUT")
+    if connect_timeout:
+        query.append(f"socket_connect_timeout={float(connect_timeout)}")
+    if scheme == "rediss":
+        query.append("ssl_cert_reqs=none&ssl_check_hostname=false")
+
+    url = f"{scheme}://{userinfo}{host}:{port}"
+    if query:
+        url += "?" + "&".join(query)
+    return url
+
+
+def pytest_configure(config):
+    # When RE_CLUSTER is set, point the suite at the managed Redis Enterprise
+    # database resolved from the endpoints config instead of localhost. When the
+    # variable is unset, behaviour is unchanged (localhost:6379, no auth).
+    if os.getenv("RE_CLUSTER", "").lower() == "true":
+        re_url = _redis_url_from_endpoints_config()
+        config.option.redis_url = re_url
+        config.option.redis_mod_url = re_url
+
+
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = client.info()
@@ -187,7 +274,10 @@ def pytest_sessionstart(session):
     # during test discovery, e.g. with VS Code, we may not
     # have a server running.
     protocol = session.config.getoption("--protocol")
-    REDIS_INFO["resp_version"] = int(protocol) if protocol else None
+    # When ``--protocol`` is not provided (or is empty), resolve to the
+    # library default so RESP-version-gated decorators reflect the wire
+    # protocol that clients will actually negotiate.
+    REDIS_INFO["resp_version"] = int(protocol) if protocol else DEFAULT_RESP_VERSION
     redis_url = session.config.getoption("--redis-url")
     try:
         info = _get_info(redis_url)
@@ -311,6 +401,19 @@ def skip_if_redis_enterprise() -> _TestDecorator:
     return pytest.mark.skipif(check, reason="Redis enterprise")
 
 
+def is_redis_enterprise_cluster() -> bool:
+    # INFO reports cluster_enabled as an integer, so test it for truthiness.
+    return REDIS_INFO.get("enterprise", False) is True and bool(
+        REDIS_INFO.get("cluster_enabled", False)
+    )
+
+
+def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+    return pytest.mark.skipif(
+        is_redis_enterprise_cluster(), reason="Redis enterprise cluster"
+    )
+
+
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO.get("enterprise", False) is False
     return pytest.mark.skipif(check, reason="Not running in redis enterprise")
@@ -368,7 +471,14 @@ def _get_client(
     redis_tls_url = request.config.getoption("--redis-ssl-url")
 
     if "protocol" not in redis_url and kwargs.get("protocol") is None:
-        kwargs["protocol"] = request.config.getoption("--protocol")
+        protocol_opt = request.config.getoption("--protocol")
+        if protocol_opt:
+            kwargs["protocol"] = protocol_opt
+
+    if "legacy_responses" not in kwargs:
+        legacy_opt = request.config.getoption("--legacy-responses")
+        if legacy_opt and legacy_opt != "default":
+            kwargs["legacy_responses"] = legacy_opt.lower() == "true"
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
     ssl = kwargs.pop("ssl", False)
@@ -423,10 +533,146 @@ def cluster_teardown(client, flushdb):
     client.disconnect_connection_pools()
 
 
+def patch_monotonic(module: str, value: float):
+    """
+    Freeze ``time.monotonic`` as :module: sees it, without patching the
+    ``time`` module that every other thread and library also uses.
+    """
+    frozen_time = Mock(wraps=time)
+    frozen_time.monotonic.return_value = value
+    return mock.patch(f"{module}.time", frozen_time)
+
+
+@pytest.fixture()
+def no_topology_refresh_interval():
+    """
+    Let every error-triggered cluster topology refresh run at once, for tests
+    of the refresh logic itself rather than of its minimum interval.
+    """
+    with mock.patch("redis.cluster._TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS", 0):
+        yield
+
+
+@pytest.fixture()
+def no_cluster_retry_delay():
+    """
+    Skip the backoff sleep between cluster retries, for tests that count
+    retries rather than time them.
+    """
+    # The async clients inherit it from the same class
+    with mock.patch.object(
+        redis.cluster.AbstractRedisCluster, "_retry_backoff_delay", return_value=0
+    ):
+        yield
+
+
 @pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
         yield client
+
+
+def _enable_keyspace_notifications(client, flags="KEA"):
+    """
+    Enable keyspace notifications on a Redis server (standalone or cluster).
+
+    Returns a function to restore the original configuration.
+    """
+    cluster_mode = REDIS_INFO.get("cluster_enabled", False)
+
+    if cluster_mode:
+        # For cluster, configure all primary nodes
+        # Store both the original config and the node connection for cleanup
+        original_configs = {}
+        node_connections = {}
+        for node in client.get_primaries():
+            node_client = client.get_redis_connection(node)
+            original = node_client.config_get("notify-keyspace-events")
+            original_configs[node.name] = original.get("notify-keyspace-events", "")
+            node_connections[node.name] = node_client
+            node_client.config_set("notify-keyspace-events", flags)
+
+        def restore():
+            # Restore configuration on all nodes that were originally configured
+            # Use the stored connections to ensure we restore the same nodes
+            for node_name, original_value in original_configs.items():
+                try:
+                    # First try the stored connection
+                    if node_name in node_connections:
+                        node_connections[node_name].config_set(
+                            "notify-keyspace-events", original_value
+                        )
+                    else:
+                        # Fallback: try to find the node in current topology
+                        for node in client.get_primaries():
+                            if node.name == node_name:
+                                node_client = client.get_redis_connection(node)
+                                node_client.config_set(
+                                    "notify-keyspace-events", original_value
+                                )
+                                break
+                except Exception as e:
+                    # Log but don't fail cleanup - node may have changed
+                    import warnings
+
+                    warnings.warn(
+                        f"Failed to restore keyspace config on {node_name}: {e}"
+                    )
+
+        return restore
+    else:
+        # For standalone, configure the single server
+        original_config = client.config_get("notify-keyspace-events")
+        original_value = original_config.get("notify-keyspace-events", "")
+        client.config_set("notify-keyspace-events", flags)
+
+        def restore():
+            try:
+                client.config_set("notify-keyspace-events", original_value)
+            except Exception as e:
+                import warnings
+
+                warnings.warn(f"Failed to restore keyspace config: {e}")
+
+        return restore
+
+
+@pytest.fixture()
+def r_with_keyspace_notifications(request):
+    """
+    A Redis client with keyspace notifications enabled on the server.
+
+    This fixture configures the server to emit all keyspace and keyevent
+    notifications (notify-keyspace-events=KEA) for the duration of the test,
+    then restores the original configuration.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+    with _get_client(redis.Redis, request) as client:
+        restore = _enable_keyspace_notifications(client)
+        try:
+            yield client
+        finally:
+            restore()
+
+
+@pytest.fixture()
+def r_with_subkey_notifications(request):
+    """
+    A Redis client with keyspace and subkey notifications enabled.
+
+    Uses notify-keyspace-events=KEASTIV, which enables subkey notification
+    flags (S, T, I, V). These flags are only available in Redis >= 8.7.2;
+    tests using this fixture must be guarded accordingly.
+
+    Works for both standalone Redis and RedisCluster.
+    """
+    with _get_client(redis.Redis, request) as client:
+        restore = _enable_keyspace_notifications(client, flags="KEASTIV")
+        try:
+            yield client
+        finally:
+            restore()
 
 
 @pytest.fixture()
@@ -502,6 +748,7 @@ def master(request, sentinel_setup):
 
 def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
+    connection._resp2_fallback = False
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
     connection.host = "localhost"
@@ -579,6 +826,23 @@ def master_host(request):
     return parts.hostname, (parts.port or 6379)
 
 
+@pytest.fixture(scope="session")
+def master_connection_kwargs(request):
+    """
+    Connection kwargs for the server under test: the host and port of
+    ``master_host`` plus the username and password of ``--redis-url``, if it
+    has them, so a test that builds its own connection can authenticate.
+    """
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    kwargs = {"host": parts.hostname, "port": parts.port or 6379}
+    if parts.username:
+        kwargs["username"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    return kwargs
+
+
 @pytest.fixture()
 def cache_conf() -> CacheConfig:
     return CacheConfig(max_size=100, eviction_policy=EvictionPolicy.LRU)
@@ -643,9 +907,24 @@ def get_credential_provider(request) -> CredentialProvider:
     return get_entra_id_credentials_provider(request, cred_provider_kwargs)
 
 
+def stop_credential_provider(credential_provider: CredentialProvider | None) -> None:
+    """
+    Stop the background token renewal of a streaming credential provider.
+
+    The renewal runs on its own event loop thread, so without this it outlives
+    the test, keeps renewing for the rest of the session and reports its
+    errors after the run.
+    """
+    token_mgr = getattr(credential_provider, "_token_mgr", None)
+    if token_mgr is not None:
+        token_mgr.stop()
+
+
 @pytest.fixture()
 def credential_provider(request) -> CredentialProvider:
-    return get_credential_provider(request)
+    provider = get_credential_provider(request)
+    yield provider
+    stop_credential_provider(provider)
 
 
 def get_endpoint(endpoint_name: str):
@@ -687,31 +966,112 @@ def wait_for_command(client, monitor, command, key=None):
 
 
 def is_resp2_connection(r):
-    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
-        protocol = r.connection_pool.connection_kwargs.get("protocol")
-    elif isinstance(r, redis.cluster.AbstractRedisCluster):
-        protocol = r.nodes_manager.connection_kwargs.get("protocol")
-    return protocol in ["2", 2, None]
+    return get_protocol_version(r) in ["2", 2]
 
 
-def get_protocol_version(r):
+def _get_raw_protocol(r):
+    """Return the raw ``protocol`` from ``connection_kwargs`` (no default).
+
+    Returns ``None`` when the caller did not pin a protocol value, which
+    is distinct from the wire version the connection eventually
+    negotiates (see :func:`get_protocol_version`).
+    """
     if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
         return r.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(r, redis.cluster.AbstractRedisCluster):
         return r.nodes_manager.connection_kwargs.get("protocol")
+    return None
 
 
-def assert_resp_response(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response == resp2_expected
-    else:
-        assert response == resp3_expected
+def get_protocol_version(r):
+    protocol = _get_raw_protocol(r)
+    # ``protocol is None`` means the caller did not specify one, so the
+    # connection negotiates the library default on the wire.
+    if protocol is None:
+        return DEFAULT_RESP_VERSION
+    return protocol
 
 
-def assert_resp_response_in(r, response, resp2_expected, resp3_expected):
-    protocol = get_protocol_version(r)
-    if protocol in [2, "2", None]:
-        assert response in resp2_expected
-    else:
-        assert response in resp3_expected
+def get_legacy_responses(r):
+    """Return the ``legacy_responses`` setting on the client.
+
+    Defaults to ``True`` (matching the client constructor) when absent
+    from ``connection_kwargs``.
+    """
+    if isinstance(r, redis.Redis) or isinstance(r, redis.asyncio.Redis):
+        return r.connection_pool.connection_kwargs.get("legacy_responses", True)
+    elif isinstance(r, redis.cluster.AbstractRedisCluster):
+        return r.nodes_manager.connection_kwargs.get("legacy_responses", True)
+    return True
+
+
+def expected_response_shape(r):
+    """Return the expected Python response shape for ``r``.
+
+    One of:
+
+    * ``"legacy_resp2"`` — native RESP2 wire, or RESP3 wire normalised by
+      the legacy adapters back to RESP2 Python shapes.
+    * ``"legacy_resp3"`` — Python shapes from the previous RESP3 callbacks,
+      produced when the caller pinned ``protocol=3`` with
+      ``legacy_responses=True``.
+    * ``"unified"`` — protocol-agnostic unified Python shapes selected by
+      ``legacy_responses=False``.
+    """
+    if not get_legacy_responses(r):
+        return "unified"
+    raw_protocol = _get_raw_protocol(r)
+    if raw_protocol is None or raw_protocol in ("2", 2):
+        return "legacy_resp2"
+    return "legacy_resp3"
+
+
+def expects_resp2_shape(r):
+    """Return ``True`` when Python responses on ``r`` use RESP2 shapes."""
+    return expected_response_shape(r) == "legacy_resp2"
+
+
+def expects_resp3_shape(r):
+    """Return ``True`` when Python responses on ``r`` use the previous RESP3
+    callback shapes (``protocol=3`` with ``legacy_responses=True``)."""
+    return expected_response_shape(r) == "legacy_resp3"
+
+
+def expects_unified_shape(r):
+    """Return ``True`` when Python responses on ``r`` use the unified shape
+    (``legacy_responses=False``)."""
+    return expected_response_shape(r) == "unified"
+
+
+_UNSET = object()
+
+
+def _select_expected(r, resp2_expected, resp3_expected, unified_expected):
+    match expected_response_shape(r):
+        case "legacy_resp2":
+            return resp2_expected
+        case "legacy_resp3":
+            return resp3_expected
+        case "unified":
+            # Fall back to ``resp3_expected`` when no dedicated
+            # ``unified_expected`` is supplied, since unified shapes are
+            # typically RESP3-style with only a few divergences.
+            if unified_expected is _UNSET:
+                return resp3_expected
+            return unified_expected
+        case other:
+            raise ValueError(f"unknown response shape: {other!r}")
+
+
+def assert_resp_response(
+    r, response, resp2_expected, resp3_expected, unified_expected=_UNSET
+):
+    expected = _select_expected(r, resp2_expected, resp3_expected, unified_expected)
+    assert response == expected
+
+
+def assert_resp_response_in(
+    r, response, resp2_expected, resp3_expected, unified_expected=_UNSET
+):
+    expected = _select_expected(r, resp2_expected, resp3_expected, unified_expected)
+    assert response in expected

@@ -9,12 +9,19 @@ from unittest.mock import MagicMock
 import pytest
 import redis
 from redis.cache import CacheConfig
+from redis.commands.metadata import StaticMetadataResolver
 from redis.connection import CacheProxyConnection, Connection, to_bool
 from redis.event import (
     AfterConnectionReleasedEvent,
     EventDispatcher,
     EventListenerInterface,
 )
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    MaintNotificationsPoolHandler,
+)
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -27,6 +34,20 @@ from .test_pubsub import wait_for_message
 
 if SSL_AVAILABLE:
     import ssl
+
+
+def assert_kwargs_subset(actual, expected):
+    """Assert ``expected`` is a subset of ``actual`` (keys present, values equal).
+
+    Used by URL/kwargs parsing tests to remain agnostic of auto-injected
+    connection-pool keys (e.g. maintenance-notifications fields added when
+    the pool resolves to RESP3) without weakening parsing assertions.
+    """
+    for key, value in expected.items():
+        assert key in actual, f"missing key {key!r} in {actual!r}"
+        assert actual[key] == value, (
+            f"value mismatch for {key!r}: {actual[key]!r} != {value!r}"
+        )
 
 
 class DummyConnection:
@@ -43,7 +64,7 @@ class DummyConnection:
     def disconnect(self):
         self._sock = None
 
-    def can_read(self):
+    def can_read(self, timeout: float = 0) -> bool:
         return False
 
     def should_reconnect(self):
@@ -51,6 +72,24 @@ class DummyConnection:
 
     def re_auth(self):
         pass
+
+
+class ConstructionFailure(Exception):
+    """Raised by ``failing_connection_class`` instead of building a connection."""
+
+
+def failing_connection_class(failures):
+    """A ``DummyConnection`` whose constructor raises the first ``failures`` times."""
+    remaining = [failures]
+
+    class FailingConnection(DummyConnection):
+        def __init__(self, **kwargs):
+            if remaining[0] > 0:
+                remaining[0] -= 1
+                raise ConstructionFailure("could not build a connection")
+            super().__init__(**kwargs)
+
+    return FailingConnection
 
 
 class TestConnectionPool:
@@ -68,6 +107,7 @@ class TestConnectionPool:
         )
         return pool
 
+    @pytest.mark.fixed_client
     def test_connection_creation(self):
         connection_kwargs = {
             "foo": "bar",
@@ -79,8 +119,28 @@ class TestConnectionPool:
 
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        assert_kwargs_subset(connection.kwargs, connection_kwargs)
 
+    def test_custom_connection_disables_maint_notifications(self):
+        pool = redis.ConnectionPool(connection_class=DummyConnection)
+
+        assert pool.maint_notifications_enabled() is None
+        assert "maint_notifications_config" not in pool.connection_kwargs
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+    def test_custom_connection_rejects_enabled_maint_notifications_config(self):
+        with pytest.raises(
+            redis.RedisError,
+            match=(
+                "Maintenance notifications are not supported with .*DummyConnection"
+            ),
+        ):
+            redis.ConnectionPool(
+                connection_class=DummyConnection,
+                maint_notifications_config=MaintNotificationsConfig(enabled=True),
+            )
+
+    @pytest.mark.fixed_client
     def test_closing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -91,9 +151,8 @@ class TestConnectionPool:
         with closing(pool):
             pass
 
-    def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_multiple_connections(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         c2 = pool.get_connection()
         assert c1 != c2
@@ -108,21 +167,143 @@ class TestConnectionPool:
         with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
 
-    def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_capacity_survives_failed_connection_creation(self):
+        pool = self.get_pool(
+            max_connections=2, connection_class=failing_connection_class(2)
+        )
+        for _ in range(2):
+            with pytest.raises(ConstructionFailure):
+                pool.get_connection()
+
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
+        assert c1 != c2
+        with pytest.raises(redis.MaxConnectionsError):
+            pool.get_connection()
+
+    @pytest.mark.fixed_client
+    def test_failed_re_auth_does_not_stop_the_other_connections(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        failing.send_command.side_effect = redis.ConnectionError("broken")
+        other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        in_use = mock.Mock(spec=Connection)
+        pool._available_connections.extend([failing, other])
+        pool._in_use_connections.add(in_use)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(redis.ConnectionError, match="broken"):
+            pool.re_auth_callback(token)
+
+        other.send_command.assert_called_once_with("AUTH", "oid", "value")
+        in_use.set_re_auth_token.assert_called_once_with(token)
+
+    @pytest.mark.fixed_client
+    def test_re_auth_continues_past_authentication_error(self):
+        """
+        One rejected AUTH does not stop the others: a standalone endpoint can
+        front several proxies. The rejected connection keeps the token pending,
+        in-use connections get it, and the rejection is raised at the end.
+        """
+        pool = self.get_pool(connection_class=DummyConnection)
+        failing = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 3))
+        failing.read_response.side_effect = redis.AuthenticationError("expired")
+        other = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        in_use = mock.Mock(spec=Connection)
+        pool._available_connections.extend([failing, other])
+        pool._in_use_connections.add(in_use)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        with pytest.raises(redis.AuthenticationError, match="expired"):
+            pool.re_auth_callback(token)
+
+        failing.read_response.assert_called_once()
+        failing.set_re_auth_token.assert_called_once_with(token)
+        other.send_command.assert_called_once_with("AUTH", "oid", "value")
+        assert other.set_re_auth_token.call_args_list == [
+            mock.call(token),
+            mock.call(None),
+        ]
+        in_use.set_re_auth_token.assert_called_once_with(token)
+
+    @pytest.mark.fixed_client
+    def test_re_auth_sends_every_auth_before_reading_a_reply(self):
+        """The pool lock is held for about one round trip, not one per connection."""
+        pool = self.get_pool(connection_class=DummyConnection)
+        calls = mock.Mock()
+        first = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        second = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        calls.attach_mock(first, "first")
+        calls.attach_mock(second, "second")
+        pool._available_connections.extend([first, second])
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+
+        pool.re_auth_callback(token)
+
+        assert [
+            name for name, _, _ in calls.mock_calls if "set_re_auth" not in name
+        ] == [
+            "first.send_command",
+            "second.send_command",
+            "first.read_response",
+            "second.read_response",
+        ]
+
+    @pytest.mark.fixed_client
+    def test_re_auth_does_not_connect_a_disconnected_free_connection(self):
+        """It authenticates when it connects; connecting here would hold the lock."""
+        pool = self.get_pool(connection_class=DummyConnection)
+        disconnected = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        disconnected.is_connected = False
+        pool._available_connections.append(disconnected)
+
+        pool.re_auth_callback(mock.Mock())
+
+        disconnected.send_command.assert_not_called()
+        disconnected.set_re_auth_token.assert_not_called()
+
+    @pytest.mark.fixed_client
+    def test_interrupted_re_auth_disconnects_the_connections_with_unread_replies(
+        self,
+    ):
+        """
+        The AUTH replies not read yet would be read by the next command on
+        those connections, as its own reply.
+        """
+
+        class Interrupt(BaseException):
+            pass
+
+        pool = self.get_pool(connection_class=DummyConnection)
+        first = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        first.read_response.side_effect = Interrupt()
+        second = mock.Mock(spec=Connection, retry=Retry(NoBackoff(), 0))
+        pool._available_connections.extend([first, second])
+
+        with pytest.raises(Interrupt):
+            pool.re_auth_callback(mock.Mock())
+
+        first.disconnect.assert_called_once()
+        second.disconnect.assert_called_once()
+        second.read_response.assert_not_called()
+
+    def test_reuse_previously_released_connection(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool.get_connection()
         pool.release(c1)
         c2 = pool.get_connection()
         assert c1 == c2
 
-    def test_release_not_owned_connection(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool1 = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_release_not_owned_connection(self, master_connection_kwargs):
+        pool1 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c1 = pool1.get_connection()
-        pool2 = self.get_pool(
-            connection_kwargs={"host": master_host[0], "port": master_host[1]}
-        )
+        pool2 = self.get_pool(connection_kwargs=master_connection_kwargs)
         c2 = pool2.get_connection()
         pool2.release(c2)
 
@@ -131,6 +312,7 @@ class TestConnectionPool:
         pool2.release(c1)
         assert len(pool2._available_connections) == 1
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -144,6 +326,7 @@ class TestConnectionPool:
         expected = "host=localhost,port=6379,db=1,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         pool = self.get_pool(
@@ -153,12 +336,8 @@ class TestConnectionPool:
         expected = "path=/abc,db=1,client_name=test-client"
         assert expected in repr(pool)
 
-    def test_pool_disconnect(self, master_host):
-        connection_kwargs = {
-            "host": master_host[0],
-            "port": master_host[1],
-        }
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
+    def test_pool_disconnect(self, master_connection_kwargs):
+        pool = self.get_pool(connection_kwargs=master_connection_kwargs)
 
         conn = pool.get_connection()
         pool.disconnect()
@@ -167,6 +346,18 @@ class TestConnectionPool:
         conn.connect()
         pool.disconnect(inuse_connections=False)
         assert conn._sock
+
+    def test_pool_context_manager(self):
+        pool = self.get_pool(connection_class=DummyConnection)
+
+        with pool as entered:
+            assert entered is pool
+            conn = pool.get_connection()
+            conn.connect()
+            assert conn._sock is not None
+
+        # exiting the context closes the pool, disconnecting all connections
+        assert conn._sock is None
 
 
 class TestBlockingConnectionPool:
@@ -191,7 +382,7 @@ class TestBlockingConnectionPool:
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        assert_kwargs_subset(connection.kwargs, connection_kwargs)
 
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -199,6 +390,35 @@ class TestBlockingConnectionPool:
         c1 = pool.get_connection()
         c2 = pool.get_connection()
         assert c1 != c2
+
+    def test_capacity_survives_failed_connection_creation(self):
+        pool = redis.BlockingConnectionPool(
+            connection_class=failing_connection_class(2),
+            max_connections=2,
+            timeout=0.1,
+        )
+        for _ in range(2):
+            with pytest.raises(ConstructionFailure):
+                pool.get_connection()
+
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
+        assert c1 != c2
+        with pytest.raises(redis.ConnectionError):
+            pool.get_connection()
+
+    def test_lock_released_after_checkout_in_maintenance(self):
+        pool = self.get_pool()
+        pool.set_in_maintenance(True)
+        # get_connection() and the nested make_connection() both take the
+        # lock; they used to share one flag deciding whether to release it.
+        pool.release(pool.get_connection())
+
+        acquired = []
+        t = Thread(target=lambda: acquired.append(pool._lock.acquire(timeout=1)))
+        t.start()
+        t.join()
+        assert acquired == [True]
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
         "When out of connections, block for timeout seconds, then raise"
@@ -209,10 +429,12 @@ class TestBlockingConnectionPool:
         pool.get_connection()
 
         start = time.monotonic()
-        with pytest.raises(redis.ConnectionError):
-            pool.get_connection()
+        with mock.patch("redis.connection.record_connection_timeout") as record:
+            with pytest.raises(redis.ConnectionError):
+                pool.get_connection()
         # we should have waited at least 0.1 seconds
         assert time.monotonic() - start >= 0.1
+        record.assert_called_once()
 
     def test_connection_pool_blocks_until_conn_available(self, master_host):
         """
@@ -232,7 +454,9 @@ class TestBlockingConnectionPool:
         start = time.monotonic()
         Thread(target=target).start()
         pool.get_connection()
-        assert time.monotonic() - start >= 0.1
+        elapsed = time.monotonic() - start
+        # block until the release and wake on it, well before the 2 s pool timeout
+        assert 0.1 <= elapsed < 1.0
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -242,6 +466,7 @@ class TestBlockingConnectionPool:
         c2 = pool.get_connection()
         assert c1 == c2
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
@@ -249,6 +474,7 @@ class TestBlockingConnectionPool:
         expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
@@ -259,6 +485,7 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.fixed_client
     def test_repr_redacts_sensitive_information(self):
         """Test that __repr__ redacts sensitive values like password and username."""
         pool = redis.ConnectionPool(
@@ -287,11 +514,10 @@ class TestBlockingConnectionPool:
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     @skip_if_server_version_lt("7.4.0")
-    def test_initialise_pool_with_cache(self, master_host):
+    def test_initialise_pool_with_cache(self, master_connection_kwargs):
         pool = redis.BlockingConnectionPool(
             connection_class=Connection,
-            host=master_host[0],
-            port=master_host[1],
+            **master_connection_kwargs,
             protocol=3,
             cache_config=CacheConfig(),
         )
@@ -314,28 +540,45 @@ class TestBlockingConnectionPool:
         pool.disconnect(inuse_connections=False)
         assert conn._sock
 
+    def test_pool_context_manager(self):
+        pool = self.get_pool()
 
+        with pool as entered:
+            assert entered is pool
+            conn = pool.get_connection()
+            conn.connect()
+            assert conn._sock is not None
+
+        # exiting the context closes the pool, disconnecting all connections
+        assert conn._sock is None
+
+
+@pytest.mark.fixed_client
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "my.host"}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
 
     def test_quoted_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my %2F host %2B%3D+")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "my / host +=+"}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my / host +=+"})
 
     def test_port(self):
         pool = redis.ConnectionPool.from_url("redis://localhost:6380")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "port": 6380}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"host": "localhost", "port": 6380}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("redis://myuser:@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "username": "myuser"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"host": "localhost", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -343,50 +586,61 @@ class TestConnectionPoolURLParsing:
             "redis://%2Fmyuser%2F%2B name%3D%24+:@localhost"
         )
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("redis://:mypassword@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "password": "mypassword"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"host": "localhost", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "redis://:%2Fmypass%2F%2B word%3D%24+@localhost"
         )
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_username_and_password(self):
         pool = redis.ConnectionPool.from_url("redis://myuser:mypass@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "username": "myuser",
-            "password": "mypass",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "username": "myuser",
+                "password": "mypass",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("redis://localhost", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 1}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 1})
 
     def test_db_in_path(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 2}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 2})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2?db=3", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "db": 3}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "localhost", "db": 3})
 
     def test_extra_typed_querystring_options(self):
         pool = redis.ConnectionPool.from_url(
@@ -395,13 +649,16 @@ class TestConnectionPoolURLParsing:
         )
 
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 2,
-            "socket_timeout": 20.0,
-            "socket_connect_timeout": 10.0,
-            "retry_on_timeout": True,
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "db": 2,
+                "socket_timeout": 20.0,
+                "socket_connect_timeout": 10.0,
+                "retry_on_timeout": True,
+            },
+        )
         assert pool.max_connections == 10
 
     def test_boolean_parsing(self):
@@ -416,6 +673,9 @@ class TestConnectionPoolURLParsing:
             (False, "n"),
             (False, "N"),
             (False, "No"),
+            (False, "off"),
+            (False, "OFF"),
+            (False, "Off"),
             (True, 1),
             (True, "1"),
             (True, "y"),
@@ -428,16 +688,75 @@ class TestConnectionPoolURLParsing:
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
         assert pool.connection_kwargs["client_name"] == "test-client"
 
+    def test_querystring_value_percent_decoded_once(self):
+        # A single percent-encoded sequence is decoded exactly once.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%20name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker name"
+
+    def test_querystring_value_not_double_percent_decoded(self):
+        # A literal percent sign in a query value (encoded as %2520) must survive
+        # as "%20" rather than being decoded a second time into a space. See #4208.
+        pool = redis.ConnectionPool.from_url(
+            "redis://location?client_name=worker%2520name"
+        )
+        assert pool.connection_kwargs["client_name"] == "worker%20name"
+
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
                 "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
 
+    def test_retry_on_error_querystring(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [redis.ConnectionError]
+
+    def test_retry_on_error_querystring_multiple(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=ConnectionError,TimeoutError"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_brackets(self):
+        pool = redis.ConnectionPool.from_url(
+            "redis://localhost?retry_on_error=[ConnectionError,TimeoutError]"
+        )
+        assert pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError,
+            redis.TimeoutError,
+        ]
+
+    def test_retry_on_error_querystring_blank(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url("redis://localhost?retry_on_error=,")
+
+    def test_retry_on_error_querystring_invalid(self):
+        with pytest.raises(ValueError, match="Invalid value for 'retry_on_error'"):
+            redis.ConnectionPool.from_url(
+                "redis://localhost?retry_on_error=NotARealError"
+            )
+
+    def test_from_url_retry_on_error(self):
+        client = redis.Redis.from_url(
+            "redis://localhost?retry_on_error=ConnectionError"
+        )
+        assert client.connection_pool.connection_kwargs["retry_on_error"] == [
+            redis.ConnectionError
+        ]
+
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("redis://localhost?a=1&b=2")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {"host": "localhost", "a": "1", "b": "2"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"host": "localhost", "a": "1", "b": "2"}
+        )
 
     def test_ismaster_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/1?is_master=0")
@@ -462,7 +781,50 @@ class TestConnectionPoolURLParsing:
     def test_client_creates_connection_pool(self):
         r = redis.Redis.from_url("redis://myhost")
         assert r.connection_pool.connection_class == redis.Connection
-        assert r.connection_pool.connection_kwargs == {"host": "myhost"}
+        assert_kwargs_subset(r.connection_pool.connection_kwargs, {"host": "myhost"})
+
+    def test_default_protocol_enables_maint_notifications(self):
+        """When ``protocol`` is unspecified the pool resolves to RESP3 and
+        auto-enables maintenance notifications, injecting handler keys into
+        ``connection_kwargs``."""
+        pool = redis.ConnectionPool.from_url("redis://localhost")
+        kwargs = pool.connection_kwargs
+        assert kwargs.get("host") == "localhost"
+        # ``protocol=None`` (i.e., absent from the URL) must be preserved on
+        # the pool kwargs so higher layers can distinguish "empty" from an
+        # explicit user choice.
+        assert kwargs.get("protocol") is None
+        assert isinstance(
+            kwargs.get("maint_notifications_config"), MaintNotificationsConfig
+        )
+        assert isinstance(
+            kwargs.get("maint_notifications_pool_handler"),
+            MaintNotificationsPoolHandler,
+        )
+        assert "orig_host_address" in kwargs
+        assert "orig_socket_timeout" in kwargs
+        assert "orig_socket_connect_timeout" in kwargs
+
+    def test_explicit_resp2_does_not_enable_maint_notifications(self):
+        """Pinning ``protocol=2`` keeps the legacy behavior — no maintenance
+        notifications keys are injected."""
+        pool = redis.ConnectionPool.from_url("redis://localhost?protocol=2")
+        kwargs = pool.connection_kwargs
+        assert kwargs.get("host") == "localhost"
+        assert kwargs.get("protocol") == 2
+        assert "maint_notifications_config" not in kwargs
+        assert "maint_notifications_pool_handler" not in kwargs
+        assert "orig_host_address" not in kwargs
+
+    def test_explicit_resp3_enables_maint_notifications(self):
+        """Pinning ``protocol=3`` enables maintenance notifications in the
+        same way as the default (unspecified) case."""
+        pool = redis.ConnectionPool.from_url("redis://localhost?protocol=3")
+        kwargs = pool.connection_kwargs
+        assert kwargs.get("protocol") == 3
+        assert isinstance(
+            kwargs.get("maint_notifications_config"), MaintNotificationsConfig
+        )
 
     def test_invalid_scheme_raises_error(self):
         with pytest.raises(ValueError) as cm:
@@ -480,7 +842,22 @@ class TestConnectionPoolURLParsing:
             "(redis://, rediss://, unix://)"
         )
 
+    def test_uppercase_scheme_is_accepted(self):
+        # URL schemes are case-insensitive (RFC 3986)
+        pool = redis.ConnectionPool.from_url("REDIS://my.host")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
 
+        ssl_pool = redis.ConnectionPool.from_url("REDISS://my.host")
+        assert ssl_pool.connection_class == redis.SSLConnection
+        assert_kwargs_subset(ssl_pool.connection_kwargs, {"host": "my.host"})
+
+        unix_pool = redis.ConnectionPool.from_url("UNIX:///tmp/redis.sock")
+        assert unix_pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(unix_pool.connection_kwargs, {"path": "/tmp/redis.sock"})
+
+
+@pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
     def test_extra_typed_querystring_options(self):
         pool = redis.BlockingConnectionPool.from_url(
@@ -489,13 +866,16 @@ class TestBlockingConnectionPoolURLParsing:
         )
 
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 2,
-            "socket_timeout": 20.0,
-            "socket_connect_timeout": 10.0,
-            "retry_on_timeout": True,
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "host": "localhost",
+                "db": 2,
+                "socket_timeout": 20.0,
+                "socket_connect_timeout": 10.0,
+                "retry_on_timeout": True,
+            },
+        )
         assert pool.max_connections == 10
         assert pool.timeout == 42.0
 
@@ -506,17 +886,166 @@ class TestBlockingConnectionPoolURLParsing:
             )
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket"}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket"})
+
+    def test_client_disables_maint_notifications(self):
+        client = redis.Redis(unix_socket_path="/socket")
+        pool = client.connection_pool
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket"})
+        assert pool.maint_notifications_enabled() is None
+        assert "maint_notifications_config" not in pool.connection_kwargs
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+    def test_client_enables_client_side_caching(self):
+        resolver = StaticMetadataResolver()
+        client = redis.Redis(
+            unix_socket_path="/socket",
+            protocol=3,
+            cache_config=CacheConfig(),
+            metadata_resolver=resolver,
+        )
+        pool = client.connection_pool
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert client.get_cache() is not None
+        assert pool.metadata_resolver is resolver
+        assert isinstance(pool.make_connection(), CacheProxyConnection)
+
+    def test_from_url_enables_client_side_caching(self):
+        pool = redis.ConnectionPool.from_url(
+            "unix:///socket?protocol=3", cache_config=CacheConfig()
+        )
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert pool.cache is not None
+        assert isinstance(pool.make_connection(), CacheProxyConnection)
+
+    def test_client_respects_disabled_maint_notifications_config(self):
+        client = redis.Redis(
+            unix_socket_path="/socket",
+            maint_notifications_config=MaintNotificationsConfig(enabled=False),
+        )
+        pool = client.connection_pool
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket"})
+        assert pool.maint_notifications_enabled() is None
+        assert pool._maint_notifications_pool_handler is None
+        # The disabled config is consumed by ConnectionPool and should not be
+        # propagated to individual Unix socket connections.
+        assert "maint_notifications_config" not in pool.connection_kwargs
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+    def test_client_rejects_enabled_maint_notifications_config(self):
+        with pytest.raises(
+            redis.RedisError,
+            match=(
+                "Maintenance notifications are not supported with Unix "
+                "domain socket connections"
+            ),
+        ):
+            redis.Redis(
+                unix_socket_path="/socket",
+                maint_notifications_config=MaintNotificationsConfig(enabled=True),
+            )
+
+    def test_pool_rejects_enabled_maint_notifications_config(self):
+        with pytest.raises(
+            redis.RedisError,
+            match=(
+                "Maintenance notifications are not supported with "
+                ".*UnixDomainSocketConnection"
+            ),
+        ):
+            redis.ConnectionPool(
+                connection_class=redis.UnixDomainSocketConnection,
+                path="/socket",
+                maint_notifications_config=MaintNotificationsConfig(enabled=True),
+            )
+
+    def test_pool_disables_default_maint_notifications(self):
+        pool = redis.ConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path="/socket",
+            protocol=3,
+        )
+
+        assert pool.connection_class == redis.UnixDomainSocketConnection
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "protocol": 3})
+        assert pool.maint_notifications_enabled() is None
+        assert pool._maint_notifications_pool_handler is None
+        assert "maint_notifications_config" not in pool.connection_kwargs
+        assert "maint_notifications_pool_handler" not in pool.connection_kwargs
+
+    def test_default_config_client_executes_commands_without_maint_notifications(self):
+        client = redis.Redis(unix_socket_path="/socket")
+        key = "redis-py:unix-socket-default-config"
+        responses = [
+            {"proto": 3},
+            b"OK",
+            b"OK",
+            b"PONG",
+            b"OK",
+            b"value",
+        ]
+        socket_mock = mock.MagicMock()
+
+        with (
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "_connect", return_value=socket_mock
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "can_read", return_value=False
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "send_command"
+            ) as send_command,
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "read_response", side_effect=responses
+            ),
+            mock.patch.object(
+                redis.UnixDomainSocketConnection, "_enable_maintenance_notifications"
+            ) as enable,
+        ):
+            assert client.ping() is True
+            assert client.set(key, "value") is True
+            assert client.get(key) == b"value"
+
+        client.close()
+        enable.assert_not_called()
+        sent_commands = [command.args for command in send_command.call_args_list]
+        assert ("PING",) in sent_commands
+        assert ("SET", key, "value") in sent_commands
+        assert ("GET", key) in sent_commands
+        for command in sent_commands:
+            assert command[:2] != ("CLIENT", "MAINT_NOTIFICATIONS")
+
+    def test_connection_does_not_activate_maint_notifications(self):
+        pool = redis.ConnectionPool(
+            connection_class=redis.UnixDomainSocketConnection,
+            path="/socket",
+        )
+        conn = pool.make_connection()
+
+        with mock.patch.object(conn, "_enable_maintenance_notifications") as enable:
+            conn.activate_maint_notifications_handling_if_enabled()
+
+        enable.assert_not_called()
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("unix://myuser:@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "username": "myuser"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "username": "myuser"}
+        )
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -524,45 +1053,56 @@ class TestConnectionPoolUnixSocketURLParsing:
             "unix://%2Fmyuser%2F%2B name%3D%24+:@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "username": "/myuser/+ name=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "username": "/myuser/+ name=$+",
+            },
+        )
 
     def test_password(self):
         pool = redis.ConnectionPool.from_url("unix://:mypassword@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "password": "mypassword"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "password": "mypassword"}
+        )
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:%2Fmypass%2F%2B word%3D%24+@/socket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "password": "/mypass/+ word=$+",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/socket",
+                "password": "/mypass/+ word=$+",
+            },
+        )
 
     def test_quoted_path(self):
         pool = redis.ConnectionPool.from_url(
             "unix://:mypassword@/my%2Fpath%2Fto%2F..%2F+_%2B%3D%24ocket"
         )
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/my/path/to/../+_+=$ocket",
-            "password": "mypassword",
-        }
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {
+                "path": "/my/path/to/../+_+=$ocket",
+                "password": "mypassword",
+            },
+        )
 
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("unix:///socket", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 1}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 1})
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?db=2", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "db": 2}
+        assert_kwargs_subset(pool.connection_kwargs, {"path": "/socket", "db": 2})
 
     def test_client_name_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
@@ -571,7 +1111,9 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_extra_querystring_options(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?a=1&b=2")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {"path": "/socket", "a": "1", "b": "2"}
+        assert_kwargs_subset(
+            pool.connection_kwargs, {"path": "/socket", "a": "1", "b": "2"}
+        )
 
     def test_connection_class_override(self):
         class MyConnection(redis.UnixDomainSocketConnection):
@@ -583,12 +1125,13 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
+@pytest.mark.fixed_client
 @pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
         assert pool.connection_class == redis.SSLConnection
-        assert pool.connection_kwargs == {"host": "my.host"}
+        assert_kwargs_subset(pool.connection_kwargs, {"host": "my.host"})
 
     def test_connection_class_override(self):
         class MyConnection(redis.SSLConnection):
@@ -618,6 +1161,15 @@ class TestSSLConnectionURLParsing:
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
         assert pool.get_connection().check_hostname is True
+
+    def test_ocsp_options(self):
+        pool = redis.ConnectionPool.from_url(
+            "rediss://my.host?ssl_validate_ocsp=True&ssl_validate_ocsp_stapled=False"
+        )
+        assert_kwargs_subset(
+            pool.connection_kwargs,
+            {"ssl_validate_ocsp": True, "ssl_validate_ocsp_stapled": False},
+        )
 
     def test_ssl_flags_config_parsing(self):
         class DummyConnectionPool(redis.ConnectionPool):
@@ -680,6 +1232,7 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
+    @pytest.mark.fixed_client
     def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -744,9 +1297,13 @@ class TestConnection:
     @skip_if_redis_enterprise()
     def test_read_only_error(self, r):
         "READONLY errors get turned into ReadOnlyError exceptions"
+        # A cluster client retries a READONLY reply of a primary: only the
+        # mapping is tested here
+        r.set_retry(Retry(NoBackoff(), 0))
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
+    @skip_if_redis_enterprise()
     def test_oom_error(self, r):
         "OOM errors get turned into OutOfMemoryError exceptions"
         with pytest.raises(redis.OutOfMemoryError):
@@ -754,29 +1311,35 @@ class TestConnection:
             # as the db being full
             r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
 
-        assert re.match(
+        match = re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
-        ).groups() == (
-            "ConnectionPool",
-            "Connection",
-            "db=0,host=localhost,port=6379",
         )
+        pool_name, conn_name, kwargs_str = match.groups()
+        assert pool_name == "ConnectionPool"
+        assert conn_name == "Connection"
+        # ``kwargs_str`` may contain extra auto-injected keys (e.g. maintenance
+        # notifications fields when the pool resolves to RESP3); only assert
+        # the URL-parsed pieces are present.
+        for token in ("db=0", "host=localhost", "port=6379"):
+            assert token in kwargs_str
 
+    @pytest.mark.fixed_client
     def test_connect_from_url_unix(self):
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match(
+        match = re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
-        ).groups() == (
-            "ConnectionPool",
-            "UnixDomainSocketConnection",
-            "path=/path/to/socket",
         )
+        pool_name, conn_name, kwargs_str = match.groups()
+        assert pool_name == "ConnectionPool"
+        assert conn_name == "UnixDomainSocketConnection"
+        assert "path=/path/to/socket" in kwargs_str
 
     @skip_if_redis_enterprise()
     def test_connect_no_auth_configured(self, r):
@@ -834,26 +1397,32 @@ class TestHealthCheck:
     def r(self, request):
         return _get_client(redis.Redis, request, health_check_interval=self.interval)
 
-    def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - time.monotonic()
-        assert self.interval > diff > (self.interval - 1)
+    def assert_interval_advanced(self, connection, start):
+        # next_health_check is set from the clock when a reply is read,
+        # which happens between `start` and now
+        now = time.monotonic()
+        assert (
+            start + self.interval <= connection.next_health_check <= now + self.interval
+        )
 
     def test_health_check_runs(self, r):
         r.connection.next_health_check = time.monotonic() - 1
+        start = time.monotonic()
         r.connection.check_health()
-        self.assert_interval_advanced(r.connection)
+        self.assert_interval_advanced(r.connection, start)
 
     def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
         r.get("foo")
-        r.connection.next_health_check = time.monotonic()
+        r.connection.next_health_check = time.monotonic() - 1
+        start = time.monotonic()
         with mock.patch.object(
             r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
             r.get("foo")
             m.assert_called_with("PING", check_health=False)
 
-        self.assert_interval_advanced(r.connection)
+        self.assert_interval_advanced(r.connection, start)
 
     def test_arbitrary_command_advances_next_health_check(self, r):
         r.get("foo")
@@ -900,10 +1469,11 @@ class TestHealthCheck:
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
+                start = time.monotonic()
                 pipe.watch("foo")
                 # the health check should be called when watching
                 m.assert_called_with("PING", check_health=False)
-                self.assert_interval_advanced(pipe.connection)
+                self.assert_interval_advanced(pipe.connection, start)
                 assert pipe.get("foo") == b"bar"
 
                 # reset the mock to clear the call list and schedule another
@@ -925,12 +1495,13 @@ class TestHealthCheck:
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             assert not p.subscribed
+            start = time.monotonic()
             p.subscribe("foo")
             # the connection is not yet in pubsub mode, so the normal
             # ping/pong within connection.send_command should check
             # the health of the connection
             m.assert_any_call("PING", check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
             subscribe_message = wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
@@ -946,10 +1517,11 @@ class TestHealthCheck:
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
+            start = time.monotonic()
             p.subscribe("foo")
             subscribe_message = wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
             # because we weren't subscribed when sending the subscribe
             # message to 'foo', the connection's standard check_health ran
             # prior to subscribing.
@@ -958,6 +1530,7 @@ class TestHealthCheck:
             p.connection.next_health_check = 0
             m.reset_mock()
 
+            start = time.monotonic()
             p.subscribe("bar")
             # the second subscribe issues exactly only command (the subscribe)
             # and the health check is not invoked
@@ -969,11 +1542,11 @@ class TestHealthCheck:
 
             subscribe_message = wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            assert wait_for_message(p) is None
+            assert p.get_message(timeout=1) is None
             # now that the connection is subscribed, the pubsub health
             # check should have taken over and include the HEALTH_CHECK_MESSAGE
             m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
     def test_health_check_in_pubsub_poll(self, r):
         """
@@ -985,16 +1558,18 @@ class TestHealthCheck:
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
+            start = time.monotonic()
             p.subscribe("foo")
             subscribe_message = wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
             # polling the connection before the health check interval
             # doesn't result in another health check
             m.reset_mock()
             next_health_check = p.connection.next_health_check
-            assert wait_for_message(p) is None
+            # one poll is enough: every get_message runs check_health first
+            assert p.get_message(timeout=0) is None
             assert p.connection.next_health_check == next_health_check
             m.assert_not_called()
 
@@ -1002,11 +1577,13 @@ class TestHealthCheck:
             # we should not receive a pong message, but the next_health_check
             # should be advanced
             p.connection.next_health_check = 0
-            assert wait_for_message(p) is None
+            start = time.monotonic()
+            assert p.get_message(timeout=1) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
-            self.assert_interval_advanced(p.connection)
+            self.assert_interval_advanced(p.connection, start)
 
 
+@pytest.mark.fixed_client
 class TestConnectionPoolReleasedEventEmission:
     """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
 
@@ -1054,3 +1631,165 @@ class TestConnectionPoolReleasedEventEmission:
 
         # Event should NOT be emitted for foreign connection
         listener.listen.assert_not_called()
+
+
+def _lock_is_free(lock) -> bool:
+    """Whether another thread could take ``lock`` (an RLock is reentrant)."""
+    result = []
+
+    def probe():
+        acquired = lock.acquire(blocking=False)
+        if acquired:
+            lock.release()
+        result.append(acquired)
+
+    thread = Thread(target=probe)
+    thread.start()
+    thread.join()
+    return result[0]
+
+
+@pytest.mark.fixed_client
+class TestDeferredReAuthOnRelease:
+    """A deferred AUTH runs on release and never fails a finished command."""
+
+    @staticmethod
+    def _in_use_connection_with_pending_auth(pool, read_response):
+        connection = Connection()
+        # Connected, as far as re_auth() can tell
+        connection._sock = mock.Mock()
+        connection.send_command = mock.Mock()
+        connection.read_response = mock.Mock(side_effect=read_response)
+        token = mock.Mock()
+        token.try_get.return_value = "oid"
+        token.get_value.return_value = "value"
+        connection.set_re_auth_token(token)
+        pool._in_use_connections.add(connection)
+        return connection, token
+
+    @staticmethod
+    def _use_again(pool, connection):
+        pool._available_connections.remove(connection)
+        pool._in_use_connections.add(connection)
+
+    @pytest.mark.parametrize(
+        "error",
+        [redis.AuthenticationError("rejected"), redis.ConnectionError("closed")],
+    )
+    def test_failed_auth_keeps_the_token_pending_and_does_not_fail_the_release(
+        self, error
+    ):
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, error)
+
+        pool.release(connection)
+
+        assert connection in pool._available_connections
+        assert connection._re_auth_token is token
+
+        # The next release retries it, and clears it once accepted
+        connection.read_response.side_effect = None
+        connection.read_response.return_value = b"OK"
+        self._use_again(pool, connection)
+        pool.release(connection)
+
+        assert connection.send_command.call_count == 2
+        assert connection._re_auth_token is None
+
+    def test_disconnected_connection_is_not_reconnected_to_send_the_auth(self):
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection._sock = None
+
+        pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        assert connection._re_auth_token is token
+
+    def test_connection_marked_for_reconnect_skips_the_auth(self):
+        """Its socket is about to be replaced, and may be slow or gone."""
+        pool = redis.ConnectionPool()
+        connection, token = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.mark_for_reconnect()
+        connection.disconnect = mock.Mock()
+
+        pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
+        assert connection._re_auth_token is token
+
+    def test_connection_the_pool_no_longer_owns_skips_the_auth(self):
+        """
+        It is disconnected instead of returned, like a Sentinel connection to
+        the old master.
+        """
+        pool = redis.ConnectionPool()
+        connection, _ = self._in_use_connection_with_pending_auth(pool, b"OK")
+        connection.disconnect = mock.Mock()
+
+        with mock.patch.object(pool, "owns_connection", return_value=False):
+            pool.release(connection)
+
+        connection.send_command.assert_not_called()
+        connection.disconnect.assert_called_once()
+        assert connection not in pool._available_connections
+
+    def test_new_socket_replaces_the_pending_auth(self):
+        """The handshake of a new socket authenticates with current credentials."""
+        connection = Connection()
+        connection.set_re_auth_token(mock.Mock())
+
+        with (
+            mock.patch.object(connection, "_connect", return_value=mock.Mock()),
+            mock.patch.object(connection, "on_connect_check_health"),
+        ):
+            connection.connect()
+
+        assert connection._re_auth_token is None
+
+    def test_auth_runs_before_the_connection_is_free_and_outside_the_lock(self):
+        pool = redis.ConnectionPool()
+        observed = []
+
+        def read_response():
+            observed.append(
+                (connection in pool._available_connections, _lock_is_free(pool._lock))
+            )
+            return b"OK"
+
+        connection, _ = self._in_use_connection_with_pending_auth(pool, read_response)
+
+        pool.release(connection)
+
+        assert observed == [(False, True)]
+        assert connection in pool._available_connections
+
+    def test_token_set_during_the_auth_stays_pending(self):
+        pool = redis.ConnectionPool()
+        newer = mock.Mock()
+
+        def read_response():
+            # A token renewal that lands while the AUTH is in flight
+            connection.set_re_auth_token(newer)
+            return b"OK"
+
+        connection, _ = self._in_use_connection_with_pending_auth(pool, read_response)
+
+        pool.release(connection)
+
+        assert connection._re_auth_token is newer
+
+    def test_listener_error_still_returns_the_connection(self):
+        pool = redis.ConnectionPool()
+        connection = pool.make_connection()
+        pool._in_use_connections.add(connection)
+
+        with mock.patch.object(
+            pool._event_dispatcher, "dispatch", side_effect=RuntimeError("listener")
+        ):
+            with pytest.raises(RuntimeError, match="listener"):
+                pool.release(connection)
+
+        assert connection in pool._available_connections
+        assert connection not in pool._in_use_connections

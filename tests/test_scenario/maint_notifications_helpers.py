@@ -1,16 +1,18 @@
 import binascii
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 import pytest
 from redis import RedisCluster
 
 from redis.client import Redis
 from redis.connection import Connection
+from redis.maint_notifications import EndpointType, MaintenanceState
 from tests.test_scenario.fault_injector_client import (
     FaultInjectorClient,
-    NodeInfo,
+    MockProxyFaultInjector,
     SlotMigrateEffects,
+    TopologyChangeStandaloneEffects,
 )
 
 
@@ -48,6 +50,7 @@ class ClientValidations:
         timeout: float = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
+        expected_state: Optional[MaintenanceState] = None,
     ):
         """Wait for a push notification to be received."""
         start_time = time.time()  # returns the time in seconds
@@ -63,6 +66,16 @@ class ClientValidations:
         )
 
         try:
+            if (
+                expected_state is not None
+                and test_conn.maintenance_state == expected_state
+            ):
+                logging.debug(
+                    f"Connection already in expected state {expected_state}, "
+                    f"returning immediately"
+                )
+                return
+
             while time.time() - start_time < timeout:
                 try:
                     if test_conn.can_read(timeout=0.2):
@@ -73,7 +86,11 @@ class ClientValidations:
                         )
                         if test_conn.should_reconnect():
                             logging.debug("Connection is marked for reconnect")
-                        return
+                        if (
+                            expected_state is None
+                            or test_conn.maintenance_state == expected_state
+                        ):
+                            return
                 except Exception as e:
                     logging.error(f"Error reading push notification: {e}")
                     break
@@ -104,68 +121,6 @@ class ClusterOperations:
         )
 
     @staticmethod
-    def find_target_node_and_empty_node(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        force_cluster_info_refresh: bool = True,
-    ) -> Tuple[NodeInfo, NodeInfo]:
-        """Find the node with master shards and the node with no shards.
-
-        Returns:
-            tuple: (target_node, empty_node) where target_node has master shards
-                   and empty_node has no shards
-        """
-        return fault_injector.find_target_node_and_empty_node(
-            endpoint_config, force_cluster_info_refresh
-        )
-
-    @staticmethod
-    def find_endpoint_for_bind(
-        fault_injector: FaultInjectorClient,
-        endpoint_name: str,
-        force_cluster_info_refresh: bool = True,
-    ) -> str:
-        """Find the endpoint ID from cluster status.
-
-        Returns:
-            str: The endpoint ID (e.g., "1:1")
-        """
-        return fault_injector.find_endpoint_for_bind(
-            endpoint_name, force_cluster_info_refresh
-        )
-
-    @staticmethod
-    def execute_failover(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
-    ) -> Dict[str, Any]:
-        """Execute failover command and wait for completion."""
-        return fault_injector.execute_failover(endpoint_config, timeout)
-
-    @staticmethod
-    def execute_migrate(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        target_node: str,
-        empty_node: str,
-        skip_end_notification: bool = False,
-    ) -> str:
-        """Execute rladmin migrate command and wait for completion."""
-        return fault_injector.execute_migrate(
-            endpoint_config, target_node, empty_node, skip_end_notification
-        )
-
-    @staticmethod
-    def execute_rebind(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        endpoint_id: str,
-    ) -> str:
-        """Execute rladmin bind endpoint command and wait for completion."""
-        return fault_injector.execute_rebind(endpoint_config, endpoint_id)
-
-    @staticmethod
     def get_slot_migrate_triggers(
         fault_injector: FaultInjectorClient,
         effect_name: SlotMigrateEffects,
@@ -174,10 +129,21 @@ class ClusterOperations:
         return fault_injector.get_slot_migrate_triggers(effect_name)
 
     @staticmethod
+    def get_topology_change_standalone_triggers(
+        fault_injector: FaultInjectorClient,
+        effect_name: TopologyChangeStandaloneEffects,
+    ) -> Dict[str, Any]:
+        """
+        Get available triggers(trigger name + db example config) for a
+        topology change for standalone client effect.
+        """
+        return fault_injector.get_topology_change_standalone_triggers(effect_name)
+
+    @staticmethod
     def trigger_effect(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
-        effect_name: SlotMigrateEffects,
+        effect_name: SlotMigrateEffects | TopologyChangeStandaloneEffects,
         trigger_name: Optional[str] = None,
         source_node: Optional[str] = None,
         target_node: Optional[str] = None,
@@ -204,6 +170,43 @@ class ClusterOperations:
             source_node=source_node,
             target_node=target_node,
             skip_end_notification=skip_end_notification,
+        )
+
+    @staticmethod
+    def migrate(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+    ) -> str:
+        """Migrate all master shards of the database to another node.
+
+        Args:
+            fault_injector: The fault injector client to use
+            endpoint_config: Endpoint configuration dictionary
+
+        Returns:
+            str: Action ID for tracking the operation
+        """
+        return fault_injector.migrate(endpoint_config)
+
+    @staticmethod
+    def wait_for_database_active(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+        active_timeout: Optional[int] = None,
+    ) -> str:
+        """Wait server-side until the database reports 'active'.
+
+        Args:
+            fault_injector: The fault injector client to use
+            endpoint_config: Endpoint configuration dictionary
+            active_timeout: Optional seconds to wait before the fault injector
+                gives up (its own default applies when omitted)
+
+        Returns:
+            str: Action ID for tracking the operation
+        """
+        return fault_injector.wait_for_database_active(
+            endpoint_config, active_timeout=active_timeout
         )
 
 
@@ -281,9 +284,134 @@ class KeyGenerationHelpers:
                 end_slot = start_slot + slots_per_shard - 1
 
             # Generate keys for this shard's slot range
+            span = end_slot - start_slot + 1
             for i in range(keys_per_shard):
-                # Pick a slot within this shard's range
-                slot_number = start_slot + (i % (end_slot - start_slot + 1))
+                # Spread the keys across the shard's slot range instead of clustering
+                # them at its start. Slots one apart almost always migrate together, so
+                # adjacent keys never produce the partial move that leaves a per-node
+                # PubSub holding some but not all of its channels. Identical to the
+                # previous formula at keys_per_shard=1, which every other caller uses.
+                slot_number = start_slot + (i * span) // keys_per_shard
                 keys.append(KeyGenerationHelpers.generate_key(slot_number, prefix))
 
         return keys
+
+
+def is_endpoint_configured_correctly(
+    conn,
+    configured_endpoint_type: EndpointType,
+    fault_injector_client,
+) -> bool:
+    """Return True if conn's host matches the expected endpoint type.
+
+    Always returns True for mock-proxy injectors — the proxy doesn't
+    distinguish endpoint types so there is nothing to validate.
+    """
+    if isinstance(fault_injector_client, MockProxyFaultInjector):
+        return True
+
+    if configured_endpoint_type == EndpointType.NONE:
+        if conn.host != conn.orig_host_address:
+            logging.debug(
+                f"Endpoint check failed: configured NONE but "
+                f"host={conn.host!r} != orig_host_address={conn.orig_host_address!r}"
+            )
+            return False
+        return True
+
+    if conn.host == conn.orig_host_address:
+        logging.debug(
+            f"Endpoint check failed: expected non-NONE endpoint type but "
+            f"host={conn.host!r} == orig_host_address={conn.orig_host_address!r}"
+        )
+        return False
+    actual_endpoint_type = conn.maint_notifications_config.get_endpoint_type(
+        conn.orig_host_address, conn
+    )
+    if configured_endpoint_type != actual_endpoint_type:
+        logging.debug(
+            f"Endpoint check failed: "
+            f"configured_endpoint_type={configured_endpoint_type!r} != "
+            f"actual_endpoint_type={actual_endpoint_type!r} for host={conn.host!r}"
+        )
+        return False
+    return True
+
+
+def generate_params(
+    fault_injector_client: FaultInjectorClient,
+    effect_names: list[SlotMigrateEffects | TopologyChangeStandaloneEffects],
+    skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
+    endpoint_types: Optional[list[EndpointType]] = None,
+    include_tls: bool = True,
+):
+    """Build parametrize tuples for maint-notification scenario tests.
+
+    Returns a list of (effect_name, trigger, dbconfig, db_name) tuples, or
+    (effect_name, trigger, dbconfig, db_name, endpoint_type) when endpoint_types
+    is provided.
+
+    Set include_tls=False to drop the TLS and mTLS requirement variants, for suites
+    whose client cannot use a rediss:// endpoint.
+    """
+    params = []
+    try:
+        logging.info(f"Extracting params for test with effect_names: {effect_names}")
+        for effect_name in effect_names:
+            if isinstance(effect_name, SlotMigrateEffects):
+                triggers_data = ClusterOperations.get_slot_migrate_triggers(
+                    fault_injector_client, effect_name
+                )
+            else:
+                triggers_data = (
+                    ClusterOperations.get_topology_change_standalone_triggers(
+                        fault_injector_client, effect_name
+                    )
+                )
+
+            for trigger_info in triggers_data["triggers"]:
+                trigger = trigger_info["name"]
+                if (effect_name, trigger) in skip_combinations:
+                    continue
+                if trigger == "maintenance_mode":
+                    continue
+                trigger_requirements = trigger_info["requirements"]
+                for requirement in trigger_requirements:
+                    if not include_tls and requirement.get("tls"):
+                        continue
+                    dbconfig = requirement["dbconfig"]
+                    if requirement.get("oss_cluster_api"):
+                        ip_type = requirement["oss_cluster_api"]["ip_type"]
+                        if ip_type == "internal":
+                            continue
+                    db_name_pattern = dbconfig.get("name").rsplit("-", 2)[0]
+                    dbconfig["name"] = db_name_pattern
+
+                    if endpoint_types is not None:
+                        for endpoint_type in endpoint_types:
+                            params.append(
+                                (
+                                    effect_name,
+                                    trigger,
+                                    dbconfig,
+                                    db_name_pattern,
+                                    endpoint_type,
+                                )
+                            )
+                    else:
+                        params.append((effect_name, trigger, dbconfig, db_name_pattern))
+    except NotImplementedError as e:
+        # Not every backend implements every effect - the mock proxy server
+        # rejects the topology-change triggers outright - so an empty
+        # parametrization is the correct outcome rather than a failure.
+        logging.info(f"No params for test, unsupported by this fault injector: {e}")
+    except Exception as e:
+        logging.error(f"Failed to extract params for test: {e}")
+        if not params:
+            # Partial results are still worth running, but an *empty*
+            # parametrization makes pytest report success while having executed
+            # nothing at all. A fault injector that is unreachable or rejecting
+            # requests has to surface as a collection error instead.
+            raise
+
+    return params

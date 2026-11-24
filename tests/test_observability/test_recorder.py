@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from opentelemetry.metrics import Observation
 
+from redis._parsers.response_callbacks import get_response_callbacks
+
 from redis.observability import recorder
 from redis.observability.registry import (
     ObservablesRegistry,
@@ -50,9 +52,11 @@ from redis.observability.attributes import (
     DB_CLIENT_GEOFAILOVER_REASON,
 )
 from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.providers import ObservabilityInstance
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.recorder import (
     record_connection_closed,
+    record_connection_count,
     record_connection_create_time,
     record_connection_handoff,
     record_connection_relaxed_timeout,
@@ -184,16 +188,15 @@ def setup_recorder(metrics_collector, mock_instruments):
     # Reset the global collector before test
     recorder.reset_collector()
 
-    # Patch _get_or_create_collector to return our collector with mocked instruments
-    with patch.object(
-        recorder, "_get_or_create_collector", return_value=metrics_collector
-    ):
+    # Install our collector with mocked instruments directly: the recording helpers read this variable.
+    with patch.object(recorder, "_metrics_collector", metrics_collector):
         yield mock_instruments
 
     # Reset after test
     recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestRecordOperationDuration:
     """Tests for record_operation_duration - verifies Histogram.record() calls."""
 
@@ -271,6 +274,7 @@ class TestRecordOperationDuration:
         assert isinstance(attrs[DB_OPERATION_NAME], str)
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionCreateTime:
     """Tests for record_connection_create_time - verifies Histogram.record() calls."""
 
@@ -302,6 +306,7 @@ class TestRecordConnectionCreateTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionTimeout:
     """Tests for record_connection_timeout - verifies Counter.add() calls."""
 
@@ -324,6 +329,7 @@ class TestRecordConnectionTimeout:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionWaitTime:
     """Tests for record_connection_wait_time - verifies Histogram.record() calls."""
 
@@ -345,6 +351,7 @@ class TestRecordConnectionWaitTime:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionClosed:
     """Tests for record_connection_closed - verifies Counter.add() calls."""
 
@@ -384,6 +391,7 @@ class TestRecordConnectionClosed:
         assert attrs[ERROR_TYPE] == "ConnectionResetError"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionRelaxedTimeout:
     """Tests for record_connection_relaxed_timeout - verifies UpDownCounter.add() calls."""
 
@@ -427,6 +435,7 @@ class TestRecordConnectionRelaxedTimeout:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionHandoff:
     """Tests for record_connection_handoff - verifies Counter.add() calls."""
 
@@ -447,6 +456,7 @@ class TestRecordConnectionHandoff:
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool<localhost:6379>"
 
 
+@pytest.mark.fixed_client
 class TestRecordErrorCount:
     """Tests for record_error_count - verifies Counter.add() calls."""
 
@@ -503,6 +513,7 @@ class TestRecordErrorCount:
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
+@pytest.mark.fixed_client
 class TestRecordMaintNotificationCount:
     """Tests for record_maint_notification_count - verifies Counter.add() calls."""
 
@@ -553,6 +564,7 @@ class TestRecordMaintNotificationCount:
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
 
 
+@pytest.mark.fixed_client
 class TestRecordGeoFailover:
     """Tests for record_geo_failover - verifies Counter.add() calls."""
 
@@ -624,6 +636,7 @@ class TestRecordGeoFailover:
         assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "manual"
 
 
+@pytest.mark.fixed_client
 class TestRecordPubsubMessage:
     """Tests for record_pubsub_message - verifies Counter.add() calls."""
 
@@ -671,6 +684,7 @@ class TestRecordPubsubMessage:
         assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is True
 
 
+@pytest.mark.fixed_client
 class TestRecordStreamingLag:
     """Tests for record_streaming_lag - verifies Histogram.record() calls."""
 
@@ -725,7 +739,75 @@ class TestRecordStreamingLag:
         attrs = instruments.stream_lag.record.call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "events-stream"
 
+    @pytest.mark.parametrize("protocol", [None, 2, 3])
+    @pytest.mark.parametrize("legacy_responses", [False, True])
+    @pytest.mark.parametrize("command", ["XREAD", "XREADGROUP"])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    def test_streaming_lag_response_modes(
+        self, setup_recorder, protocol, legacy_responses, command, decode_responses
+    ):
+        def encode(value):
+            return value if decode_responses else value.encode()
 
+        entries = [
+            [encode("1000-0"), [encode("field"), encode("first")]],
+            [encode("2000-0"), [encode("field"), encode("second")]],
+        ]
+        stream = encode("events")
+        raw = [[stream, entries]] if protocol == 2 else {stream: entries}
+        response = get_response_callbacks(protocol, legacy_responses)[command](raw)
+        group = "workers" if command == "XREADGROUP" else None
+        recorder.record_streaming_lag_from_response(response, consumer_group=group)
+        instrument = setup_recorder.stream_lag
+        assert instrument.record.call_count == 2
+        for call in instrument.record.call_args_list:
+            assert call.kwargs["attributes"][REDIS_CLIENT_STREAM_NAME] == "events"
+            assert call.args[0] >= 0
+            if group is not None:
+                assert call.kwargs["attributes"][REDIS_CLIENT_CONSUMER_GROUP] == group
+
+    @pytest.mark.parametrize("protocol", [None, 2, 3])
+    @pytest.mark.parametrize("legacy_responses", [False, True])
+    @pytest.mark.parametrize("decode_responses", [False, True])
+    @pytest.mark.parametrize("claim", [False, True])
+    def test_streaming_lag_reads_deleted_and_claimed_entries(
+        self, setup_recorder, protocol, legacy_responses, decode_responses, claim
+    ):
+        def encode(value):
+            return value if decode_responses else value.encode()
+
+        def entry(message_id):
+            fields = [encode("field"), encode("value")]
+            if claim:
+                return [encode(message_id), fields, 100, 2]
+            return [encode(message_id), fields]
+
+        first = [entry("1000-0")]
+        second = [entry("2000-0")]
+        expected = ["first", "second"]
+        if not claim:
+            # A deleted pending entry keeps its ID and has nil fields. CLAIM
+            # leaves deleted entries out of the reply.
+            first.insert(0, [encode("500-0"), None])
+            expected.insert(0, "first")
+        first_stream, second_stream = encode("first"), encode("second")
+        if protocol == 2:
+            raw = [[first_stream, first], [second_stream, second]]
+        else:
+            raw = {first_stream: first, second_stream: second}
+        options = {"claim_min_idle_time": 100} if claim else {}
+        response = get_response_callbacks(protocol, legacy_responses)["XREADGROUP"](
+            raw, **options
+        )
+        recorder.record_streaming_lag_from_response(response, consumer_group="workers")
+        instrument = setup_recorder.stream_lag
+        assert [
+            call.kwargs["attributes"][REDIS_CLIENT_STREAM_NAME]
+            for call in instrument.record.call_args_list
+        ] == expected
+
+
+@pytest.mark.fixed_client
 class TestHidePubSubChannelNames:
     """Tests for hide_pubsub_channel_names configuration option."""
 
@@ -742,7 +824,7 @@ class TestHidePubSubChannelNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             with patch.object(recorder, "_get_config", return_value=config):
                 yield mock_instruments
 
@@ -785,6 +867,7 @@ class TestHidePubSubChannelNames:
         assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "visible-channel"
 
 
+@pytest.mark.fixed_client
 class TestHideStreamNames:
     """Tests for hide_stream_names configuration option."""
 
@@ -801,7 +884,7 @@ class TestHideStreamNames:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             with patch.object(recorder, "_get_config", return_value=config):
                 yield mock_instruments
 
@@ -898,6 +981,7 @@ class TestHideStreamNames:
         assert REDIS_CLIENT_STREAM_NAME not in attrs
 
 
+@pytest.mark.fixed_client
 class TestRecorderDisabled:
     """Tests for recorder behavior when observability is disabled."""
 
@@ -906,7 +990,10 @@ class TestRecorderDisabled:
 
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             # Should not raise any exception
             record_operation_duration(
                 command_name="SET",
@@ -921,7 +1008,10 @@ class TestRecorderDisabled:
         """Test is_enabled returns False when collector is None."""
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             assert recorder.is_enabled() is False
 
         recorder.reset_collector()
@@ -931,7 +1021,10 @@ class TestRecorderDisabled:
 
         reset_collector()
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=None):
+        with (
+            patch.object(recorder, "_metrics_collector", None),
+            patch.object(recorder, "_collector_resolved", True),
+        ):
             # None of these should raise
             recorder.record_connection_create_time("pool", 0.1)
             recorder.record_connection_timeout("pool")
@@ -949,6 +1042,7 @@ class TestRecorderDisabled:
         recorder.reset_collector()
 
 
+@pytest.mark.fixed_client
 class TestResetCollector:
     """Tests for reset_collector function."""
 
@@ -959,6 +1053,192 @@ class TestResetCollector:
         assert recorder._metrics_collector is None
 
 
+class _Config:
+    enabled_telemetry = True
+
+
+class _MeterProvider:
+    def __init__(self, hook):
+        self._hook = hook
+
+    def get_meter(self, *_args, **_kwargs):
+        # The read a concurrent reset can land in, after the "resolved" flag has
+        # been set and before the collector is published.
+        self._hook()
+        return MagicMock(name="meter")
+
+
+class _ProviderManager:
+    def __init__(self, hook):
+        self.config = _Config()
+        self._provider = _MeterProvider(hook)
+
+    def get_meter_provider(self):
+        return self._provider
+
+
+class _Observability:
+    def __init__(self, manager):
+        self._manager = manager
+
+    def get_provider_manager(self):
+        return self._manager
+
+
+class _StandInCollector:
+    """Keeps the class attributes the resolver reads off the collector class.
+
+    Replacing the collector class with a plain callable raises AttributeError on
+    the ``METER_NAME`` read, which the resolver's broad ``except`` swallows, and
+    the resolution then looks like a miss for the wrong reason.
+    """
+
+    METER_NAME = "redis-py"
+    METER_VERSION = "1"
+
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def record_operation_duration(self, **_kwargs):
+        pass
+
+
+def _record_with_the_real_resolver(hook):
+    """One recording, with ``hook`` called during the meter read."""
+    manager = _ProviderManager(hook)
+    with (
+        patch.object(
+            recorder, "get_observability_instance", lambda: _Observability(manager)
+        ),
+        patch.object(recorder, "RedisMetricsCollector", _StandInCollector),
+    ):
+        recorder.reset_collector()
+        record_operation_duration("GET", 0.001, "localhost", 6379)
+
+
+@pytest.mark.fixed_client
+class TestCollectorResolution:
+    """The collector lookup runs once per observability configuration.
+
+    The recording helpers run on every command, so a miss - observability is
+    disabled - is cached as well. ObservabilityInstance.init() and
+    reset_collector() drop that cache so a later enable still collects.
+    """
+
+    def test_disabled_path_resolves_the_collector_once(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        for _ in range(5):
+            record_operation_duration("GET", 0.001, "localhost", 6379)
+            record_connection_count("pool", ConnectionState.IDLE, 1)
+
+        assert len(lookups) == 1
+        reset_collector()
+
+    def test_reset_collector_resolves_again(self, monkeypatch):
+        recorder.reset_collector()
+        lookups = []
+        original = recorder.get_observability_instance
+
+        def counting(*args, **kwargs):
+            lookups.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(recorder, "get_observability_instance", counting)
+
+        record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 1
+
+        reset_collector()
+        record_operation_duration("GET", 0.001, "localhost", 6379)
+        assert len(lookups) == 2
+        reset_collector()
+
+    def test_init_drops_a_cached_miss(
+        self, monkeypatch, metrics_collector, mock_instruments
+    ):
+        """init() must invalidate the recorder's cached collector.
+
+        Both recorders cache the resolved collector, including the answer
+        "observability is disabled", so that a disabled recording stays cheap.
+        Once cached, that answer is only ever replaced by dropping the cache, so
+        if init() did not drop it a recorder that ran before init() would stay
+        silent for the rest of the process.
+        """
+        recorder.reset_collector()
+
+        # Prime the cache the way a recording call before init() would: a miss
+        # is cached by setting the "resolved" flag with no collector.
+        recorder._metrics_collector = None
+        recorder._collector_resolved = True
+
+        ObservabilityInstance().init(OTelConfig())
+
+        assert recorder._collector_resolved is False, (
+            "init() must drop the recorder's cached miss, or the recorder "
+            "stays silent after observability is enabled"
+        )
+        assert recorder._metrics_collector is None
+        reset_collector()
+
+    def test_resolution_spanning_a_reset_does_not_cache_its_answer(self):
+        """A reset during the resolution must leave the cache unresolved.
+
+        This drives the real resolver, with the reset injected during the
+        provider-manager read: the resolution starts before the reset and
+        finishes after it, so the collector it builds belongs to the
+        configuration the reset replaced. Publishing it would pin a stale value
+        into the cache; leaving the flag set would be worse, because the next
+        caller would read a cached miss and metrics would stay off until the
+        next init.
+        """
+        recorder.reset_collector()
+        resets = []
+
+        def inject_reset():
+            if not resets:
+                resets.append(1)
+                recorder.reset_collector()
+
+        _record_with_the_real_resolver(inject_reset)
+
+        assert resets == [1], "the reset must land inside the resolution"
+        assert recorder._metrics_collector is None, (
+            "the collector was built against the configuration the reset "
+            "replaced, so it must not be published as the cache"
+        )
+        assert recorder._collector_resolved is False, (
+            "the cache must be left unresolved; a cached miss here is what "
+            "silences metrics until the next init"
+        )
+        recorder.reset_collector()
+
+    def test_resolution_without_a_reset_does_cache_its_answer(self):
+        """The control: with no reset the resolution publishes normally.
+
+        Without this, the test above would also pass if the resolver simply
+        never cached anything.
+        """
+        recorder.reset_collector()
+        _record_with_the_real_resolver(lambda: None)
+
+        assert recorder._metrics_collector is not None, (
+            "an uninterrupted resolution must cache the collector it built"
+        )
+        assert recorder._collector_resolved is True
+
+        recorder.reset_collector()
+
+
+@pytest.mark.fixed_client
 class TestMetricGroupsDisabled:
     """Tests for verifying metrics are not sent to Meter when their MetricGroup is disabled.
 
@@ -1028,7 +1308,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_operation_duration(
                 command_name="SET",
                 duration_seconds=0.005,
@@ -1050,7 +1330,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_create_time(
                 connection_pool="test-pool",
                 duration_seconds=0.050,
@@ -1070,7 +1350,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_wait_time(
                 pool_name="test-pool",
                 duration_seconds=0.010,
@@ -1090,7 +1370,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_closed(
                 close_reason=CloseReason.APPLICATION_CLOSE,
             )
@@ -1109,7 +1389,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_connection_relaxed_timeout(
                 connection_name="test-pool",
                 maint_notification="MOVING",
@@ -1128,7 +1408,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_pubsub_message(
                 direction=PubSubDirection.PUBLISH,
                 channel="test-channel",
@@ -1146,7 +1426,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_streaming_lag(
                 lag_seconds=0.150,
                 stream_name="test-stream",
@@ -1165,7 +1445,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             record_error_count(
                 server_address="localhost",
                 server_port=6379,
@@ -1189,7 +1469,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             recorder.record_maint_notification_count(
                 server_address="localhost",
                 server_port=6379,
@@ -1210,7 +1490,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             # Call all record functions
             record_operation_duration("GET", 0.001, "localhost", 6379)
             record_connection_create_time("pool", 0.050)
@@ -1254,7 +1534,7 @@ class TestMetricGroupsDisabled:
         )
 
         recorder.reset_collector()
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             # Call functions from enabled groups
             record_operation_duration("GET", 0.001, "localhost", 6379)
             record_pubsub_message(PubSubDirection.PUBLISH, "channel")
@@ -1279,6 +1559,7 @@ class TestMetricGroupsDisabled:
         instruments.stream_lag.record.assert_not_called()
 
 
+@pytest.mark.fixed_client
 class TestObservablesRegistry:
     """Tests for ObservablesRegistry singleton and callback registration."""
 
@@ -1323,6 +1604,7 @@ class TestObservablesRegistry:
         assert len(registry) == 0
 
 
+@pytest.mark.fixed_client
 class TestRecordConnectionCount:
     """Tests for record_connection_count (UpDownCounter)."""
 
@@ -1346,9 +1628,26 @@ class TestRecordConnectionCount:
         """Create a config with CONNECTION_BASIC enabled."""
         return OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
 
+    @staticmethod
+    def _calls_for(mock_counter, pool_name):
+        """The add() calls for ``pool_name`` only.
+
+        Other code in the process (a pool from an earlier test being collected,
+        for instance) can record connection counts on the patched collector while
+        a test runs, so a test counts only the calls for the pool it uses.
+        """
+        return [
+            c
+            for c in mock_counter.add.call_args_list
+            if c[1]["attributes"].get(DB_CLIENT_CONNECTION_POOL_NAME) == pool_name
+        ]
+
     @pytest.fixture
     def setup_connection_count_recorder(
-        self, mock_meter_with_counter, mock_config_with_connection_basic
+        self,
+        mock_meter_with_counter,
+        mock_config_with_connection_basic,
+        mock_up_down_counter,
     ):
         """Setup recorder with mocked meter for connection count tests."""
         recorder.reset_collector()
@@ -1358,7 +1657,11 @@ class TestRecordConnectionCount:
                 mock_meter_with_counter, mock_config_with_connection_basic
             )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
+            # Reset mock call counts to avoid pollution from external code
+            # paths (e.g., connection pool operations in other tests) that may
+            # have called record_connection_count on our mock collector.
+            mock_up_down_counter.reset_mock()
             yield mock_meter_with_counter
 
         recorder.reset_collector()
@@ -1373,9 +1676,8 @@ class TestRecordConnectionCount:
             counter=1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == 1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1393,9 +1695,8 @@ class TestRecordConnectionCount:
             counter=-1,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -1
         assert (
             calls[0][1]["attributes"][DB_CLIENT_CONNECTION_POOL_NAME]
@@ -1413,9 +1714,8 @@ class TestRecordConnectionCount:
             counter=-5,
         )
 
-        assert mock_up_down_counter.add.call_count == 1
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "localhost:6379_abc123")
+        assert len(calls) == 1
         assert calls[0][0][0] == -5
         assert calls[0][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
@@ -1462,9 +1762,8 @@ class TestRecordConnectionCount:
         )
 
         # Total calls: 6
-        assert mock_up_down_counter.add.call_count == 6
-
-        calls = mock_up_down_counter.add.call_args_list
+        calls = self._calls_for(mock_up_down_counter, "pool1")
+        assert len(calls) == 6
 
         # Step 1: IDLE +1 (creation)
         assert calls[0][0][0] == 1
@@ -1487,6 +1786,7 @@ class TestRecordConnectionCount:
         assert calls[5][1]["attributes"][DB_CLIENT_CONNECTION_STATE] == "idle"
 
 
+@pytest.mark.fixed_client
 class TestInitCSCItems:
     """Tests for init_csc_items and register_csc_items_callback."""
 
@@ -1518,7 +1818,7 @@ class TestInitCSCItems:
                 mock_meter_with_observable, mock_config_with_csc
             )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             yield mock_meter_with_observable
 
         recorder.reset_collector()
@@ -1617,6 +1917,7 @@ class TestInitCSCItems:
         assert obs2[0].value == 20
 
 
+@pytest.mark.fixed_client
 class TestHistogramBucketBoundaries:
     """Tests for custom histogram bucket boundaries configuration."""
 

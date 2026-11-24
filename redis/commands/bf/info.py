@@ -1,6 +1,16 @@
 from ..helpers import nativestr
 
 
+def _parse_info_args(args):
+    """Convert INFO response args to a dict with string keys.
+
+    Handles both RESP2 (flat list) and RESP3 (dict) responses.
+    """
+    if isinstance(args, dict):
+        return {nativestr(k): v for k, v in args.items()}
+    return dict(zip(map(nativestr, args[::2]), args[1::2]))
+
+
 class BFInfo:
     capacity = None
     size = None
@@ -9,7 +19,7 @@ class BFInfo:
     expansionRate = None
 
     def __init__(self, args):
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        response = _parse_info_args(args)
         self.capacity = response["Capacity"]
         self.size = response["Size"]
         self.filterNum = response["Number of filters"]
@@ -37,7 +47,7 @@ class CFInfo:
     maxIteration = None
 
     def __init__(self, args):
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        response = _parse_info_args(args)
         self.size = response["Size"]
         self.bucketNum = response["Number of buckets"]
         self.filterNum = response["Number of filters"]
@@ -61,12 +71,16 @@ class CMSInfo:
     width = None
     depth = None
     count = None
+    cell_size = None
 
     def __init__(self, args):
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        response = _parse_info_args(args)
         self.width = response["width"]
         self.depth = response["depth"]
         self.count = response["count"]
+        # Reported by RedisBloom versions that support CELL_SIZE; older servers
+        # omit the field.
+        self.cell_size = response.get("cell_size")
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -79,7 +93,7 @@ class TopKInfo:
     decay = None
 
     def __init__(self, args):
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        response = _parse_info_args(args)
         self.k = response["k"]
         self.width = response["width"]
         self.depth = response["depth"]
@@ -100,7 +114,7 @@ class TDigestInfo:
     memory_usage = None
 
     def __init__(self, args):
-        response = dict(zip(map(nativestr, args[::2]), args[1::2]))
+        response = _parse_info_args(args)
         self.compression = response["Compression"]
         self.capacity = response["Capacity"]
         self.merged_nodes = response["Merged nodes"]

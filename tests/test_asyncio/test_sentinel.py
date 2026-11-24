@@ -7,13 +7,20 @@ from redis.asyncio.client import StrictRedis
 
 import redis.asyncio.sentinel
 from redis import exceptions
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialBackoff
 from redis.asyncio.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
-from tests.conftest import is_resp2_connection
+
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = skip_if_redis_enterprise()
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -29,6 +36,7 @@ class SentinelTestClient:
     async def sentinel_masters(self):
         self.cluster.connection_error_if_down(self)
         self.cluster.timeout_if_down(self)
+        self.cluster.response_error_if_down(self)
         return {self.cluster.service_name: self.cluster.master}
 
     async def sentinel_slaves(self, master_name):
@@ -60,6 +68,7 @@ class SentinelTestCluster:
         self.slaves = []
         self.nodes_down = set()
         self.nodes_timeout = set()
+        self.nodes_response_error = set()
 
     def connection_error_if_down(self, node):
         if node.id in self.nodes_down:
@@ -68,6 +77,12 @@ class SentinelTestCluster:
     def timeout_if_down(self, node):
         if node.id in self.nodes_timeout:
             raise exceptions.TimeoutError
+
+    def response_error_if_down(self, node):
+        if node.id in self.nodes_response_error:
+            raise exceptions.ResponseError(
+                "unknown command 'SENTINEL', with args beginning with: 'masters'"
+            )
 
     def client(self, host, port, **kwargs):
         return SentinelTestClient(self, (host, port))
@@ -100,14 +115,15 @@ async def deployed_sentinel(request):
     sentinel_kwargs = {"decode_responses": decode_responses}
     force_master_ip = "localhost"
 
-    protocol = request.config.getoption("--protocol", 2)
+    protocol = request.config.getoption("--protocol")
+    if protocol:
+        kwargs["protocol"] = protocol
 
     sentinel = Sentinel(
         sentinel_endpoints,
         force_master_ip=force_master_ip,
         sentinel_kwargs=sentinel_kwargs,
         socket_timeout=0.1,
-        protocol=protocol,
         decode_responses=decode_responses,
         **kwargs,
     )
@@ -146,6 +162,26 @@ async def test_discover_master_sentinel_timeout(cluster, sentinel, master_ip):
     assert address == (master_ip, 6379)
     # 'bar' is now first sentinel
     assert sentinel.sentinels[0].id == ("bar", 26379)
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_master_sentinel_response_error(cluster, sentinel, master_ip):
+    # 'foo' answers SENTINEL MASTERS with an error reply (a node that is not a
+    # sentinel, or an ACL that denies the command): try 'bar' instead
+    cluster.nodes_response_error.add(("foo", 26379))
+    address = await sentinel.discover_master("mymaster")
+    assert address == (master_ip, 6379)
+    # 'bar' is now first sentinel
+    assert sentinel.sentinels[0].id == ("bar", 26379)
+
+
+@pytest.mark.onlynoncluster
+async def test_discover_master_error_names_response_error(cluster, sentinel):
+    cluster.nodes_response_error.update({("foo", 26379), ("bar", 26379)})
+    with pytest.raises(
+        MasterNotFoundError, match="ResponseError: unknown command 'SENTINEL'"
+    ):
+        await sentinel.discover_master("mymaster")
 
 
 @pytest.mark.onlynoncluster
@@ -214,6 +250,19 @@ async def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+async def test_discover_replicas(cluster, sentinel):
+    assert await sentinel.discover_replicas("mymaster") == []
+
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+
+    assert sentinel.filter_replicas(cluster.slaves) == [("slave0", 1234)]
+    assert await sentinel.discover_replicas("mymaster") == [("slave0", 1234)]
+
+
+@pytest.mark.onlynoncluster
 async def test_master_for(cluster, sentinel, master_ip):
     async with sentinel.master_for("mymaster", db=9) as master:
         assert await master.ping()
@@ -234,11 +283,30 @@ async def test_slave_for(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+async def test_replica_for(cluster, sentinel):
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        assert await replica.ping()
+
+
+@pytest.mark.onlynoncluster
 async def test_slave_for_slave_not_found_error(cluster, sentinel):
     cluster.master["is_odown"] = True
     async with sentinel.slave_for("mymaster", db=9) as slave:
         with pytest.raises(SlaveNotFoundError):
             await slave.ping()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_not_found_alias(cluster, sentinel):
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+    cluster.master["is_odown"] = True
+    async with sentinel.replica_for("mymaster", db=9) as replica:
+        with pytest.raises(ReplicaNotFoundError):
+            await replica.ping()
 
 
 @pytest.mark.onlynoncluster
@@ -255,6 +323,74 @@ async def test_slave_round_robin(cluster, sentinel, master_ip):
     assert await rotator.__anext__() == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
         await rotator.__anext__()
+
+
+@pytest.mark.onlynoncluster
+async def test_replica_round_robin(cluster, sentinel, master_ip):
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
+    assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert await rotator.__anext__() == (master_ip, 6379)
+    with pytest.raises(ReplicaNotFoundError):
+        await rotator.__anext__()
+
+
+@pytest.mark.fixed_client
+async def test_master_failover_does_not_reuse_connection_to_old_master():
+    master_a = ("master-a", 6379)
+    master_b = ("master-b", 6379)
+
+    class FakeConnection:
+        def __init__(self, **kwargs):
+            self.connection_pool = kwargs["connection_pool"]
+            self.host = self.port = None
+            self._should_reconnect = False
+
+        async def connect(self):
+            if self.host is None:
+                self.host, self.port = await self.connection_pool.get_master_address()
+
+        async def disconnect(self):
+            self.host = self.port = None
+            self._should_reconnect = False
+
+        async def can_read(self):
+            return False
+
+        async def re_auth(self):
+            pass
+
+        def mark_for_reconnect(self):
+            self._should_reconnect = True
+
+        def should_reconnect(self):
+            return self._should_reconnect
+
+    sentinel_manager = mock.AsyncMock()
+    sentinel_manager.discover_master.return_value = master_a
+    pool = SentinelConnectionPool(
+        "mymaster", sentinel_manager, connection_class=FakeConnection
+    )
+
+    in_use = await pool.get_connection()
+    assert (in_use.host, in_use.port) == master_a
+
+    # Sentinel reports a new master while in_use is checked out. The next new
+    # connection learns about it, which disconnects only the idle connections.
+    sentinel_manager.discover_master.return_value = master_b
+    other = await pool.get_connection()
+    assert (other.host, other.port) == master_b
+    await pool.release(other)
+    await pool.release(in_use)
+
+    connections = [await pool.get_connection() for _ in range(2)]
+    assert [(c.host, c.port) for c in connections] == [master_b, master_b]
 
 
 @pytest.mark.onlynoncluster
@@ -277,7 +413,7 @@ async def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
+@pytest.mark.parametrize("method_name", ["master_for", "slave_for", "replica_for"])
 async def test_auto_close_pool(cluster, sentinel, method_name):
     """
     Check that the connection pool created by the sentinel client is
@@ -319,6 +455,42 @@ async def test_repr_correctly_represents_connection_object(sentinel):
         str(connection)
         == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"  # noqa: E501
     )
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    async with sentinel as entered:
+        assert entered is sentinel
+
+    # exiting the context closes every sentinel client and its pool
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose_error_still_closes_remaining_clients(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(3)]
+    sentinel.sentinels[0].aclose.side_effect = Exception("sentinel down")
+
+    with pytest.raises(Exception, match="sentinel down"):
+        await sentinel.aclose()
+
+    # the failing client must not prevent closing the others
+    for s in sentinel.sentinels:
+        s.aclose.assert_awaited_once()
+
+
+@pytest.mark.onlynoncluster
+async def test_aclose_idempotent(cluster, sentinel):
+    sentinel.sentinels = [mock.AsyncMock() for _ in range(2)]
+
+    await sentinel.aclose()
+    await sentinel.aclose()
+
+    for s in sentinel.sentinels:
+        assert s.aclose.await_count == 2
 
 
 # Tests against real sentinel instances
@@ -372,23 +544,20 @@ async def test_redis_master_usage(deployed_sentinel):
 async def test_sentinel_commands_with_strict_redis_client(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_host, sentinel_port = sentinel_ips.split(",")[0].split(":")
-    protocol = request.config.getoption("--protocol", 2)
+    protocol = request.config.getoption("--protocol")
+    kwargs = {}
+    if protocol:
+        kwargs["protocol"] = protocol
 
     client = StrictRedis(
-        host=sentinel_host, port=sentinel_port, decode_responses=True, protocol=protocol
+        host=sentinel_host, port=sentinel_port, decode_responses=True, **kwargs
     )
     # skipping commands that change the state of the sentinel setup
     assert isinstance(
         await client.sentinel_get_master_addr_by_name("redis-py-test"), tuple
     )
     assert isinstance(await client.sentinel_master("redis-py-test"), dict)
-    if is_resp2_connection(client):
-        assert isinstance(await client.sentinel_masters(), dict)
-    else:
-        masters = await client.sentinel_masters()
-        assert isinstance(masters, list)
-        for master in masters:
-            assert isinstance(master, dict)
+    assert isinstance(await client.sentinel_masters(), dict)
 
     assert isinstance(await client.sentinel_sentinels("redis-py-test"), list)
     assert isinstance(await client.sentinel_slaves("redis-py-test"), list)
@@ -396,3 +565,96 @@ async def test_sentinel_commands_with_strict_redis_client(request):
     assert isinstance(await client.sentinel_ckquorum("redis-py-test"), bool)
 
     await client.close()
+
+
+# ---------------------------------------------------------------------------
+# HIMPORT on Sentinel (async)
+# ---------------------------------------------------------------------------
+# Mirrors tests/test_sentinel.py: the client from ``master_for`` inherits the shared
+# ``HImportRegistry`` from ``ConnectionPool`` and declares fieldsets at runtime; the
+# registry lives on the long-lived pool so it survives failover.
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_master_for_exposes_runtime_prepare(sentinel):
+    """``master_for`` returns a client exposing the HIMPORT family; runtime
+    ``himport_prepare`` populates the client's registry with no init argument, and
+    discard is never forbidden."""
+    async with sentinel.master_for("mymaster", db=9) as master:
+        assert await master.himport_prepare("users", ["name", "email", "age"]) is True
+        fs = master.himport_registry.get("users")
+        assert fs is not None
+        assert fs.fields == ("name", "email", "age")
+        assert await master.himport_discard("users") == 1
+        assert master.himport_registry.get("users") is None
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_registry_shared_with_pool_connections(sentinel):
+    """The runtime-prepared fieldset lives on the pool-level registry object injected
+    into every connection via ``connection_kwargs``, so a connection created after a
+    Sentinel failover (pool re-point) still sees it."""
+    async with sentinel.master_for("mymaster", db=9) as master:
+        await master.himport_prepare("shared", ["a", "b"])
+        pool = master.connection_pool
+        assert pool.connection_kwargs["himport_registry"] is pool.himport_registry
+        assert "shared" in pool.himport_registry
+
+
+@pytest.mark.onlynoncluster
+async def test_himport_prepare_set_survives_reconnect(deployed_sentinel):
+    """Async mirror of the sync reconnect test: runtime ``himport_prepare`` on a
+    reused ``master_for`` client survives a connection drop (the Sentinel-failover
+    analog); the fieldset is re-prepared lazily on the next ``himport_set`` against
+    the re-pointed pool. Requires a deployed Sentinel and Redis >= 8.9.0."""
+    master = await deployed_sentinel.master_for("redis-py-test", db=0)
+    try:
+        await master.himport_prepare("users", ["name", "email"])
+        await master.delete("himport:sentinel:async:1")
+        await master.himport_set(
+            "himport:sentinel:async:1", "users", ["alice", "a@x.com"]
+        )
+    except exceptions.ResponseError as exc:
+        if "unknown command" in str(exc).lower() or "no such fieldset" in str(exc):
+            pytest.skip("server does not support HIMPORT")
+        raise
+    assert await master.hget("himport:sentinel:async:1", "name") == "alice"
+    # Drop pooled connections to simulate the failover reconnect, then reuse the same
+    # client: the fieldset is re-prepared lazily on the next himport_set.
+    await master.connection_pool.disconnect()
+    await master.delete("himport:sentinel:async:2")
+    await master.himport_set("himport:sentinel:async:2", "users", ["bob", "b@x.com"])
+    assert await master.hget("himport:sentinel:async:2", "email") == "b@x.com"
+
+
+@pytest.mark.onlynoncluster
+def test_sentinel_clients_do_not_retry_by_default():
+    # Master discovery moves on to the next sentinel by itself; retrying an
+    # unreachable sentinel with the client default policy multiplies its timeout.
+    sentinel = Sentinel([("localhost", 26379), ("localhost", 26380)])
+    assert [s.get_retry().get_retries() for s in sentinel.sentinels] == [0, 0]
+
+
+@pytest.mark.onlynoncluster
+def test_sentinel_clients_retry_once_on_error_when_asked():
+    sentinel = Sentinel(
+        [("localhost", 26379)],
+        sentinel_kwargs={"retry_on_error": [exceptions.ConnectionError]},
+    )
+    assert sentinel.sentinels[0].get_retry().get_retries() == 1
+
+
+@pytest.mark.onlynoncluster
+def test_sentinel_clients_use_the_given_retry():
+    sentinel = Sentinel(
+        [("localhost", 26379)],
+        sentinel_kwargs={"retry": Retry(ExponentialBackoff(), 2)},
+    )
+    assert sentinel.sentinels[0].get_retry().get_retries() == 2
+
+
+@pytest.mark.onlynoncluster
+def test_sentinel_kwargs_are_not_modified():
+    sentinel_kwargs = {"socket_timeout": 1}
+    Sentinel([("localhost", 26379)], sentinel_kwargs=sentinel_kwargs)
+    assert sentinel_kwargs == {"socket_timeout": 1}

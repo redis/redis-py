@@ -1,21 +1,302 @@
+import asyncio
+import threading
 from unittest import mock
 
 import pytest
 from redis import RedisClusterException
 import redis
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing
 from .conftest import wait_for_command
 
 from unittest.mock import MagicMock, patch, AsyncMock
-from redis.asyncio.client import Pipeline
+from redis.asyncio.client import (
+    Pipeline,
+    _PIPELINE_PACK_OFFLOAD_MIN_COMMANDS,
+    _PIPELINE_YIELD_MIN_COMMANDS,
+)
+from redis.himport import HImportRegistry
 from redis.asyncio.observability import recorder as async_recorder
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 
 
 class TestPipeline:
+    @pytest.mark.parametrize("transaction", (False, True))
+    async def test_pipeline_packing_does_not_block_event_loop(self, transaction):
+        pipeline = Pipeline(
+            connection_pool=mock.MagicMock(),
+            response_callbacks={},
+            transaction=transaction,
+            shard_hint=None,
+        )
+        connection = mock.MagicMock()
+        packing_started = threading.Event()
+        release_packing = threading.Event()
+        packing_finished = threading.Event()
+        event_loop_ticks_during_packing = 0
+
+        def pack_commands(_commands):
+            packing_started.set()
+            release_packing.wait(timeout=1)
+            packing_finished.set()
+            return []
+
+        commands = [(("PING",), {})] * _PIPELINE_PACK_OFFLOAD_MIN_COMMANDS
+        command_responses = [True] * len(commands)
+        connection.pack_commands.side_effect = pack_commands
+        connection.send_packed_command = mock.AsyncMock()
+        pipeline.parse_response = mock.AsyncMock(
+            side_effect=[None, *command_responses, command_responses]
+            if transaction
+            else command_responses
+        )
+
+        async def observe_event_loop():
+            nonlocal event_loop_ticks_during_packing
+            while not packing_finished.is_set():
+                await asyncio.sleep(0)
+                if packing_started.is_set() and not packing_finished.is_set():
+                    event_loop_ticks_during_packing += 1
+                    # Release only after observing a loop tick while the worker
+                    # is inside pack_commands. A fixed delay races with slow
+                    # thread dispatch on loaded CI runners and can set the
+                    # event before the worker starts.
+                    release_packing.set()
+
+        observer = asyncio.create_task(observe_event_loop())
+        await asyncio.sleep(0)
+
+        try:
+            if transaction:
+                result = await asyncio.wait_for(
+                    pipeline._execute_transaction(connection, commands, True),
+                    timeout=1,
+                )
+            else:
+                result = await asyncio.wait_for(
+                    pipeline._execute_pipeline(connection, commands, True),
+                    timeout=1,
+                )
+        finally:
+            release_packing.set()
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+
+        assert packing_started.is_set()
+        assert result == command_responses
+        assert event_loop_ticks_during_packing > 0
+
+    @pytest.mark.parametrize("transaction", (False, True))
+    async def test_small_pipeline_packing_is_not_offloaded(self, transaction):
+        pipeline = Pipeline(
+            connection_pool=mock.MagicMock(),
+            response_callbacks={},
+            transaction=transaction,
+            shard_hint=None,
+        )
+        connection = mock.MagicMock()
+        connection.pack_commands.return_value = []
+        connection.send_packed_command = mock.AsyncMock()
+        commands = [(("PING",), {})] * 2
+        pipeline.parse_response = mock.AsyncMock(
+            side_effect=[None, True, True, [True, True]]
+            if transaction
+            else [True, True]
+        )
+
+        with mock.patch(
+            "redis.asyncio.client.asyncio.to_thread", new=mock.AsyncMock()
+        ) as to_thread:
+            if transaction:
+                result = await pipeline._execute_transaction(connection, commands, True)
+            else:
+                result = await pipeline._execute_pipeline(connection, commands, True)
+
+        assert result == [True, True]
+        to_thread.assert_not_called()
+        connection.pack_commands.assert_called_once()
+
+    @pytest.mark.parametrize("transaction", (False, True))
+    async def test_large_pipeline_packing_is_offloaded(self, transaction):
+        pipeline = Pipeline(
+            connection_pool=mock.MagicMock(),
+            response_callbacks={},
+            transaction=transaction,
+            shard_hint=None,
+        )
+        connection = mock.MagicMock()
+        commands = [(("PING",), {})] * _PIPELINE_PACK_OFFLOAD_MIN_COMMANDS
+        command_responses = [True] * len(commands)
+        connection.send_packed_command = mock.AsyncMock()
+        pipeline.parse_response = mock.AsyncMock(
+            side_effect=[None, *command_responses, command_responses]
+            if transaction
+            else command_responses
+        )
+        pack_offload = mock.AsyncMock(return_value=[])
+
+        with mock.patch(
+            "redis.asyncio.client.asyncio.to_thread", new=pack_offload
+        ) as to_thread:
+            if transaction:
+                result = await pipeline._execute_transaction(connection, commands, True)
+            else:
+                result = await pipeline._execute_pipeline(connection, commands, True)
+
+        assert result == command_responses
+        to_thread.assert_awaited_once()
+        assert pack_offload.await_args.args[0] == connection.pack_commands
+        packed = pack_offload.await_args.args[1]
+        assert len(packed) >= _PIPELINE_PACK_OFFLOAD_MIN_COMMANDS
+        if transaction:
+            assert packed[0] == ("MULTI",)
+            assert packed[-1] == ("EXEC",)
+        else:
+            assert packed[0] == ("PING",)
+        connection.pack_commands.assert_not_called()
+
+    async def test_offloaded_pipeline_batch_keeps_himport_preflight(self):
+        pipeline = Pipeline(
+            connection_pool=mock.MagicMock(),
+            response_callbacks={},
+            transaction=False,
+            shard_hint=None,
+        )
+        registry = HImportRegistry()
+        registry.prepare("fs", ["a", "b"])
+        connection = mock.MagicMock()
+        connection.himport_registry = registry
+        connection._himport_prepared = {}
+        connection._himport_reconciled_revision = registry.revision
+        connection.send_packed_command = mock.AsyncMock()
+        commands = [(("HIMPORT", "SET", "key", "fs", "v1", "v2"), {})] + [
+            (("PING",), {})
+        ] * (_PIPELINE_PACK_OFFLOAD_MIN_COMMANDS - 1)
+        pipeline.parse_response = mock.AsyncMock(
+            side_effect=[True] * (1 + len(commands))
+        )
+        pack_offload = mock.AsyncMock(return_value=[])
+
+        with mock.patch("redis.asyncio.client.asyncio.to_thread", new=pack_offload):
+            result = await pipeline._execute_pipeline(connection, commands, True)
+
+        assert result == [True] * len(commands)
+        packed = pack_offload.await_args.args[1]
+        assert packed[0] == ("HIMPORT", "PREPARE", "fs", "a", "b")
+        assert packed[1] == ("HIMPORT", "SET", "key", "fs", "v1", "v2")
+        assert len(packed) == len(commands) + 1
+
+    @staticmethod
+    def _mock_pipeline_execution(transaction, count):
+        pipeline = Pipeline(
+            connection_pool=mock.MagicMock(),
+            response_callbacks={"PING": lambda response, **options: response},
+            transaction=transaction,
+            shard_hint=None,
+        )
+        connection = mock.MagicMock()
+        connection._resp2_fallback = False
+        connection.send_packed_command = mock.AsyncMock()
+        connection.disconnect = mock.AsyncMock()
+        commands = [(("PING",), {})] * count
+        command_responses = [True] * count
+        # Replies that are already buffered: parse_response never suspends
+        pipeline.parse_response = mock.AsyncMock(
+            side_effect=[None, *command_responses, command_responses]
+            if transaction
+            else command_responses
+        )
+        return pipeline, connection, commands
+
+    @pytest.mark.parametrize("transaction", (False, True))
+    @pytest.mark.parametrize(
+        "count",
+        (
+            _PIPELINE_YIELD_MIN_COMMANDS - 1,
+            _PIPELINE_YIELD_MIN_COMMANDS,
+            2 * _PIPELINE_YIELD_MIN_COMMANDS,
+        ),
+    )
+    async def test_pipeline_reply_loops_yield_to_event_loop(self, transaction, count):
+        """
+        Reading buffered replies never suspends, so a large pipeline yields every
+        _PIPELINE_YIELD_MIN_COMMANDS commands in the read loop and, for a
+        transaction, in the callback loop too (#3416), but never after the last
+        command. Smaller pipelines never yield.
+        """
+        pipeline, connection, commands = self._mock_pipeline_execution(
+            transaction, count
+        )
+        ticks = 0
+
+        async def tick():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0)
+
+        ticker = asyncio.create_task(tick())
+        await asyncio.sleep(0)
+        ticks_before = ticks
+        try:
+            # Packing is offloaded at this size; a mock keeps it from suspending
+            with mock.patch(
+                "redis.asyncio.client.asyncio.to_thread",
+                new=mock.AsyncMock(return_value=[]),
+            ):
+                if transaction:
+                    result = await pipeline._execute_transaction(
+                        connection, commands, True
+                    )
+                else:
+                    result = await pipeline._execute_pipeline(
+                        connection, commands, True
+                    )
+        finally:
+            ticker.cancel()
+            await asyncio.gather(ticker, return_exceptions=True)
+
+        assert result == [True] * count
+        yields_per_loop = (count - 1) // _PIPELINE_YIELD_MIN_COMMANDS
+        loops = 2 if transaction else 1
+        assert ticks - ticks_before == yields_per_loop * loops
+        connection.disconnect.assert_not_called()
+
+    @pytest.mark.parametrize("transaction", (False, True))
+    async def test_pipeline_cancelled_at_reply_loop_yield_disconnects(
+        self, transaction
+    ):
+        """
+        A cancellation at a read loop yield leaves the rest of the replies on the
+        socket, so the connection is dropped instead of returned to the pool.
+        """
+        pipeline, connection, commands = self._mock_pipeline_execution(
+            transaction, _PIPELINE_YIELD_MIN_COMMANDS + 1
+        )
+        with mock.patch(
+            "redis.asyncio.client.asyncio.to_thread",
+            new=mock.AsyncMock(return_value=[]),
+        ):
+            if transaction:
+                execution = pipeline._execute_transaction(connection, commands, True)
+            else:
+                execution = pipeline._execute_pipeline(connection, commands, True)
+            task = asyncio.create_task(execution)
+            # The task runs until the first yield, then is cancelled there
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        connection.disconnect.assert_awaited_once_with(nowait=True)
+        # MULTI, plus the replies read before the yield
+        reads = _PIPELINE_YIELD_MIN_COMMANDS + (1 if transaction else 0)
+        assert pipeline.parse_response.await_count == reads
+
     async def test_pipeline_is_true(self, r):
         """Ensure pipeline instances are not false-y"""
         async with r.pipeline() as pipe:
@@ -65,6 +346,23 @@ class TestPipeline:
             assert await r.get("c") == b"c1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    async def test_info_in_transaction(self, decoded_r):
+        async with decoded_r.pipeline() as pipe:
+            pipe.info("server")
+            (info,) = await pipe.execute()
+            assert "redis_version" in info
+
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    async def test_info_in_transaction_with_custom_callback(self, decoded_r):
+        decoded_r.set_response_callback("INFO", lambda response, **options: response)
+        async with decoded_r.pipeline() as pipe:
+            pipe.info("server")
+            (info,) = await pipe.execute()
+            assert "redis_version:" in info
+
+    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction_watch(self, r):
         await r.set("a", 0)
 
@@ -93,6 +391,82 @@ class TestPipeline:
                 await pipe.execute()
 
             assert await r.get("a") == b"bad"
+
+    @pytest.mark.onlynoncluster
+    async def test_pipeline_reset_releases_connection_when_cancelled(self, r):
+        # Regression test for https://github.com/redis/redis-py/issues/4121:
+        # cancelling reset() while it awaits the UNWATCH reply must still
+        # return the pooled connection to the pool.
+        await r.set("a", 0)
+
+        pool = r.connection_pool
+        pipe = r.pipeline()
+        await pipe.watch("a")
+        assert pipe.connection is not None
+        assert pipe.connection in pool._in_use_connections
+        leased = pipe.connection
+
+        # Block read_response on the UNWATCH reply so we can cancel mid-call.
+        started = asyncio.Event()
+
+        async def hang(*_args, **_kwargs):
+            started.set()
+            await asyncio.sleep(60)
+
+        with mock.patch.object(leased, "read_response", side_effect=hang):
+            task = asyncio.ensure_future(pipe.reset())
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert pipe.connection is None
+        assert leased not in pool._in_use_connections
+
+    @pytest.mark.onlynoncluster
+    async def test_cancelled_watch_transaction_does_not_reconnect_for_unwatch(self, r):
+        """
+        A cancel mid-read drops the connection, which already clears the
+        server-side WATCH, so reset() must not reconnect just to send UNWATCH.
+        """
+        await r.set("a", 0)
+
+        pool = r.connection_pool
+        pipe = r.pipeline()
+        await pipe.watch("a")
+        leased = pipe.connection
+        pipe.multi()
+        pipe.set("a", 1)
+
+        started = asyncio.Event()
+        original = leased._parser.read_response
+        calls = 0
+
+        async def hang_once(*args, **kwargs):
+            # Hang on the MULTI reply only, so a reconnect for UNWATCH would
+            # still be answered instead of blocking the test.
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                started.set()
+                await asyncio.sleep(60)
+            return await original(*args, **kwargs)
+
+        with (
+            mock.patch.object(leased._parser, "read_response", side_effect=hang_once),
+            mock.patch.object(leased, "connect", wraps=leased.connect) as connect,
+        ):
+            task = asyncio.create_task(pipe.execute())
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        connect.assert_not_called()
+        assert not leased.is_connected
+        assert pipe.watching is False
+        assert pipe.connection is None
+        assert leased not in pool._in_use_connections
 
     async def test_exec_error_in_response(self, r):
         """
@@ -129,8 +503,9 @@ class TestPipeline:
             pipe.set("a", 1).set("b", 2).lpush("c", 3).set("d", 4)
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
-            assert str(ex.value).startswith(
+            assert str(ex.value) == (
                 "Command # 3 (LPUSH c 3) of pipeline caused error: "
+                "WRONGTYPE Operation against a key holding the wrong kind of value"
             )
 
             # make sure the pipe was restored to a working state
@@ -181,6 +556,45 @@ class TestPipeline:
             # make sure the pipe was restored to a working state
             assert await pipe.set("z", "zzz").execute() == [True]
             assert await r.get("z") == b"zzz"
+
+    @pytest.mark.onlynoncluster
+    async def test_callback_error_does_not_leave_replies_on_connection(self, r):
+        # The score callback raises on the first reply, while the BLPOP reply is
+        # still in flight. The next command on the pooled connection must not
+        # read it.
+        await r.zadd("z", {"a": float("inf")})
+        await r.set("b", "b1")
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.zrange("z", 0, -1, withscores=True, score_cast_func=int)
+            pipe.blpop("q", 0.5)
+            with pytest.raises(OverflowError):
+                await pipe.execute()
+
+        client = redis.asyncio.Redis(connection_pool=r.connection_pool)
+        assert await client.get("b") == b"b1"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
+    @skip_if_server_version_lt("6.0.0")
+    async def test_exec_error_in_pipeline_redacts_credentials(self, r):
+        try:
+            async with r.pipeline(transaction=False) as pipe:
+                pipe.acl_setuser(
+                    "redis-py-user",
+                    enabled=True,
+                    passwords=["+pipeline-secret"],
+                    commands=["+nosuchcommand"],
+                )
+
+                with pytest.raises(redis.ResponseError) as ex:
+                    await pipe.execute()
+        finally:
+            await r.acl_deluser("redis-py-user")
+
+        assert "pipeline-secret" not in str(ex.value)
+        assert str(ex.value).startswith(
+            "Command # 1 (ACL SETUSER <REDACTED>) of pipeline caused error: "
+        )
 
     @pytest.mark.onlynoncluster
     async def test_parse_error_raised_transaction(self, r):
@@ -487,6 +901,7 @@ class TestPipeline:
         assert "JSON.GET" in r.response_callbacks
 
 
+@pytest.mark.fixed_client
 @pytest.mark.asyncio
 class TestAsyncPipelineOperationDurationMetricsRecording:
     """
@@ -574,12 +989,7 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            async_recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        with patch.object(async_recorder, "_async_metrics_collector", collector):
             # Create pipeline with mocked connection pool
             pipeline = Pipeline(
                 connection_pool=mock_async_connection_pool,
@@ -646,12 +1056,7 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            async_recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        with patch.object(async_recorder, "_async_metrics_collector", collector):
             # Create pipeline with transaction=False
             pipeline = Pipeline(
                 connection_pool=mock_async_connection_pool,
@@ -706,12 +1111,7 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            async_recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        with patch.object(async_recorder, "_async_metrics_collector", collector):
             # First pipeline execution
             pipeline1 = Pipeline(
                 connection_pool=mock_async_connection_pool,
@@ -754,12 +1154,7 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
         with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
-        # Note: _get_or_create_collector is now sync
-        with patch.object(
-            async_recorder,
-            "_get_or_create_collector",
-            return_value=collector,
-        ):
+        with patch.object(async_recorder, "_async_metrics_collector", collector):
             pipeline = Pipeline(
                 connection_pool=mock_async_connection_pool,
                 response_callbacks={},
@@ -780,3 +1175,62 @@ class TestAsyncPipelineOperationDurationMetricsRecording:
             self.operation_duration.record.assert_not_called()
 
         async_recorder.reset_collector()
+
+
+@pytest.mark.fixed_client
+class TestAsyncPipelineRetryChecker:
+    """A retry-level checker rejection must still run the pipeline's fail hook."""
+
+    class FakeConnection:
+        host = "localhost"
+        port = 6379
+        db = 0
+        _resp2_fallback = False
+
+        def __init__(self, retry):
+            self.retry = retry
+            self.disconnected = False
+
+        @property
+        def is_connected(self):
+            return not self.disconnected
+
+        async def send_command(self, *args, **kwargs):
+            if args[0] == "GET":
+                raise redis.TimeoutError("boom")
+            return None
+
+        async def read_response(self):
+            return True
+
+        async def disconnect(self, *args, **kwargs):
+            self.disconnected = True
+
+        def extract_connection_details(self):
+            # Read by the failure debug log, which runs with DEBUG logging on.
+            return f"{self.host}:{self.port}"
+
+    class FakeConnectionPool:
+        def __init__(self, connection):
+            self.connection = connection
+
+        async def get_connection(self):
+            return self.connection
+
+        async def release(self, connection):
+            pass
+
+    @pytest.mark.asyncio
+    async def test_retry_checker_rejection_resets_watching_pipeline(self):
+        retry = Retry(NoBackoff(), 3, is_retryable=lambda error: False)
+        connection = self.FakeConnection(retry)
+        pipeline = Pipeline(self.FakeConnectionPool(connection), {}, True, None)
+
+        await pipeline.watch("foo")
+        assert pipeline.watching
+
+        with pytest.raises(redis.WatchError):
+            await pipeline.get("foo")
+
+        assert not pipeline.watching
+        assert connection.disconnected

@@ -1,10 +1,18 @@
+import json
+
 import pytest
 import redis
 from redis import Redis, exceptions
+from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_server_version_lt,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest.fixture
@@ -45,6 +53,101 @@ def test_json_get_jset(client):
     assert client.json().get("baz") is None
     assert 1 == client.json().delete("foo")
     assert client.exists("foo") == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha(client):
+    """Test JSON.SET with FPHA (FP Homogeneous Array) argument."""
+    # Set a JSON value with an FP array using FP32
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert client.json().set("fpha_key", Path.root_path(), fp_array, fpha="FP32")
+    result = client.json().get("fpha_key", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP64
+    assert client.json().set("fpha_key64", Path.root_path(), fp_array, fpha="FP64")
+    result = client.json().get("fpha_key64", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with FP16
+    assert client.json().set("fpha_key16", Path.root_path(), fp_array, fpha="FP16")
+    result = client.json().get("fpha_key16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    # Test with BF16
+    assert client.json().set("fpha_keybf16", Path.root_path(), fp_array, fpha="BF16")
+    result = client.json().get("fpha_keybf16", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_with_nx_xx(client):
+    """Test JSON.SET with FPHA combined with NX/XX modifiers."""
+    fp_array = [1.5, 2.5, 3.5]
+
+    # Set with NX + FPHA (should succeed since key doesn't exist)
+    assert client.json().set(
+        "fpha_nx", Path.root_path(), fp_array, nx=True, fpha="FP32"
+    )
+
+    # Set with NX + FPHA again (should fail since key exists)
+    assert (
+        client.json().set("fpha_nx", Path.root_path(), [4.5, 5.5], nx=True, fpha="FP32")
+        is None
+    )
+
+    # Set with XX + FPHA (should succeed since key exists)
+    assert client.json().set(
+        "fpha_nx", Path.root_path(), [4.5, 5.5], xx=True, fpha="FP32"
+    )
+
+
+@pytest.mark.redismod
+def test_json_set_fpha_invalid_type(client):
+    """Test JSON.SET with invalid FPHA type raises an error."""
+    fp_array = [1.1, 2.2, 3.3]
+    with pytest.raises(exceptions.DataError, match="Invalid FPHA type"):
+        client.json().set("fpha_invalid", Path.root_path(), fp_array, fpha="INVALID")
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_case_insensitive(client):
+    """Test JSON.SET FPHA type is case-insensitive."""
+    fp_array = [1.1, 2.2, 3.3]
+    # Lowercase should work
+    assert client.json().set("fpha_lower", Path.root_path(), fp_array, fpha="fp32")
+    # Mixed case should work
+    assert client.json().set("fpha_mixed", Path.root_path(), fp_array, fpha="Fp64")
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.7.0")
+def test_json_set_fpha_enum(client):
+    """Test JSON.SET with FPHAType enum values."""
+    fp_array = [1.1, 2.2, 3.3, 4.4]
+    assert client.json().set(
+        "fpha_enum", Path.root_path(), fp_array, fpha=FPHAType.FP32
+    )
+    result = client.json().get("fpha_enum", Path.root_path())
+    assert isinstance(result, list)
+    assert len(result) == 4
+
+    assert client.json().set(
+        "fpha_enum64", Path.root_path(), fp_array, fpha=FPHAType.FP64
+    )
+    assert client.json().set(
+        "fpha_enum16", Path.root_path(), fp_array, fpha=FPHAType.FP16
+    )
+    assert client.json().set(
+        "fpha_enumbf16", Path.root_path(), fp_array, fpha=FPHAType.BF16
+    )
 
 
 @pytest.mark.redismod
@@ -168,7 +271,10 @@ def test_nummultby(client):
             client, client.json().nummultby("num", Path.root_path(), 2.5), 5, [5]
         )
         assert_resp_response(
-            client, client.json().nummultby("num", Path.root_path(), 0.5), 2.5, [2.5]
+            client,
+            client.json().nummultby("num", Path.root_path(), 0.5),
+            2.5,
+            [2.5],
         )
 
 
@@ -201,6 +307,34 @@ def test_strlen(client):
 
 
 @pytest.mark.redismod
+def test_none_path_is_root_path(client):
+    # path=None must address the root, not a member named "None".
+    client.json().set("arr", Path.root_path(), [0, 1])
+    assert 3 == client.json().arrappend("arr", None, 2)
+    assert 3 == client.json().arrlen("arr", None)
+    assert 2 == client.json().arrpop("arr", None)
+    assert_resp_response(client, client.json().type("arr", None), "array", ["array"])
+    assert isinstance(client.json().resp("arr", None), list)
+    assert 1 == client.json().clear("arr", None)
+    assert [] == client.json().get("arr")
+
+    client.json().set("obj", Path.root_path(), {"a": 1, "b": 2})
+    assert 2 == client.json().objlen("obj", None)
+    assert ["a", "b"] == sorted(client.json().objkeys("obj", None))
+    assert client.json().debug("MEMORY", "obj", None) > 0
+
+    client.json().set("str", Path.root_path(), "foo")
+    assert 6 == client.json().strappend("str", "bar", None)
+
+    client.json().set("bool", Path.root_path(), False)
+    assert client.json().toggle("bool", None)
+    assert client.json().get("bool") is True
+
+    assert 1 == client.json().delete("str", None)
+    assert client.exists("str") == 0
+
+
+@pytest.mark.redismod
 def test_arrappend(client):
     client.json().set("arr", Path.root_path(), [1])
     assert 2 == client.json().arrappend("arr", Path.root_path(), 2)
@@ -218,6 +352,13 @@ def test_arrindex(client):
     assert 4 == client.json().arrindex("arr", Path.root_path(), 4, start=0, stop=5000)
     assert -1 == client.json().arrindex("arr", Path.root_path(), 4, start=0, stop=-1)
     assert -1 == client.json().arrindex("arr", Path.root_path(), 4, start=1, stop=3)
+
+
+@pytest.mark.redismod
+def test_arrindex_stop_without_start(client):
+    client.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
+    assert -1 == client.json().arrindex("arr", Path.root_path(), 4, stop=3)
+    assert 2 == client.json().arrindex("arr", Path.root_path(), 2, stop=3)
 
 
 @pytest.mark.redismod
@@ -252,6 +393,11 @@ def test_arrpop(client):
     # test out of bounds
     client.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 4 == client.json().arrpop("arr", Path.root_path(), 99)
+
+    # index=None pops the last element, like omitting it
+    client.json().set("arr", Path.root_path(), [0, 1, 2])
+    assert 2 == client.json().arrpop("arr", Path.root_path(), None)
+    assert [0, 1] == client.json().get("arr")
 
     # none test
     client.json().set("arr", Path.root_path(), [])
@@ -509,7 +655,6 @@ def test_numby_commands_dollar(client):
         client.json().numincrby("non_existing_doc", "$..a", 2)
         client.json().nummultby("non_existing_doc", "$..a", 2)
 
-    # Test legacy NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
     assert_resp_response(client, client.json().numincrby("doc1", ".b[0].a", 3), 5, [5])
 
@@ -931,7 +1076,7 @@ def test_type_dollar(client):
 
     # Test missing key
     assert_resp_response(
-        client, client.json().type("non_existing_doc", "..a"), None, [None]
+        client, client.json().type("non_existing_doc", "..a"), None, [None], None
     )
 
 
@@ -1468,6 +1613,7 @@ def test_arrindex_dollar(client):
     assert client.json().arrindex("test_None", "..nested2_not_found.arr", "None") == 0
 
 
+@pytest.mark.fixed_client
 @pytest.mark.redismod
 def test_decoders_and_unstring():
     assert unstring("4") == 4
@@ -1477,6 +1623,29 @@ def test_decoders_and_unstring():
     assert decode_list(b"45.55") == 45.55
     assert decode_list("45.55") == 45.55
     assert decode_list(["hello", b"world"]) == ["hello", "world"]
+
+
+@pytest.mark.fixed_client
+def test_unstring_decimal_point_must_be_a_literal_dot():
+    """The float pattern must only match a *literal* decimal point.
+
+    ``.`` is a regex metacharacter, so the unescaped pattern used to match
+    any character between two runs of digits (e.g. ``"1a5"``, ``"1 5"``).
+    The whole match was then fed to ``float()``, which raised ``ValueError``
+    instead of the "best effort" return-the-value contract of this helper.
+    """
+    # Still parses genuine numbers.
+    assert unstring("45.55") == 45.55
+    assert unstring("0.0") == 0.0
+    # Non-decimal separators are not numbers: return the value untouched.
+    assert unstring("1a5") == "1a5"
+    assert unstring("1 5") == "1 5"
+    assert unstring("1.2.3") == "1.2.3"
+    assert unstring(".") == "."
+
+    # decode_list() must not raise for the same inputs.
+    assert decode_list("1a5") == "1a5"
+    assert decode_list("1 5") == "1 5"
 
 
 @pytest.mark.redismod
@@ -1515,21 +1684,52 @@ def test_set_file(client):
 
 
 @pytest.mark.redismod
-def test_set_path(client):
-    import json
-    import tempfile
+def test_set_path(client, tmp_path):
+    # Place the file under a directory whose name contains a dot, to guard
+    # against the derived key being truncated at a dot in the directory rather
+    # than at the file extension.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    jsonfile = dotted_dir / "data.json"
+    jsonfile.write_text(json.dumps({"hello": "world"}))
+    nojsonfile = tmp_path / "notes.txt"
+    nojsonfile.write_text("hello")
 
-    root = tempfile.mkdtemp()
-    sub = tempfile.mkdtemp(dir=root)
-    jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)[1]
-    nojsonfile = tempfile.mkstemp(dir=root)[1]
+    result = {str(jsonfile): True, str(nojsonfile): False}
+    assert client.json().set_path(Path.root_path(), str(tmp_path)) == result
+    # State the expected key directly (the file path with only its extension
+    # stripped) rather than repeating the implementation's split.
+    expected_key = str(dotted_dir / "data")
+    assert client.json().get(expected_key) == {"hello": "world"}
 
-    with open(jsonfile, "w+") as fp:
-        fp.write(json.dumps({"hello": "world"}))
-    with open(nojsonfile, "a+") as fp:
-        fp.write("hello")
 
-    result = {jsonfile: True, nojsonfile: False}
-    assert client.json().set_path(Path.root_path(), root) == result
-    res = {"hello": "world"}
-    assert client.json().get(jsonfile.rsplit(".")[0]) == res
+def test_set_path_key_strips_only_extension(tmp_path, monkeypatch):
+    # Regression test: JSON.set_path must strip only the extension of the final
+    # path component when deriving the key. A dot in a directory (a versioned
+    # "v1.2" folder), a file with no extension, a dotfile, and a multi-part
+    # extension must all be handled correctly. set_file is stubbed so this runs
+    # without a server.
+    dotted_dir = tmp_path / "v1.2"
+    dotted_dir.mkdir()
+    # Map each file to the key set_path is expected to derive for it.
+    expected_keys = {
+        dotted_dir / "data.json": dotted_dir / "data",
+        dotted_dir / "report.tar.gz": dotted_dir / "report.tar",
+        dotted_dir / "README": dotted_dir / "README",
+        dotted_dir / ".env": dotted_dir / ".env",
+    }
+    for file_path in expected_keys:
+        file_path.write_text("{}")
+
+    json_client = redis.Redis().json()
+    captured = []
+
+    def fake_set_file(name, *args, **kwargs):
+        captured.append(name)
+        return True
+
+    monkeypatch.setattr(json_client, "set_file", fake_set_file)
+
+    json_client.set_path(Path.root_path(), str(tmp_path))
+
+    assert set(captured) == {str(key) for key in expected_keys.values()}

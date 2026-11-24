@@ -11,10 +11,12 @@ from redis.typing import (
     AsyncClientProtocol,
     CommandsProtocol,
     EncodableT,
+    FieldT,
     KeyT,
     Number,
     SyncClientProtocol,
 )
+from redis.utils import check_protocol_version
 
 VADD_CMD = "VADD"
 VSIM_CMD = "VSIM"
@@ -74,7 +76,7 @@ class VectorSetCommands(CommandsProtocol):
         self: SyncClientProtocol,
         key: KeyT,
         vector: list[float] | bytes,
-        element: str,
+        element: FieldT,
         reduce_dim: int | None = None,
         cas: bool | None = False,
         quantization: QuantizationOptions | None = None,
@@ -88,7 +90,7 @@ class VectorSetCommands(CommandsProtocol):
         self: AsyncClientProtocol,
         key: KeyT,
         vector: list[float] | bytes,
-        element: str,
+        element: FieldT,
         reduce_dim: int | None = None,
         cas: bool | None = False,
         quantization: QuantizationOptions | None = None,
@@ -101,7 +103,7 @@ class VectorSetCommands(CommandsProtocol):
         self,
         key: KeyT,
         vector: list[float] | bytes,
-        element: str,
+        element: FieldT,
         reduce_dim: int | None = None,
         cas: bool | None = False,
         quantization: QuantizationOptions | None = None,
@@ -111,6 +113,8 @@ class VectorSetCommands(CommandsProtocol):
     ) -> Awaitable[int] | int:
         """
         Add vector ``vector`` for element ``element`` to a vector set ``key``.
+
+        ``element`` may be an empty string or bytestring.
 
         ``reduce_dim`` sets the dimensions to reduce the vector to.
                 If not provided, the vector is not reduced.
@@ -130,13 +134,15 @@ class VectorSetCommands(CommandsProtocol):
 
         ``attributes`` is a dictionary or json string that contains the attributes to set for the vector.
                 If not provided, no attributes are set.
+                An empty dictionary replaces existing attributes with an empty object;
+                an empty string removes them. None leaves existing attributes unchanged.
 
         ``numlinks`` sets the number of links to create for the vector.
                 If not provided, the default number of links is used.
 
         For more information, see https://redis.io/commands/vadd.
         """
-        if not vector or not element:
+        if not vector or element is None:
             raise DataError("Both vector and element must be provided")
 
         pieces = []
@@ -162,7 +168,7 @@ class VectorSetCommands(CommandsProtocol):
         if ef:
             pieces.extend(["EF", ef])
 
-        if attributes:
+        if attributes is not None:
             if isinstance(attributes, dict):
                 # transform attributes to json string
                 attributes_json = json.dumps(attributes)
@@ -224,6 +230,8 @@ class VectorSetCommands(CommandsProtocol):
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
+        A string ``input`` names an existing element and may be empty.
+
         ``with_scores`` sets if similarity scores should be returned for each element in the result.
 
         ``with_attribs`` ``with_attribs`` sets if the results should be returned with the
@@ -248,7 +256,7 @@ class VectorSetCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/vsim.
         """
 
-        if not input:
+        if not input and not isinstance(input, str):
             raise DataError("'input' should be provided")
 
         pieces = []
@@ -263,7 +271,7 @@ class VectorSetCommands(CommandsProtocol):
             pieces.extend(["ELE", input])
 
         if with_scores or with_attribs:
-            if get_protocol_version(self.client) in ["3", 3]:
+            if check_protocol_version(get_protocol_version(self.client), 3):
                 options[CallbacksOptions.RESP3.value] = True
 
             if with_scores:
@@ -334,12 +342,14 @@ class VectorSetCommands(CommandsProtocol):
         return self.execute_command(VCARD_CMD, key)
 
     @overload
-    def vrem(self: SyncClientProtocol, key: KeyT, element: str) -> int: ...
+    def vrem(self: SyncClientProtocol, key: KeyT, element: FieldT) -> int: ...
 
     @overload
-    def vrem(self: AsyncClientProtocol, key: KeyT, element: str) -> Awaitable[int]: ...
+    def vrem(
+        self: AsyncClientProtocol, key: KeyT, element: FieldT
+    ) -> Awaitable[int]: ...
 
-    def vrem(self, key: KeyT, element: str) -> Awaitable[int] | int:
+    def vrem(self, key: KeyT, element: FieldT) -> Awaitable[int] | int:
         """
         Remove an element from a vector set.
 
@@ -351,7 +361,7 @@ class VectorSetCommands(CommandsProtocol):
     def vemb(
         self: SyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         raw: bool | None = False,
     ) -> VEmbResult: ...
 
@@ -359,12 +369,12 @@ class VectorSetCommands(CommandsProtocol):
     def vemb(
         self: AsyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         raw: bool | None = False,
     ) -> Awaitable[VEmbResult]: ...
 
     def vemb(
-        self, key: KeyT, element: str, raw: bool | None = False
+        self, key: KeyT, element: FieldT, raw: bool | None = False
     ) -> Awaitable[VEmbResult] | VEmbResult:
         """
         Get the approximated vector of an element ``element`` from vector set ``key``.
@@ -379,7 +389,7 @@ class VectorSetCommands(CommandsProtocol):
         pieces = []
         pieces.extend([key, element])
 
-        if get_protocol_version(self.client) in ["3", 3]:
+        if check_protocol_version(get_protocol_version(self.client), 3):
             options[CallbacksOptions.RESP3.value] = True
 
         if raw:
@@ -388,10 +398,14 @@ class VectorSetCommands(CommandsProtocol):
             options[NEVER_DECODE] = True
             if (
                 hasattr(self.client, "connection_pool")
-                and self.client.connection_pool.connection_kwargs["decode_responses"]
+                and self.client.connection_pool.connection_kwargs.get(
+                    "decode_responses", False
+                )
             ) or (
                 hasattr(self.client, "nodes_manager")
-                and self.client.nodes_manager.connection_kwargs["decode_responses"]
+                and self.client.nodes_manager.connection_kwargs.get(
+                    "decode_responses", False
+                )
             ):
                 # allow decoding in the postprocessing callback
                 # if the user set decode_responses=True
@@ -406,7 +420,7 @@ class VectorSetCommands(CommandsProtocol):
     def vlinks(
         self: SyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         with_scores: bool | None = False,
     ) -> VLinksResult: ...
 
@@ -414,12 +428,12 @@ class VectorSetCommands(CommandsProtocol):
     def vlinks(
         self: AsyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         with_scores: bool | None = False,
     ) -> Awaitable[VLinksResult]: ...
 
     def vlinks(
-        self, key: KeyT, element: str, with_scores: bool | None = False
+        self, key: KeyT, element: FieldT, with_scores: bool | None = False
     ) -> Awaitable[VLinksResult] | VLinksResult:
         """
         Returns the neighbors for each level the element ``element`` exists in the vector set ``key``.
@@ -460,7 +474,7 @@ class VectorSetCommands(CommandsProtocol):
     def vsetattr(
         self: SyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         attributes: dict | str | None = None,
     ) -> int: ...
 
@@ -468,12 +482,12 @@ class VectorSetCommands(CommandsProtocol):
     def vsetattr(
         self: AsyncClientProtocol,
         key: KeyT,
-        element: str,
+        element: FieldT,
         attributes: dict | str | None = None,
     ) -> Awaitable[int]: ...
 
     def vsetattr(
-        self, key: KeyT, element: str, attributes: dict | str | None = None
+        self, key: KeyT, element: FieldT, attributes: dict | str | None = None
     ) -> Awaitable[int] | int:
         """
         Associate or remove JSON attributes ``attributes`` of element ``element``
@@ -493,16 +507,16 @@ class VectorSetCommands(CommandsProtocol):
 
     @overload
     def vgetattr(
-        self: SyncClientProtocol, key: KeyT, element: str
+        self: SyncClientProtocol, key: KeyT, element: FieldT
     ) -> VGetAttrResult: ...
 
     @overload
     def vgetattr(
-        self: AsyncClientProtocol, key: KeyT, element: str
+        self: AsyncClientProtocol, key: KeyT, element: FieldT
     ) -> Awaitable[VGetAttrResult]: ...
 
     def vgetattr(
-        self, key: KeyT, element: str
+        self, key: KeyT, element: FieldT
     ) -> Awaitable[VGetAttrResult] | VGetAttrResult:
         """
         Retrieve the JSON attributes of an element ``element `` for vector set ``key``.

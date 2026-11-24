@@ -1,8 +1,27 @@
+from typing import Literal
+
 from redis._parsers.helpers import bool_ok
 
-from ..helpers import get_protocol_version, parse_to_list
+from ..helpers import (
+    apply_module_callbacks,
+    get_legacy_responses,
+    get_protocol_version,
+    parse_to_list,
+)
 from .commands import *  # noqa
 from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
+
+
+def _parse_to_float_list(response):
+    """Parse a list of doubles, which RESP2 sends as bulk strings."""
+    return [float(item) for item in response]
+
+
+def _parse_topk_info_resp2_unified(response):
+    """Parse TOPK.INFO, whose decay is a double RESP2 sends as a bulk string."""
+    info = TopKInfo(response)
+    info.decay = float(info.decay)
+    return info
 
 
 class AbstractBloom:
@@ -44,7 +63,7 @@ class AbstractBloom:
     @staticmethod
     def append_no_scale(params, noScale):
         """Append NONSCALING tag to params."""
-        if noScale is not None:
+        if noScale:
             params.extend(["NONSCALING"])
 
     @staticmethod
@@ -57,7 +76,7 @@ class AbstractBloom:
     @staticmethod
     def append_no_create(params, noCreate):
         """Append NOCREATE tag to params."""
-        if noCreate is not None:
+        if noCreate:
             params.extend(["NOCREATE"])
 
     @staticmethod
@@ -86,8 +105,14 @@ class AbstractBloom:
         if bucket_size is not None:
             params.extend(["BUCKETSIZE", bucket_size])
 
+    @staticmethod
+    def append_cell_size(params, cell_size):
+        """Append CELL_SIZE to params."""
+        if cell_size is not None:
+            params.extend(["CELL_SIZE", cell_size])
 
-class CMSBloom(CMSCommands, AbstractBloom):
+
+class _CMSBloomBase(CMSCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -103,21 +128,34 @@ class CMSBloom(CMSCommands, AbstractBloom):
             CMS_INFO: CMSInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            CMS_INFO: CMSInfo,
+        }
 
         self.client = client
         self.commandmixin = CMSCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
-class TOPKBloom(TOPKCommands, AbstractBloom):
+class _TOPKBloomBase(TOPKCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -134,21 +172,39 @@ class TOPKBloom(TOPKCommands, AbstractBloom):
             TOPK_LIST: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: _parse_topk_info_resp2_unified,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TOPK_INFO: TopKInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TOPK_ADD: parse_to_list,
+            TOPK_INCRBY: parse_to_list,
+            TOPK_INFO: TopKInfo,
+            TOPK_LIST: parse_to_list,
+        }
 
         self.client = client
         self.commandmixin = TOPKCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
-class CFBloom(CFCommands, AbstractBloom):
+class _CFBloomBase(CFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -169,21 +225,34 @@ class CFBloom(CFCommands, AbstractBloom):
             CF_INFO: CFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            CF_INFO: CFInfo,
+        }
 
         self.client = client
         self.commandmixin = CFCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
-class TDigestBloom(TDigestCommands, AbstractBloom):
+class _TDigestBloomBase(TDigestCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -205,21 +274,52 @@ class TDigestBloom(TDigestCommands, AbstractBloom):
             TDIGEST_QUANTILE: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        # RESP3 answers these with doubles; RESP2 sends them as bulk strings,
+        # which parse_to_list turns into ints and the string "nan"
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            **_RESP2_MODULE_CALLBACKS,
+            TDIGEST_BYRANK: _parse_to_float_list,
+            TDIGEST_BYREVRANK: _parse_to_float_list,
+            TDIGEST_CDF: _parse_to_float_list,
+            TDIGEST_QUANTILE: _parse_to_float_list,
+        }
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            TDIGEST_BYRANK: parse_to_list,
+            TDIGEST_BYREVRANK: parse_to_list,
+            TDIGEST_CDF: parse_to_list,
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+            TDIGEST_QUANTILE: parse_to_list,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            TDIGEST_INFO: TDigestInfo,
+            TDIGEST_MIN: float,
+            TDIGEST_MAX: float,
+            TDIGEST_TRIMMED_MEAN: float,
+        }
 
         self.client = client
         self.commandmixin = TDigestCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
 
 
-class BFBloom(BFCommands, AbstractBloom):
+class _BFBloomBase(BFCommands, AbstractBloom):
     def __init__(self, client, **kwargs):
         """Create a new RedisBloom client."""
         # Set the module commands' callbacks
@@ -239,15 +339,68 @@ class BFBloom(BFCommands, AbstractBloom):
             BF_INFO: BFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        _RESP3_UNIFIED_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
+        _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            BF_INFO: BFInfo,
+        }
 
         self.client = client
         self.commandmixin = BFCommands
         self.execute_command = client.execute_command
 
-        if get_protocol_version(self.client) in ["3", 3]:
-            _MODULE_CALLBACKS.update(_RESP3_MODULE_CALLBACKS)
-        else:
-            _MODULE_CALLBACKS.update(_RESP2_MODULE_CALLBACKS)
+        callbacks = apply_module_callbacks(
+            get_protocol_version(self.client),
+            get_legacy_responses(self.client),
+            common=_MODULE_CALLBACKS,
+            resp2=_RESP2_MODULE_CALLBACKS,
+            resp3=_RESP3_MODULE_CALLBACKS,
+            resp2_unified=_RESP2_UNIFIED_MODULE_CALLBACKS,
+            resp3_unified=_RESP3_UNIFIED_MODULE_CALLBACKS,
+            resp3_to_resp2_legacy=_RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS,
+        )
 
-        for k, v in _MODULE_CALLBACKS.items():
+        for k, v in callbacks.items():
             self.client.set_response_callback(k, v)
+
+
+class CMSBloom(_CMSBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class TOPKBloom(_TOPKBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class CFBloom(_CFBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class TDigestBloom(_TDigestBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class BFBloom(_BFBloomBase):
+    _is_async_client: Literal[False] = False
+
+
+class AsyncCMSBloom(_CMSBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncTOPKBloom(_TOPKBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncCFBloom(_CFBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncTDigestBloom(_TDigestBloomBase):
+    _is_async_client: Literal[True] = True
+
+
+class AsyncBFBloom(_BFBloomBase):
+    _is_async_client: Literal[True] = True

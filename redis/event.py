@@ -1,8 +1,10 @@
 import asyncio
+import logging
 import threading
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Dict, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
@@ -11,6 +13,44 @@ from redis.observability.recorder import (
     register_pools_connection_count,
 )
 from redis.utils import check_protocol_version, deprecated_function
+
+if TYPE_CHECKING:
+    from redis.maint_notifications import (
+        MaintenanceNotification,
+        MaintenanceState,
+        MaintNotificationsConfig,
+    )
+
+logger = logging.getLogger(__name__)
+
+# A failed deferred AUTH is logged by every connection, on every release that
+# retries it, so it is a warning at most once per interval and debug otherwise
+_RE_AUTH_FAILURE_WARNING_INTERVAL = 60.0
+_last_re_auth_failure_warning = float("-inf")
+_suppressed_re_auth_failures = 0
+
+
+def _log_re_auth_failure(connection: object, error: Exception) -> None:
+    """Log a failed deferred AUTH without flooding the log."""
+    global _last_re_auth_failure_warning, _suppressed_re_auth_failures
+    now = time.monotonic()
+    if now - _last_re_auth_failure_warning >= _RE_AUTH_FAILURE_WARNING_INTERVAL:
+        suppressed = _suppressed_re_auth_failures
+        _last_re_auth_failure_warning = now
+        _suppressed_re_auth_failures = 0
+        logger.warning(
+            "Deferred re-authentication of %s failed: %r (%d failures since "
+            "the last warning were logged at debug level)",
+            connection,
+            error,
+            suppressed,
+        )
+    else:
+        _suppressed_re_auth_failures += 1
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Deferred re-authentication of %s failed: %r", connection, error
+            )
 
 
 class EventListenerInterface(ABC):
@@ -58,6 +98,17 @@ class EventDispatcherInterface(ABC):
         """Register additional listeners."""
         pass
 
+    @abstractmethod
+    def unregister_listeners(
+        self,
+        mappings: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
+    ):
+        """Remove previously registered listeners by identity."""
+        pass
+
 
 class EventException(Exception):
     """
@@ -100,28 +151,37 @@ class EventDispatcher(EventDispatcherInterface):
             ],
         }
 
-        self._lock = threading.Lock()
+        # Reentrant so a finalizer/listener that runs on the same thread
+        # while the lock is held (e.g. a weakref.finalize callback fired
+        # from cyclic GC during an allocation inside register_listeners /
+        # unregister_listeners) can re-enter without deadlocking.
+        self._lock = threading.RLock()
         self._async_lock = None
 
         if event_listeners:
             self.register_listeners(event_listeners)
 
     def dispatch(self, event: object):
+        # Snapshot listeners under the lock, then release it before invoking
+        # them. Holding the lock across listener execution would turn any
+        # listener that calls register_listeners / unregister_listeners /
+        # dispatch back into the dispatcher into a deadlock.
         with self._lock:
-            listeners = self._event_listeners_mapping.get(type(event), [])
-
-            for listener in listeners:
-                listener.listen(event)
+            listeners = list(self._event_listeners_mapping.get(type(event), []))
+        for listener in listeners:
+            listener.listen(event)
 
     async def dispatch_async(self, event: object):
         if self._async_lock is None:
             self._async_lock = asyncio.Lock()
 
+        # Snapshot listeners under the lock, then release it before awaiting
+        # them. See the note in dispatch(); the same rationale applies here
+        # for dispatch_async re-entry from within a listener.
         async with self._async_lock:
-            listeners = self._event_listeners_mapping.get(type(event), [])
-
-            for listener in listeners:
-                await listener.listen(event)
+            listeners = list(self._event_listeners_mapping.get(type(event), []))
+        for listener in listeners:
+            await listener.listen(event)
 
     def register_listeners(
         self,
@@ -142,6 +202,26 @@ class EventDispatcher(EventDispatcherInterface):
                 else:
                     self._event_listeners_mapping[event_type] = mappings[event_type]
 
+    def unregister_listeners(
+        self,
+        mappings: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
+    ):
+        with self._lock:
+            for event_type, to_remove in mappings.items():
+                current = self._event_listeners_mapping.get(event_type)
+                if not current:
+                    continue
+                # Remove by identity to match register semantics and to avoid
+                # reliance on listener __eq__ implementations.
+                self._event_listeners_mapping[event_type] = [
+                    listener
+                    for listener in current
+                    if all(listener is not target for target in to_remove)
+                ]
+
 
 class AfterConnectionReleasedEvent:
     """
@@ -157,6 +237,104 @@ class AfterConnectionReleasedEvent:
 
 
 class AsyncAfterConnectionReleasedEvent(AfterConnectionReleasedEvent):
+    pass
+
+
+class AfterSlotsCacheRefreshEvent:
+    """
+    Event fired after NodesManager's slots cache is refreshed, either via a
+    full re-initialization or a MOVED-driven slot re-mapping. Signal-only;
+    carries no payload. Listeners typically reconcile per-node bookkeeping
+    (e.g. ClusterPubSub shard subscriptions).
+    """
+
+    pass
+
+
+class AsyncAfterSlotsCacheRefreshEvent(AfterSlotsCacheRefreshEvent):
+    pass
+
+
+class MaintenanceEvent:
+    """
+    Base class of the events a maintenance notification pushed by the server
+    produces while it relaxes timeouts: on a connection pool for a node handoff
+    (``MaintenanceState.MOVING``), or on a single connection for a shard
+    migration or failover (``MaintenanceState.MAINTENANCE``).
+
+    Dispatched synchronously, by both the sync and the async client, to the
+    ``event_dispatcher`` of the ``MaintNotificationsConfig`` the handler acted
+    with; listeners implement ``EventListenerInterface``.
+
+    :param connection_pool: The pool whose connections are affected. ``None``
+        when the notification was handled by a connection without a pool
+        handler, such as an OSS cluster node connection.
+    :param connection: The connection that received the notification. ``None``
+        when a pool-level handler had no connection to attribute it to.
+    :param state: The ``MaintenanceState`` the notification puts its source in.
+    :param notification: The ``MaintenanceNotification`` that was handled.
+    :param config: The ``MaintNotificationsConfig`` the handler acted with.
+    """
+
+    def __init__(
+        self,
+        connection_pool: Optional[object],
+        connection: Optional[object],
+        state: "MaintenanceState",
+        notification: Optional["MaintenanceNotification"],
+        config: "MaintNotificationsConfig",
+    ):
+        self._connection_pool = connection_pool
+        self._connection = connection
+        self._state = state
+        self._notification = notification
+        self._config = config
+
+    @property
+    def connection_pool(self) -> Optional[object]:
+        return self._connection_pool
+
+    @property
+    def connection(self) -> Optional[object]:
+        return self._connection
+
+    @property
+    def state(self) -> "MaintenanceState":
+        return self._state
+
+    @property
+    def notification(self) -> Optional["MaintenanceNotification"]:
+        return self._notification
+
+    @property
+    def config(self) -> "MaintNotificationsConfig":
+        return self._config
+
+
+class MaintenanceStartedEvent(MaintenanceEvent):
+    """
+    Event fired when a maintenance notification starts relaxing the timeouts of
+    its source. Paired with a ``MaintenanceCompletedEvent`` carrying the same
+    ``state`` and source.
+    """
+
+    pass
+
+
+class MaintenanceCompletedEvent(MaintenanceEvent):
+    """
+    Event fired when the timeout relaxation announced by a
+    ``MaintenanceStartedEvent`` is reverted: the completion notification
+    arrived, the handoff TTL expired, or the connection was closed while
+    still under maintenance. Also fired, with ``MaintenanceState.MAINTENANCE``,
+    when a handoff takes over a connection under maintenance: the connection
+    stays relaxed, but under the handoff's ``MOVING`` pair from then on. In
+    the last two cases ``notification`` is ``None``.
+
+    Not fired when a newer handoff superseded the one that completed; the
+    source stays relaxed until the newer one completes.
+    """
+
     pass
 
 
@@ -311,7 +489,13 @@ class ReAuthConnectionListener(EventListenerInterface):
     """
 
     def listen(self, event: AfterConnectionReleasedEvent):
-        event.connection.re_auth()
+        # It runs between commands, where an error would fail a command that
+        # did not cause it, so a failure is logged instead. The token stays
+        # pending on the connection.
+        try:
+            event.connection.re_auth()
+        except Exception as e:
+            _log_re_auth_failure(event.connection, e)
 
 
 class AsyncReAuthConnectionListener(AsyncEventListenerInterface):
@@ -320,7 +504,13 @@ class AsyncReAuthConnectionListener(AsyncEventListenerInterface):
     """
 
     async def listen(self, event: AsyncAfterConnectionReleasedEvent):
-        await event.connection.re_auth()
+        # It runs between commands, where an error would fail a command that
+        # did not cause it, so a failure is logged instead. The token stays
+        # pending on the connection.
+        try:
+            await event.connection.re_auth()
+        except Exception as e:
+            _log_re_auth_failure(event.connection, e)
 
 
 class RegisterReAuthForPooledConnections(EventListenerInterface):
@@ -344,12 +534,26 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
                 event.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token):
+        first_error = None
         for pool in self._event.connection_pools:
-            pool.re_auth_callback(token)
+            try:
+                pool.re_auth_callback(token)
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error
 
     async def _re_auth_async(self, token):
+        first_error = None
         for pool in self._event.connection_pools:
-            await pool.re_auth_callback(token)
+            try:
+                await pool.re_auth_callback(token)
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error
 
     def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)
@@ -414,8 +618,22 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
             event.credential_provider.on_error(self._raise_on_error)
 
     async def _re_auth(self, token: TokenInterface):
-        for key in self._event.nodes:
-            await self._event.nodes[key].re_auth_callback(token)
+        nodes = self._event.nodes
+        first_error = None
+        # Iterate a snapshot: a topology refresh can add and remove nodes while
+        # a node is being re-authenticated. A node that is no longer the one cached
+        # under its key is skipped: it is being closed, even if a later refresh
+        # re-added its address as a new node. Nodes added in the meantime connect
+        # with the current credentials and need no AUTH.
+        for key, node in tuple(nodes.items()):
+            if nodes.get(key) is node:
+                try:
+                    await node.re_auth_callback(token)
+                except Exception as e:
+                    if first_error is None:
+                        first_error = e
+        if first_error is not None:
+            raise first_error
 
     async def _raise_on_error(self, error: Exception):
         raise EventException(error, self._event)

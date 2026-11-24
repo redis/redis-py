@@ -1,6 +1,11 @@
-from typing import Union
+from typing import Iterable, Union
 
 from .aggregation import Asc, Desc, Reducer, SortDirection
+
+
+def _ensure_at_prefix(name: str) -> str:
+    """Return ``name`` with a single leading ``@`` prefix."""
+    return name if name.startswith("@") else "@" + name
 
 
 class FieldOnlyReducer(Reducer):
@@ -180,3 +185,77 @@ class random_sample(Reducer):
         args = [field, str(size)]
         super().__init__(*args)
         self._field = field
+
+
+class collect(Reducer):
+    """
+    Gathers the rows of each ``GROUPBY`` group, projects a chosen set of
+    fields from every row, optionally deduplicates, sorts, and limits them,
+    and returns them as an array of per-entry maps under the reducer alias.
+
+    ``COLLECT`` is a preview feature gated behind
+    ``search-enable-unstable-features``. See
+    `FT.AGGREGATE <https://redis.io/commands/ft.aggregate>`_.
+    """
+
+    NAME = "COLLECT"
+
+    def __init__(
+        self,
+        fields: str | Iterable[str] = "*",
+        distinct: bool = False,
+        sort_by: Asc | Desc | Iterable[Asc | Desc] | None = None,
+        limit: tuple[int, int] | None = None,
+    ) -> None:
+        """
+        ### Parameters
+
+        - **fields**: The fields to project from each collected row. Either the
+            literal ``"*"`` (project every field present in the pipeline at this
+            stage) or a field name / iterable of field names. Names are
+            normalized to a single leading ``@`` on the wire; output map keys
+            are the bare names.
+        - **distinct**: When ``True``, emit ``DISTINCT`` to deduplicate entries
+            with identical projected fields. Forward-compatible: this option is
+            not yet implemented by the server and currently produces a server
+            error when sent.
+        - **sort_by**: An ``Asc``/``Desc`` instance or an iterable of them, used
+            to order the collected entries within each group.
+        - **limit**: An ``(offset, count)`` pair. Returns at most ``count``
+            entries per group after skipping ``offset``. With ``sort_by`` this
+            acts as a top-N selection.
+        """
+        args: list[str] = []
+
+        # FIELDS (required)
+        if fields == "*":
+            args += ["FIELDS", "*"]
+        else:
+            names = [fields] if isinstance(fields, str) else list(fields)
+            if not names or any(not n.strip() for n in names):
+                raise ValueError(
+                    "collect fields must be '*' or a non-empty list of names"
+                )
+            names = [_ensure_at_prefix(n) for n in names]
+            args += ["FIELDS", str(len(names))] + names
+
+        # DISTINCT (optional)
+        if distinct:
+            args += ["DISTINCT"]
+
+        # SORTBY (optional)
+        if sort_by is not None:
+            sort_fields = [sort_by] if isinstance(sort_by, (Asc, Desc)) else sort_by
+            sort_args: list[str] = []
+            for f in sort_fields:
+                sort_args += [_ensure_at_prefix(f.field), f.DIRSTRING]
+            if not sort_args:
+                raise ValueError("collect sort_by must contain at least one field")
+            args += ["SORTBY", str(len(sort_args))] + sort_args
+
+        # LIMIT (optional)
+        if limit is not None:
+            offset, count = limit
+            args += ["LIMIT", str(offset), str(count)]
+
+        super().__init__(*args)

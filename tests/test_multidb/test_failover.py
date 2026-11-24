@@ -14,7 +14,7 @@ from redis.multidb.failover import (
 )
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestWeightBasedFailoverStrategy:
     @pytest.mark.parametrize(
         "mock_db,mock_db1,mock_db2",
@@ -65,7 +65,7 @@ class TestWeightBasedFailoverStrategy:
             assert failover_strategy.database()
 
 
-@pytest.mark.onlynoncluster
+@pytest.mark.fixed_client
 class TestDefaultStrategyExecutor:
     @pytest.mark.parametrize(
         "mock_db",
@@ -126,7 +126,7 @@ class TestDefaultStrategyExecutor:
                     sleep(0.11)
                     pass
 
-            assert mock_fs.database.call_count == 4
+        assert mock_fs.database.call_count == 4
 
     def test_execute_throws_exception_on_attempts_does_not_exceed_delay(self, mock_fs):
         failover_attempts = 3
@@ -158,4 +158,4 @@ class TestDefaultStrategyExecutor:
                     if i == failover_attempts:
                         raise e
 
-            assert mock_fs.database.call_count == 4
+        assert mock_fs.database.call_count == 4

@@ -7,6 +7,11 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.asyncio.keyspace_notifications import (
+    AsyncClusterKeyspaceNotifications,
+    AsyncKeyspaceNotifications,
+    AsyncKeyspaceNotificationsInterface,
+)
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
@@ -31,8 +36,12 @@ from redis.exceptions import (
     TimeoutError,
     WatchError,
 )
+from redis.typing import Subscription
 
 __all__ = [
+    "AsyncClusterKeyspaceNotifications",
+    "AsyncKeyspaceNotifications",
+    "AsyncKeyspaceNotificationsInterface",
     "AuthenticationError",
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",
@@ -58,6 +67,7 @@ __all__ = [
     "SentinelManagedSSLConnection",
     "SSLConnection",
     "StrictRedis",
+    "Subscription",
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",

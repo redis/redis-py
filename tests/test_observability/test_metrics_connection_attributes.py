@@ -67,7 +67,7 @@ class MockConnectionWithoutHostPort(ConnectionInterface):
     def send_command(self, *args, **kwargs):
         pass
 
-    def can_read(self, timeout=0):
+    def can_read(self, timeout: float = 0) -> bool:
         return False
 
     def read_response(
@@ -100,7 +100,12 @@ class MockConnectionWithoutHostPort(ConnectionInterface):
     def reset_should_reconnect(self):
         pass
 
+    @property
+    def is_connected(self) -> bool:
+        return self._sock is not None
 
+
+@pytest.mark.fixed_client
 class TestConnectionAttributesWithoutHostPort:
     """Tests for metrics recording with connections lacking host/port attributes."""
 
@@ -125,7 +130,7 @@ class TestConnectionAttributesWithoutHostPort:
             db=0,
         )
 
-        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+        with patch.object(recorder, "_metrics_collector", collector):
             client = Redis(connection_pool=pool)
             yield client, pool
 

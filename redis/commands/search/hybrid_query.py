@@ -1,15 +1,9 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-
-from redis.utils import experimental
-
-try:
-    from typing import Self  # Py 3.11+
-except ImportError:
-    from typing_extensions import Self
+from typing import Any, Dict, List, Optional, Self, Union
 
 from redis.commands.search.aggregation import Limit, Reducer
 from redis.commands.search.query import Filter, SortbyField
+from redis.utils import experimental
 
 
 @experimental
@@ -244,21 +238,53 @@ class HybridPostProcessingConfig:
         Create a new hybrid post processing configuration object.
         """
         self._load_statements = []
+        self._return_fields_decode_as: Dict[str, Optional[str]] = {}
         self._apply_statements = []
         self._groupby_statements = []
         self._sortby_fields = []
         self._filter = None
         self._limit = None
 
-    def load(self, *fields: str) -> Self:
+    def load(
+        self,
+        *fields: str,
+        decode_field: Optional[bool] = False,
+        encoding: Optional[str] = "utf8",
+    ) -> Self:
         """
         Add load statement parameters to the query.
+
+        Args:
+            fields: Fields to load.
+            decode_field: Whether to decode loaded field values from bytes to strings.
+                Defaults to False to preserve the legacy RESP2 HYBRID behavior and
+                keep binary fields intact.
+            encoding: The encoding to use when decoding loaded field values.
         """
         if fields:
             fields_str = " ".join(fields)
             fields_list = fields_str.split(" ")
             self._load_statements.extend(("LOAD", len(fields_list), *fields_list))
+            self._set_load_field_encodings(
+                fields_list, encoding if decode_field else None
+            )
         return self
+
+    def _set_load_field_encodings(
+        self, fields: List[str], encoding: Optional[str]
+    ) -> None:
+        i = 0
+        while i < len(fields):
+            field = fields[i]
+            if field.upper() == "AS":
+                i += 2
+                continue
+            if i + 2 < len(fields) and fields[i + 1].upper() == "AS":
+                self._return_fields_decode_as[fields[i + 2]] = encoding
+                i += 3
+                continue
+            self._return_fields_decode_as[field.removeprefix("@")] = encoding
+            i += 1
 
     def group_by(self, fields: List[str], *reducers: Reducer) -> Self:
         """
@@ -325,6 +351,11 @@ class HybridPostProcessingConfig:
     def limit(self, offset: int, num: int) -> Self:
         """
         Add limit parameters to the query.
+
+        If `num` is 0, `offset` must also be 0; `LIMIT 0 0` omits result
+        rows. Do not use it as a counting API. To count search matches, use
+        `Query(...).paging(0, 0)` with `FT.SEARCH`. To count inside an
+        aggregation, use `group_by([], reducers.count())`.
         """
         self._limit = Limit(offset, num)
         return self
@@ -371,6 +402,9 @@ class HybridCursorQuery:
     def __init__(self, count: int = 0, max_idle: int = 0) -> None:
         """
         Create a new hybrid cursor query object.
+
+        ``WITHCURSOR`` for ``FT.HYBRID`` is exposed only by Redis versions
+        8.4 to 8.10. Newer servers reject it as an unknown argument.
 
         Args:
             count: Number of results to return per cursor iteration.

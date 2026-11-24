@@ -4,10 +4,21 @@ from json import JSONDecoder, JSONEncoder
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .bf import BFBloom, CFBloom, CMSBloom, TDigestBloom, TOPKBloom
-    from .json import JSON
+    from .bf import (
+        AsyncBFBloom,
+        AsyncCFBloom,
+        AsyncCMSBloom,
+        AsyncTDigestBloom,
+        AsyncTOPKBloom,
+        BFBloom,
+        CFBloom,
+        CMSBloom,
+        TDigestBloom,
+        TOPKBloom,
+    )
+    from .json import JSON, AsyncJSON
     from .search import AsyncSearch, Search
-    from .timeseries import TimeSeries
+    from .timeseries import AsyncTimeSeries, TimeSeries
     from .vectorset import AsyncVectorSet, VectorSet
 
 
@@ -92,6 +103,14 @@ class RedisModuleCommands:
 
 
 class AsyncRedisModuleCommands(RedisModuleCommands):
+    def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()) -> AsyncJSON:
+        """Access the json namespace, providing support for redis json."""
+
+        from .json import AsyncJSON
+
+        jj = AsyncJSON(client=self, encoder=encoder, decoder=decoder)
+        return jj
+
     def ft(self, index_name="idx") -> AsyncSearch:
         """Access the search namespace, providing support for redis search."""
 
@@ -99,6 +118,56 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
 
         s = AsyncSearch(client=self, index_name=index_name)
         return s
+
+    def ts(self) -> AsyncTimeSeries:
+        """Access the timeseries namespace, providing support for
+        redis timeseries data.
+        """
+
+        from .timeseries import AsyncTimeSeries
+
+        s = AsyncTimeSeries(client=self)
+        return s
+
+    def bf(self) -> AsyncBFBloom:
+        """Access the bloom namespace."""
+
+        from .bf import AsyncBFBloom
+
+        bf = AsyncBFBloom(client=self)
+        return bf
+
+    def cf(self) -> AsyncCFBloom:
+        """Access the bloom namespace."""
+
+        from .bf import AsyncCFBloom
+
+        cf = AsyncCFBloom(client=self)
+        return cf
+
+    def cms(self) -> AsyncCMSBloom:
+        """Access the bloom namespace."""
+
+        from .bf import AsyncCMSBloom
+
+        cms = AsyncCMSBloom(client=self)
+        return cms
+
+    def topk(self) -> AsyncTOPKBloom:
+        """Access the bloom namespace."""
+
+        from .bf import AsyncTOPKBloom
+
+        topk = AsyncTOPKBloom(client=self)
+        return topk
+
+    def tdigest(self) -> AsyncTDigestBloom:
+        """Access the bloom namespace."""
+
+        from .bf import AsyncTDigestBloom
+
+        tdigest = AsyncTDigestBloom(client=self)
+        return tdigest
 
     def vset(self) -> AsyncVectorSet:
         """Access the VectorSet commands namespace."""

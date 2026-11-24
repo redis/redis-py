@@ -11,10 +11,7 @@ class Limit:
         self.count = count
 
     def build_args(self):
-        if self.count:
-            return ["LIMIT", str(self.offset), str(self.count)]
-        else:
-            return []
+        return ["LIMIT", str(self.offset), str(self.count)]
 
 
 class Reducer:
@@ -50,8 +47,8 @@ class Reducer:
             if not self._field:
                 raise ValueError("Cannot use FIELDNAME alias with no field")
             else:
-                # Chop off initial '@'
-                alias = self._field[1:]
+                # Chop off initial '@', which is optional in field names
+                alias = self._field.removeprefix("@")
         self._alias = alias
         return self
 
@@ -191,7 +188,18 @@ class AggregateRequest:
         ### Parameters
 
         - **offset**: Result offset from which to begin paging
-        - **num**: Number of results to return
+        - **num**: Number of results to return. If `num` is 0, `offset` must
+            also be 0; `LIMIT 0 0` omits result rows.
+
+        `LIMIT 0 0` is not a reliable way to count matches through an
+        `AggregateRequest`. To count search matches, use
+        `Query(...).paging(0, 0)` with `FT.SEARCH`. To count inside an
+        aggregation, use `group_by([], reducers.count())`.
+
+        When redis-py returns an `AggregateResult`, its `total` is populated
+        from RESP3 replies but remains 0 for RESP2 replies because the RESP2
+        parser does not populate it. Do not rely on `AggregateResult.total`
+        for counting.
 
 
         Example of sorting the initial results:
@@ -386,10 +394,12 @@ class Cursor:
 
 
 class AggregateResult:
-    def __init__(self, rows, cursor: Cursor, schema) -> None:
+    def __init__(self, rows, cursor: Cursor, schema, total=0, warnings=None) -> None:
         self.rows = rows
         self.cursor = cursor
         self.schema = schema
+        self.total = total
+        self.warnings = warnings or []
 
     def __repr__(self) -> str:
         cid = self.cursor.cid if self.cursor else -1

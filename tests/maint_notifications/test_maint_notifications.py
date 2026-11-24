@@ -2,7 +2,20 @@ import threading
 from unittest.mock import Mock, call, patch, MagicMock
 import pytest
 
-from redis.connection import ConnectionInterface, MaintNotificationsAbstractConnection
+from redis._parsers.base import MaintenanceNotificationsParser
+from redis.connection import (
+    CacheProxyConnection,
+    Connection,
+    ConnectionInterface,
+    ConnectionPool,
+    MaintNotificationsAbstractConnection,
+)
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    MaintenanceCompletedEvent,
+    MaintenanceStartedEvent,
+)
 
 from redis.maint_notifications import (
     MaintenanceNotification,
@@ -16,11 +29,13 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
     MaintNotificationsConnectionHandler,
+    OSSMaintNotificationsHandler,
     MaintenanceState,
     EndpointType,
 )
 
 
+@pytest.mark.fixed_client
 class TestMaintenanceNotification:
     """Test the base MaintenanceNotification class functionality through concrete subclasses."""
 
@@ -72,6 +87,7 @@ class TestMaintenanceNotification:
             assert notification.is_expired()
 
 
+@pytest.mark.fixed_client
 class TestNodeMovingNotification:
     """Test the NodeMovingNotification class."""
 
@@ -223,6 +239,7 @@ class TestNodeMovingNotification:
         )  # notification1 and notification2 should be considered the same
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratingNotification:
     """Test the NodeMigratingNotification class."""
 
@@ -261,6 +278,7 @@ class TestNodeMigratingNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeMigratedNotification:
     """Test the NodeMigratedNotification class."""
 
@@ -303,6 +321,7 @@ class TestNodeMigratedNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailingOverNotification:
     """Test the NodeFailingOverNotification class."""
 
@@ -341,6 +360,7 @@ class TestNodeFailingOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestNodeFailedOverNotification:
     """Test the NodeFailedOverNotification class."""
 
@@ -383,6 +403,7 @@ class TestNodeFailedOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratingNotification:
     """Test the OSSNodeMigratingNotification class."""
 
@@ -487,6 +508,7 @@ class TestOSSNodeMigratingNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
 class TestOSSNodeMigratedNotification:
     """Test the OSSNodeMigratedNotification class."""
 
@@ -630,6 +652,87 @@ class TestOSSNodeMigratedNotification:
         )  # notification1 and notification2 should be the same
 
 
+@pytest.mark.fixed_client
+class TestOSSMaintNotificationsHandler:
+    """Test address parsing in the OSS SMIGRATED handler."""
+
+    def _make_handler(self):
+        cluster_client = MagicMock()
+        # Keep the affected-nodes set and the node-reconnect loop empty so the
+        # test focuses purely on how src/dest addresses are parsed.
+        cluster_client.nodes_manager.get_node.return_value = None
+        cluster_client.nodes_manager.nodes_cache.values.return_value = []
+        config = MaintNotificationsConfig(enabled=True)
+        return OSSMaintNotificationsHandler(cluster_client, config), cluster_client
+
+    def test_handle_smigrated_parses_ipv4_addresses(self):
+        handler, cluster_client = self._make_handler()
+        notification = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+
+        handler.handle_oss_maintenance_completed_notification(notification)
+
+        cluster_client.nodes_manager.get_node.assert_called_once_with(
+            host="127.0.0.1", port=6379
+        )
+        cluster_client.nodes_manager.initialize.assert_called_once_with(
+            disconnect_startup_nodes_pools=False,
+            additional_startup_nodes_info=[("127.0.0.1", 6380)],
+        )
+
+    def test_handle_smigrated_parses_ipv6_addresses(self):
+        handler, cluster_client = self._make_handler()
+        # IPv6 literals contain multiple colons; a naive split(":") would raise
+        # ValueError on the host/port unpack.
+        notification = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={
+                "2001:db8::1:6379": [{"2001:db8::2:6380": "1-100"}]
+            },
+        )
+
+        handler.handle_oss_maintenance_completed_notification(notification)
+
+        cluster_client.nodes_manager.get_node.assert_called_once_with(
+            host="2001:db8::1", port=6379
+        )
+        cluster_client.nodes_manager.initialize.assert_called_once_with(
+            disconnect_startup_nodes_pools=False,
+            additional_startup_nodes_info=[("2001:db8::2", 6380)],
+        )
+
+
+@pytest.mark.fixed_client
+class TestMaintenanceNotificationsParser:
+    """Test endpoint parsing in the shared MOVING push parser."""
+
+    def test_parse_moving_msg_ipv4_endpoint(self):
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, "1.2.3.4:6379"]
+        )
+        assert notification.new_node_host == "1.2.3.4"
+        assert notification.new_node_port == 6379
+
+    def test_parse_moving_msg_ipv6_endpoint(self):
+        # IPv6 literals contain multiple colons; a naive split(":") would raise
+        # ValueError on the host/port unpack.
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, "2001:db8::1:6379"]
+        )
+        assert notification.new_node_host == "2001:db8::1"
+        assert notification.new_node_port == 6379
+
+    def test_parse_moving_msg_none_endpoint(self):
+        notification = MaintenanceNotificationsParser.parse_moving_msg(
+            ["MOVING", 1, 10, None]
+        )
+        assert notification.new_node_host is None
+        assert notification.new_node_port is None
+
+
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfig:
     """Test the MaintNotificationsConfig class."""
 
@@ -685,7 +788,351 @@ class TestMaintNotificationsConfig:
         config = MaintNotificationsConfig(relaxed_timeout=None)
         assert config.relaxed_timeout is None
 
+    def test_event_dispatcher_defaults_to_none(self):
+        """No events are dispatched unless a dispatcher is configured."""
+        config = MaintNotificationsConfig()
+        assert config.event_dispatcher is None
+        assert "event_dispatcher=None" in repr(config)
 
+    def test_event_dispatcher_is_saved(self):
+        dispatcher = EventDispatcher()
+        config = MaintNotificationsConfig(event_dispatcher=dispatcher)
+        assert config.event_dispatcher is dispatcher
+        assert "event_dispatcher=" in repr(config)
+
+
+class _RecordingListener(EventListenerInterface):
+    def __init__(self):
+        self.events = []
+
+    def listen(self, event):
+        self.events.append(event)
+
+
+class _RaisingListener(EventListenerInterface):
+    def listen(self, event):
+        raise RuntimeError("listener failed")
+
+
+def _config_with_listener(listener, **kwargs):
+    dispatcher = EventDispatcher(
+        {
+            MaintenanceStartedEvent: [listener],
+            MaintenanceCompletedEvent: [listener],
+        }
+    )
+    kwargs.setdefault("enabled", True)
+    kwargs.setdefault("relaxed_timeout", 20)
+    return MaintNotificationsConfig(event_dispatcher=dispatcher, **kwargs)
+
+
+@pytest.mark.fixed_client
+class TestMaintNotificationsConnectionHandlerEvents:
+    """The connection handler reports the relaxation it applies as events."""
+
+    def setup_method(self):
+        self.mock_connection = Mock()
+        self.mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
+        self.mock_connection.maintenance_state = MaintenanceState.NONE
+        self.listener = _RecordingListener()
+        self.config = _config_with_listener(self.listener)
+        self.handler = MaintNotificationsConnectionHandler(
+            self.mock_connection, self.config
+        )
+
+    def test_start_notification_dispatches_started_event(self):
+        notification = NodeMigratingNotification(id=1, ttl=5)
+
+        self.handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, notification
+        )
+
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceStartedEvent)
+        assert event.state == MaintenanceState.MAINTENANCE
+        assert event.connection is self.mock_connection
+        assert (
+            event.connection_pool
+            is self.mock_connection._maint_notifications_pool_handler.pool
+        )
+        assert event.notification is notification
+        assert event.config is self.config
+
+    def test_completed_notification_dispatches_completed_event(self):
+        self.mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
+        notification = NodeMigratedNotification(id=1)
+
+        self.handler.handle_maintenance_completed_notification(
+            notification=notification
+        )
+
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceCompletedEvent)
+        assert event.state == MaintenanceState.MAINTENANCE
+        assert event.connection is self.mock_connection
+        assert event.notification is notification
+        assert event.config is self.config
+
+    def test_completed_without_notification_dispatches_completed_event(self):
+        self.mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
+
+        self.handler.handle_maintenance_completed_notification()
+
+        assert len(self.listener.events) == 1
+        assert isinstance(self.listener.events[0], MaintenanceCompletedEvent)
+        assert self.listener.events[0].notification is None
+
+    def test_completed_without_prior_start_dispatches_nothing(self):
+        """The start may have been routed to another connection of the cluster."""
+        self.mock_connection.maintenance_state = MaintenanceState.NONE
+
+        self.handler.handle_maintenance_completed_notification(
+            notification=NodeMigratedNotification(id=1)
+        )
+
+        assert self.listener.events == []
+
+    def test_start_and_completed_pair_through_handle_notification(self):
+        self.handler.handle_notification(NodeFailingOverNotification(id=1, ttl=5))
+        self.handler.handle_notification(NodeFailedOverNotification(id=1))
+
+        assert [type(e) for e in self.listener.events] == [
+            MaintenanceStartedEvent,
+            MaintenanceCompletedEvent,
+        ]
+
+    def test_no_event_when_relaxed_timeout_disabled(self):
+        config = _config_with_listener(self.listener, relaxed_timeout=-1)
+        handler = MaintNotificationsConnectionHandler(self.mock_connection, config)
+
+        handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+        handler.handle_maintenance_completed_notification()
+
+        assert self.listener.events == []
+
+    def test_no_event_when_connection_is_moving(self):
+        self.mock_connection.maintenance_state = MaintenanceState.MOVING
+
+        self.handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+        self.handler.handle_maintenance_completed_notification()
+
+        assert self.listener.events == []
+
+    def test_no_dispatcher_is_a_noop(self):
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
+        handler = MaintNotificationsConnectionHandler(self.mock_connection, config)
+
+        handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+
+        assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
+
+    def test_raising_listener_does_not_prevent_state_change(self):
+        config = _config_with_listener(_RaisingListener())
+        handler = MaintNotificationsConnectionHandler(self.mock_connection, config)
+
+        handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+        assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
+
+        handler.handle_maintenance_completed_notification()
+        assert self.mock_connection.maintenance_state == MaintenanceState.NONE
+
+
+@pytest.mark.fixed_client
+class TestMaintNotificationsPoolHandlerEvents:
+    """The pool handler reports a handoff as a MOVING event pair."""
+
+    def setup_method(self):
+        self.mock_pool = Mock()
+        self.mock_pool._lock = MagicMock()
+        self.mock_pool._lock.__enter__.return_value = None
+        self.mock_pool._lock.__exit__.return_value = None
+        self.listener = _RecordingListener()
+        self.config = _config_with_listener(self.listener)
+        self.handler = MaintNotificationsPoolHandler(self.mock_pool, self.config)
+
+    def _moving(self, id=1):
+        return NodeMovingNotification(
+            id=id, new_node_host="localhost", new_node_port=6379, ttl=10
+        )
+
+    def test_moving_dispatches_one_started_event_per_notification(self):
+        notification = self._moving()
+
+        with patch("threading.Timer"):
+            self.handler.handle_node_moving_notification(notification)
+            # Delivered again on another connection: already processed
+            self.handler.handle_node_moving_notification(notification)
+
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceStartedEvent)
+        assert event.state == MaintenanceState.MOVING
+        assert event.connection_pool is self.mock_pool
+        assert event.notification is notification
+        assert event.config is self.config
+
+    def test_started_event_precedes_relaxing_the_pool(self):
+        """
+        Taking over a connection under maintenance completes that connection's
+        pair; the handoff's pair must already be open for a listener by then.
+        """
+        seen = []
+        self.mock_pool.update_connections_settings.side_effect = (
+            lambda **kwargs: seen.extend(type(e) for e in self.listener.events)
+        )
+
+        with patch("threading.Timer"):
+            self.handler.handle_node_moving_notification(self._moving())
+
+        assert seen == [MaintenanceStartedEvent]
+
+    def test_failed_handoff_closes_its_pair(self):
+        """A pool mutation that fails leaves no relaxation to end later."""
+        notification = self._moving()
+        self.mock_pool.update_connections_settings.side_effect = RuntimeError("boom")
+
+        with patch("threading.Timer") as timer, pytest.raises(RuntimeError):
+            self.handler.handle_node_moving_notification(notification)
+
+        assert [type(e) for e in self.listener.events] == [
+            MaintenanceStartedEvent,
+            MaintenanceCompletedEvent,
+        ]
+        assert self.listener.events[1].notification is notification
+        timer.assert_not_called()
+        assert notification not in self.handler._processed_notifications
+
+    def test_moved_dispatches_completed_event(self):
+        notification = self._moving()
+        self.mock_pool.connection_kwargs = {
+            "maintenance_notification_hash": hash(notification)
+        }
+
+        self.handler.handle_node_moved_notification(notification)
+
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceCompletedEvent)
+        assert event.state == MaintenanceState.MOVING
+        assert event.connection_pool is self.mock_pool
+        assert event.notification is notification
+
+    def test_moved_superseded_by_newer_moving_dispatches_nothing(self):
+        first = self._moving(id=1)
+        second = self._moving(id=2)
+        self.mock_pool.connection_kwargs = {
+            "maintenance_notification_hash": hash(second)
+        }
+
+        self.handler.handle_node_moved_notification(first)
+
+        assert self.listener.events == []
+        # The connections matching the expired notification are still reverted
+        self.mock_pool.update_connections_settings.assert_called_once()
+
+    def test_no_event_when_handoff_handling_disabled(self):
+        config = _config_with_listener(
+            self.listener, proactive_reconnect=False, relaxed_timeout=-1
+        )
+        handler = MaintNotificationsPoolHandler(self.mock_pool, config)
+
+        handler.handle_node_moving_notification(self._moving())
+
+        assert self.listener.events == []
+
+    def test_no_event_when_handoff_relaxes_nothing(self):
+        """A handoff handled only for the proactive reconnect relaxes no timeout."""
+        config = _config_with_listener(
+            self.listener, proactive_reconnect=True, relaxed_timeout=-1
+        )
+        handler = MaintNotificationsPoolHandler(self.mock_pool, config)
+        notification = self._moving()
+        self.mock_pool.connection_kwargs = {
+            "maintenance_notification_hash": hash(notification)
+        }
+
+        with patch("threading.Timer"):
+            handler.handle_node_moving_notification(notification)
+        handler.handle_node_moved_notification(notification)
+
+        # The handoff itself is still handled
+        assert self.mock_pool.update_connections_settings.call_count == 2
+        assert self.listener.events == []
+
+
+@pytest.mark.fixed_client
+class TestCacheProxyConnectionMaintenanceEvents:
+    """With client-side caching the proxy is the source of both events."""
+
+    def test_disconnect_completes_with_the_proxy_as_source(self):
+        listener = _RecordingListener()
+        config = _config_with_listener(listener)
+        connection = Connection(protocol=3, maint_notifications_config=config)
+        proxy = CacheProxyConnection(connection, Mock(), threading.RLock())
+
+        proxy._maint_notifications_connection_handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
+        assert proxy.maintenance_state == MaintenanceState.MAINTENANCE
+
+        proxy.disconnect()
+
+        assert proxy.maintenance_state == MaintenanceState.NONE
+        assert [type(e) for e in listener.events] == [
+            MaintenanceStartedEvent,
+            MaintenanceCompletedEvent,
+        ]
+        assert all(event.connection is proxy for event in listener.events)
+
+
+@pytest.mark.fixed_client
+class TestConnectionDisconnectMaintenanceEvent:
+    """Closing a connection under maintenance ends its relaxation with an event."""
+
+    def _connection(self, listener):
+        config = _config_with_listener(listener)
+        connection = Connection(protocol=3, maint_notifications_config=config)
+        # disconnect() is a no-op on a connection that was never connected
+        connection._sock = Mock()
+        return connection
+
+    def test_disconnect_in_maintenance_dispatches_completed_event(self):
+        listener = _RecordingListener()
+        connection = self._connection(listener)
+        connection.maintenance_state = MaintenanceState.MAINTENANCE
+
+        connection.disconnect()
+
+        assert connection.maintenance_state == MaintenanceState.NONE
+        assert len(listener.events) == 1
+        event = listener.events[0]
+        assert isinstance(event, MaintenanceCompletedEvent)
+        assert event.state == MaintenanceState.MAINTENANCE
+        assert event.connection is connection
+        assert event.notification is None
+
+    @pytest.mark.parametrize("state", [MaintenanceState.NONE, MaintenanceState.MOVING])
+    def test_disconnect_outside_maintenance_dispatches_nothing(self, state):
+        listener = _RecordingListener()
+        connection = self._connection(listener)
+        connection.maintenance_state = state
+
+        connection.disconnect()
+
+        assert listener.events == []
+
+
+@pytest.mark.fixed_client
 class TestMaintNotificationsPoolHandler:
     """Test the MaintNotificationsPoolHandler class."""
 
@@ -785,18 +1232,17 @@ class TestMaintNotificationsPoolHandler:
         )
 
         with (
-            patch("threading.Timer") as mock_timer,
+            patch.object(self.handler, "_schedule") as mock_schedule,
             patch("time.monotonic", return_value=1000),
         ):
             self.handler.handle_node_moving_notification(notification)
 
-            # Verify timer was started
-            mock_timer.assert_called_once_with(
+            # Verify the cleanup was scheduled
+            mock_schedule.assert_called_once_with(
                 notification.ttl,
                 self.handler.handle_node_moved_notification,
-                args=(notification,),
+                notification,
             )
-            mock_timer.return_value.start.assert_called_once()
 
             # Verify notification was added to processed set
             assert notification in self.handler._processed_notifications
@@ -811,28 +1257,20 @@ class TestMaintNotificationsPoolHandler:
         )
 
         with (
-            patch("threading.Timer") as mock_timer,
+            patch.object(self.handler, "_schedule") as mock_schedule,
             patch("time.monotonic", return_value=1000),
         ):
             self.handler.handle_node_moving_notification(notification)
 
-            # Verify timer was started
-            mock_timer.assert_has_calls(
-                [
-                    call(
-                        notification.ttl / 2,
-                        self.handler.run_proactive_reconnect,
-                        args=(None,),
-                    ),
-                    call().start(),
-                    call(
-                        notification.ttl,
-                        self.handler.handle_node_moved_notification,
-                        args=(notification,),
-                    ),
-                    call().start(),
-                ]
-            )
+            # Verify the proactive reconnect and the cleanup were scheduled
+            assert mock_schedule.call_args_list == [
+                call(notification.ttl / 2, self.handler.run_proactive_reconnect, None),
+                call(
+                    notification.ttl,
+                    self.handler.handle_node_moved_notification,
+                    notification,
+                ),
+            ]
 
             # Verify notification was added to processed set
             assert notification in self.handler._processed_notifications
@@ -852,6 +1290,7 @@ class TestMaintNotificationsPoolHandler:
         self.mock_pool.update_connections_settings.assert_called_once()
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConnectionHandler:
     """Test the MaintNotificationsConnectionHandler class."""
 
@@ -990,6 +1429,7 @@ class TestMaintNotificationsConnectionHandler:
         )
 
 
+@pytest.mark.fixed_client
 class TestEndpointType:
     """Test the EndpointType class functionality."""
 
@@ -1002,6 +1442,7 @@ class TestEndpointType:
         assert EndpointType.NONE.value == "none"
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsConfigEndpointType:
     """Test MaintNotificationsConfig endpoint type functionality."""
 
@@ -1021,6 +1462,10 @@ class TestMaintNotificationsConfigEndpointType:
                 self.port = 6379
                 self._sock = MockSocket(resolved_ip) if resolved_ip else None
                 self.__class__.__name__ = "SSLConnection" if is_ssl else "Connection"
+
+            @property
+            def is_connected(self):
+                return self._sock is not None
 
             def _get_socket(self):
                 return self._sock
@@ -1153,6 +1598,7 @@ class TestMaintNotificationsConfigEndpointType:
         assert config.get_endpoint_type("localhost", conn) == EndpointType.EXTERNAL_IP
 
 
+@pytest.mark.fixed_client
 class TestMaintNotificationsMetricsRecording:
     """
     Tests for metrics recording from maintenance notification handlers.
@@ -1168,6 +1614,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1193,6 +1640,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection._maint_notifications_pool_handler = Mock()
         mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
@@ -1217,6 +1665,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
         mock_connection._maint_notifications_pool_handler = Mock()
         mock_connection._maint_notifications_pool_handler.pool = Mock()
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         mock_get_pool_name.return_value = "localhost:6379_abc123"
 
         config = MaintNotificationsConfig(relaxed_timeout=20)
@@ -1240,6 +1689,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection.maintenance_state = MaintenanceState.NONE
         mock_connection.host = "localhost"
         mock_connection.port = 6379
+        mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
 
         config = MaintNotificationsConfig(enabled=True, relaxed_timeout=-1)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
@@ -1324,3 +1774,77 @@ class TestMaintNotificationsMetricsRecording:
         handler.handle_node_moving_notification(notification)
 
         mock_record_connection_handoff.assert_not_called()
+
+
+@pytest.mark.fixed_client
+class TestDisconnectCompletesMaintenance:
+    def test_disconnect_without_socket_still_completes_maintenance(self):
+        """
+        The relaxation is restored and reported on every disconnect, including
+        one that finds no socket to close and returns early.
+        """
+        listener = _RecordingListener()
+        config = _config_with_listener(listener)
+        connection = Connection(protocol=3, maint_notifications_config=config)
+        connection.maintenance_state = MaintenanceState.MAINTENANCE
+        assert connection._sock is None
+
+        connection.disconnect()
+
+        assert connection.maintenance_state == MaintenanceState.NONE
+        assert [type(e) for e in listener.events] == [MaintenanceCompletedEvent]
+
+
+@pytest.mark.fixed_client
+class TestHandoffTakesOverMaintenance:
+    """
+    A connection under maintenance that a MOVING handoff takes over has its
+    MAINTENANCE pair closed: its completion notification is skipped while it
+    is MOVING, and the handoff's cleanup does not know what it superseded.
+    """
+
+    def setup_method(self):
+        self.listener = _RecordingListener()
+        self.config = _config_with_listener(self.listener)
+        self.pool = ConnectionPool(
+            host="localhost",
+            port=6379,
+            protocol=3,
+            maint_notifications_config=self.config,
+        )
+
+    def _connection(self, state):
+        conn = Mock()
+        conn.maintenance_state = state
+        conn.maint_notifications_config = self.config
+        return conn
+
+    def test_moving_over_maintenance_dispatches_completed_event(self):
+        conn = self._connection(MaintenanceState.MAINTENANCE)
+
+        self.pool.update_connection_settings(conn, state=MaintenanceState.MOVING)
+
+        assert conn.maintenance_state == MaintenanceState.MOVING
+        assert len(self.listener.events) == 1
+        event = self.listener.events[0]
+        assert isinstance(event, MaintenanceCompletedEvent)
+        assert event.state == MaintenanceState.MAINTENANCE
+        assert event.connection is conn
+        assert event.connection_pool is self.pool
+        assert event.notification is None
+
+    @pytest.mark.parametrize(
+        "state, new_state",
+        [
+            (MaintenanceState.NONE, MaintenanceState.MOVING),
+            (MaintenanceState.MOVING, MaintenanceState.MOVING),
+            (MaintenanceState.MOVING, MaintenanceState.NONE),
+        ],
+    )
+    def test_other_state_transitions_dispatch_nothing(self, state, new_state):
+        conn = self._connection(state)
+
+        self.pool.update_connection_settings(conn, state=new_state)
+
+        assert conn.maintenance_state == new_state
+        assert self.listener.events == []

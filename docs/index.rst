@@ -66,7 +66,7 @@ Module Documentation
 
    connections
    clustering
-   multi_database
+   geographic_failover
    exceptions
    backoff
    lock
@@ -74,6 +74,7 @@ Module Documentation
    lua_scripting
    opentelemetry
    resp3_features
+   unified_responses
    advanced_features
    examples
 
