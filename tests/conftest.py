@@ -211,6 +211,9 @@ def _redis_url_from_endpoints_config():
     endpoints config at ``REDIS_ENDPOINTS_CONFIG_PATH`` and returns a redis URL
     carrying the resolved host, port, credentials and (for ``rediss``) TLS. This
     is the same endpoints-config shape consumed by ``tests/test_scenario``.
+    ``RE_SOCKET_CONNECT_TIMEOUT``, when set, is passed as the URL's
+    ``socket_connect_timeout`` (seconds), for runners whose DNS lookups of the
+    database endpoints can stall past the client default.
     """
     db_name = os.getenv("RE_DB_NAME", "standalone")
     config_path = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH")
@@ -232,9 +235,16 @@ def _redis_url_from_endpoints_config():
     if password is not None:
         userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
 
-    url = f"{scheme}://{userinfo}{host}:{port}"
+    query = []
+    connect_timeout = os.getenv("RE_SOCKET_CONNECT_TIMEOUT")
+    if connect_timeout:
+        query.append(f"socket_connect_timeout={float(connect_timeout)}")
     if scheme == "rediss":
-        url += "?ssl_cert_reqs=none&ssl_check_hostname=false"
+        query.append("ssl_cert_reqs=none&ssl_check_hostname=false")
+
+    url = f"{scheme}://{userinfo}{host}:{port}"
+    if query:
+        url += "?" + "&".join(query)
     return url
 
 
