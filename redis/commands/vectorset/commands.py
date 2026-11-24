@@ -132,8 +132,9 @@ class VectorSetCommands(CommandsProtocol):
         ``ef`` sets the exploration factor to use.
                 If not provided, the default exploration factor is used.
 
-        ``attributes`` is a dictionary or json string that contains the attributes to set for the vector.
+        ``attributes`` is a dictionary or JSON string that contains the attributes to set for the vector.
                 If not provided, no attributes are set.
+                Dictionary attributes are serialized with literal non-ASCII characters for filtering.
                 An empty dictionary replaces existing attributes with an empty object;
                 an empty string removes them. None leaves existing attributes unchanged.
 
@@ -170,8 +171,7 @@ class VectorSetCommands(CommandsProtocol):
 
         if attributes is not None:
             if isinstance(attributes, dict):
-                # transform attributes to json string
-                attributes_json = json.dumps(attributes)
+                attributes_json = json.dumps(attributes, ensure_ascii=False)
             else:
                 attributes_json = attributes
             pieces.extend(["SETATTR", attributes_json])
@@ -493,13 +493,14 @@ class VectorSetCommands(CommandsProtocol):
         Associate or remove JSON attributes ``attributes`` of element ``element``
         for vector set ``key``.
 
+        Dictionary attributes are serialized with literal non-ASCII characters for filtering.
+
         For more information, see https://redis.io/commands/vsetattr
         """
         if attributes is None:
             attributes_json = "{}"
         elif isinstance(attributes, dict):
-            # transform attributes to json string
-            attributes_json = json.dumps(attributes)
+            attributes_json = json.dumps(attributes, ensure_ascii=False)
         else:
             attributes_json = attributes
 

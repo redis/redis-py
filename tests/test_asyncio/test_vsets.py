@@ -525,6 +525,32 @@ async def test_vsim_with_filter(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+@pytest.mark.parametrize("command", ["vadd", "vsetattr"])
+async def test_vsim_filter_unicode_attributes(d_client, command):
+    vset = d_client.vset()
+    vector = [1.0, 0.0]
+    attributes = {"name": "Zürich"}
+    json_attributes = '{"name": "Zürich"}'
+
+    if command == "vadd":
+        assert await vset.vadd("cities", vector, "dict", attributes=attributes) == 1
+        assert (
+            await vset.vadd("cities", vector, "json", attributes=json_attributes) == 1
+        )
+    else:
+        assert await vset.vadd("cities", vector, "dict") == 1
+        assert await vset.vadd("cities", vector, "json") == 1
+        assert await vset.vsetattr("cities", "dict", attributes) == 1
+        assert await vset.vsetattr("cities", "json", json_attributes) == 1
+
+    assert await vset.vgetattr("cities", "dict") == attributes
+    assert set(await vset.vsim("cities", vector, filter='.name == "Zürich"')) == {
+        "dict",
+        "json",
+    }
+
+
+@skip_if_server_version_lt("7.9.0")
 async def test_vsim_truth_no_thread_enabled(d_client):
     elements_count = 100
     vector_dim = 50
