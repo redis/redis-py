@@ -917,6 +917,10 @@ class TestRedisClusterObj:
         with patch.object(Redis, "parse_response") as parse_response:
 
             def moved_redirect_effect(connection, *args, **options):
+                # Only GET times out: the topology refresh the timeouts ask for
+                # runs once due, and its CLUSTER SLOTS must reach the nodes
+                if args[0] != "GET":
+                    return real_func(connection, *args, **options)
                 # raise a timeout for 5 times so we'll need to reinitialize the topology
                 if count.val == 4:
                     parse_response.side_effect = real_func

@@ -365,6 +365,10 @@ Vector Sets
      - Vector components are always floats, as on RESP3.
      - ``[1, 0.5, 0]``
      - ``[1.0, 0.5, 0.0]``
+   * - ``VADD``, ``VREM``, ``VSETATTR``
+     - The integer reply becomes a boolean, as on RESP3.
+     - ``1``
+     - ``True``
 
 
 RESP3 Legacy to Unified
