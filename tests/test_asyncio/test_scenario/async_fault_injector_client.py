@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import aiohttp
 import pytest
@@ -81,6 +81,17 @@ class AsyncFaultInjectorClient(ABC):
         source_node: Optional[str] = None,
         target_node: Optional[str] = None,
         skip_end_notification: bool = False,
+    ) -> str:
+        pass
+
+    @abstractmethod
+    async def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
     ) -> str:
         pass
 
@@ -294,6 +305,47 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
         except Exception as e:
             raise Exception(f"Failed to execute slot migrate: {e}")
 
+    async def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
+    ) -> str:
+        """Take a node of the database through maintenance.
+
+        'enter' evacuates a node holding master shards of the database (the
+        fault injector picks it unless node_id is given) and reports it as
+        'node_id' in the action output. 'exit' takes that node out of
+        maintenance and moves its shards back - the failback. Both wait until
+        the database serves again before the action completes.
+
+        'exit' with restore_shards=False only takes the node out of maintenance
+        and moves nothing back, and does not wait for the database: the cleanup
+        after the database was deleted.
+        """
+        parameters: Dict[str, Any] = {
+            "bdb_id": endpoint_config.get("bdb_id"),
+            "cluster_index": 0,
+            "mode": mode,
+            "wait_for_active": restore_shards,
+        }
+        if not restore_shards:
+            parameters["restore_shards"] = False
+        if node_id is not None:
+            parameters["node_id"] = node_id
+        if active_timeout is not None:
+            parameters["active_timeout"] = active_timeout
+
+        result = await self.trigger_action(
+            ActionRequest(ActionType.NODE_MAINTENANCE, parameters)
+        )
+        action_id = result.get("action_id")
+        if not action_id:
+            raise Exception(f"Failed to trigger node_maintenance action: {result}")
+        return action_id
+
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
 
@@ -391,5 +443,15 @@ class AsyncProxyServerFaultInjector(MockProxyFaultInjector, AsyncFaultInjectorCl
         source_node: Optional[str] = None,
         target_node: Optional[str] = None,
         skip_end_notification: bool = False,
+    ) -> str:
+        raise NotImplementedError("Not implemented for proxy server")
+
+    async def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
     ) -> str:
         raise NotImplementedError("Not implemented for proxy server")

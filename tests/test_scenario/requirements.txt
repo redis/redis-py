@@ -1,0 +1,7 @@
+# Additional requirements of the scenario tests in tests/test_scenario/ and
+# tests/test_asyncio/test_scenario/. Install them on top of dev_requirements.txt:
+#   pip install -r dev_requirements.txt -r tests/test_scenario/requirements.txt
+
+# Cross-checks the sockets the test process holds against the client's pools
+# (scenario_monitor.py). Without it, that check is skipped.
+psutil

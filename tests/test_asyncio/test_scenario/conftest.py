@@ -260,6 +260,7 @@ def get_async_cluster_client_maint_notifications(
     auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
     socket_connect_timeout: Optional[float] = None,
+    dynamic_startup_nodes: bool = True,
 ) -> RedisCluster:
     """Create async RedisCluster client with maintenance notifications enabled."""
     username = endpoints_config.get("username")
@@ -310,6 +311,7 @@ def get_async_cluster_client_maint_notifications(
         protocol=protocol,
         maint_notifications_config=maintenance_config,
         retry=retry,
+        dynamic_startup_nodes=dynamic_startup_nodes,
         **tls_kwargs,
     )
 

@@ -344,6 +344,7 @@ def generate_params(
     skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
     endpoint_types: Optional[list[EndpointType]] = None,
     include_tls: bool = True,
+    triggers: Optional[list[str]] = None,
 ):
     """Build parametrize tuples for maint-notification scenario tests.
 
@@ -353,6 +354,10 @@ def generate_params(
 
     Set include_tls=False to drop the TLS and mTLS requirement variants, for suites
     whose client cannot use a rediss:// endpoint.
+
+    Set triggers to keep only the named triggers. The maintenance_mode trigger is
+    skipped unless it is named there: its cleanup leaves the shards on the nodes
+    they were evacuated to, so only a suite that moves them back itself can use it.
     """
     params = []
     try:
@@ -373,7 +378,10 @@ def generate_params(
                 trigger = trigger_info["name"]
                 if (effect_name, trigger) in skip_combinations:
                     continue
-                if trigger == "maintenance_mode":
+                if triggers is not None:
+                    if trigger not in triggers:
+                        continue
+                elif trigger == "maintenance_mode":
                     continue
                 trigger_requirements = trigger_info["requirements"]
                 for requirement in trigger_requirements:

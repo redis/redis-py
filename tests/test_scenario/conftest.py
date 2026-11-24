@@ -608,6 +608,7 @@ def get_cluster_client_maint_notifications(
     auth_ssl_client_certs: bool = False,
     socket_timeout: Optional[float] = None,
     socket_connect_timeout: Optional[float] = None,
+    dynamic_startup_nodes: bool = True,
 ):
     """Create Redis cluster client with maintenance notifications enabled."""
     # Get credentials from the configuration
@@ -666,6 +667,7 @@ def get_cluster_client_maint_notifications(
         protocol=protocol,  # RESP3 required for push notifications
         maint_notifications_config=maintenance_config,
         retry=retry,
+        dynamic_startup_nodes=dynamic_startup_nodes,
         **tls_kwargs,
     )
     logging.info("Redis cluster client created with maintenance notifications enabled")

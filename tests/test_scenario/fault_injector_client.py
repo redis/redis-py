@@ -4,7 +4,7 @@ import logging
 import time
 import urllib.request
 import urllib.error
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Literal, Optional, Union
 from enum import Enum
 
 import pytest
@@ -42,6 +42,7 @@ class ActionType(str, Enum):
     EXECUTE_RLUTIL_COMMAND = "execute_rlutil_command"
     EXECUTE_RLADMIN_COMMAND = "execute_rladmin_command"
     MIGRATE = "migrate"
+    NODE_MAINTENANCE = "node_maintenance"
     WAIT_FOR_DATABASE_ACTIVE = "wait_for_database_active"
     SLOT_MIGRATE = "slot_migrate"
     TOPOLOGY_CHANGE_STANDALONE = "topology_change_standalone"
@@ -160,6 +161,17 @@ class FaultInjectorClient(ABC):
         self,
         endpoint_config: Dict[str, Any],
         active_timeout: Optional[int] = None,
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
     ) -> str:
         pass
 
@@ -503,6 +515,49 @@ class REFaultInjector(FaultInjectorClient):
             )
         return action_id
 
+    def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
+    ) -> str:
+        """Take a node of the database through maintenance.
+
+        'enter' evacuates a node holding master shards of the database (the
+        fault injector picks it unless node_id is given) and reports it as
+        'node_id' in the action output. 'exit' takes that node out of
+        maintenance and moves its shards back - the failback. Both wait until
+        the database serves again before the action completes.
+
+        'exit' with restore_shards=False only takes the node out of maintenance
+        and moves nothing back, and does not wait for the database: the cleanup
+        after the database was deleted.
+        """
+        parameters: Dict[str, Any] = {
+            "bdb_id": endpoint_config.get("bdb_id"),
+            "cluster_index": 0,
+            "mode": mode,
+            "wait_for_active": restore_shards,
+        }
+        if not restore_shards:
+            parameters["restore_shards"] = False
+        if node_id is not None:
+            parameters["node_id"] = node_id
+        if active_timeout is not None:
+            parameters["active_timeout"] = active_timeout
+
+        action = ActionRequest(
+            action_type=ActionType.NODE_MAINTENANCE,
+            parameters=parameters,
+        )
+        result = self.trigger_action(action)
+        action_id = result.get("action_id")
+        if not action_id:
+            raise Exception(f"Failed to trigger node_maintenance action: {result}")
+        return action_id
+
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
 
@@ -629,5 +684,15 @@ class ProxyServerFaultInjector(MockProxyFaultInjector, FaultInjectorClient):
         self,
         endpoint_config: Dict[str, Any],
         active_timeout: Optional[int] = None,
+    ) -> str:
+        raise NotImplementedError("Not implemented for proxy server")
+
+    def node_maintenance(
+        self,
+        endpoint_config: Dict[str, Any],
+        mode: Literal["enter", "exit"],
+        node_id: Optional[int] = None,
+        active_timeout: Optional[int] = None,
+        restore_shards: bool = True,
     ) -> str:
         raise NotImplementedError("Not implemented for proxy server")
