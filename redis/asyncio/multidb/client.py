@@ -238,8 +238,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             config: DatabaseConfig object that contains the database configuration.
             skip_initial_health_check: If True, adds the database even if it is unhealthy.
                 If False, an unhealthy database is rejected and released. Health
-                checks given through ``DatabaseConfig.health_checks`` are left
-                open, so the same configuration can be added again.
+                checks given through ``DatabaseConfig.health_checks`` and a pool
+                given through ``DatabaseConfig.from_pool`` are left open, so the
+                same configuration can be added again.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
@@ -292,6 +293,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.add(database, database.weight)
+        if self.initialized:
+            # initialize() sets the callback of the databases it starts with
+            database.circuit.on_state_changed(self._on_circuit_state_change_callback)
         await self._change_active_database(database, highest_weighted_db)
 
     async def _release_rejected_database(
@@ -301,12 +305,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Releases a database that was not added. It is never used, so nothing
         is in flight: its client, its health check client and the health checks
         built for it are closed. Health checks given through
-        ``DatabaseConfig.health_checks`` belong to the caller's configuration,
+        ``DatabaseConfig.health_checks`` and a pool given through
+        ``DatabaseConfig.from_pool`` belong to the caller's configuration,
         which can be added again, and stay open.
         """
         health_checks = (
             () if config.health_checks is not None else database.health_checks
         )
+        if config.from_pool:
+            database.client.auto_close_connection_pool = False
         await asyncio.gather(
             self._health_check_policy.close_client(database),
             *(health_check.close() for health_check in health_checks),

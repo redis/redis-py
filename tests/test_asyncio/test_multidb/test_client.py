@@ -5,6 +5,7 @@ import pybreaker
 import pytest
 
 from redis._parsers import Encoder
+from redis.asyncio import ConnectionPool
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import InitialHealthCheck
 from redis.asyncio.multidb.database import AsyncDatabase
@@ -20,7 +21,11 @@ from redis.exceptions import (
     RedisClusterException,
     RedisClusterUnreachableError,
 )
-from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
+from redis.multidb.circuit import (
+    CircuitBreaker,
+    State as CBState,
+    PBCircuitBreakerAdapter,
+)
 from redis.multidb.config import DatabaseConfig
 from redis.multidb.exception import (
     NoValidDatabaseException,
@@ -1151,6 +1156,95 @@ class TestMultiDbClient:
 
         new_hc.close.assert_awaited_once()
         mock_new_client.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_add_database_rejected_database_keeps_supplied_pool_open(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A pool given through DatabaseConfig.from_pool belongs to the caller, who
+        can add the same configuration again: a rejection must not close it.
+        """
+        databases = create_weighted_list(mock_db, mock_db2)
+        rejected_hc = MagicMock()
+        rejected_hc.health_check_probes = 1
+        rejected_hc.health_check_delay = 0.01
+        rejected_hc.health_check_timeout = 1.0
+        rejected_hc.check_health = AsyncMock(side_effect=ConnectionError("refused"))
+        pool = ConnectionPool(host="localhost", port=6379)
+        new_db_config = DatabaseConfig(
+            weight=0.8, from_pool=pool, health_checks=[rejected_hc]
+        )
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(pool, "aclose") as pool_aclose,
+        ):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                with pytest.raises(UnhealthyDatabaseException):
+                    await client.add_database(
+                        new_db_config, skip_initial_health_check=False
+                    )
+
+            pool_aclose.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_add_database_registers_circuit_state_callback(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        A database added at runtime gets the circuit callback initialize() sets
+        on the initial ones: without it nothing half-opens its circuit when the
+        grace period ends.
+        """
+        databases = create_weighted_list(mock_db, mock_db2)
+        circuit = Mock(spec=CircuitBreaker)
+        circuit.state = CBState.CLOSED
+        new_db_config = DatabaseConfig(
+            weight=0.1,
+            from_url="redis://localhost:6379",
+            circuit=circuit,
+            health_checks=[mock_hc],
+        )
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+            patch.object(
+                mock_multi_db_config.client_class,
+                "from_url",
+                return_value=AsyncMock(),
+            ),
+        ):
+            async with MultiDBClient(mock_multi_db_config) as client:
+                await client.add_database(new_db_config)
+
+                circuit.on_state_changed.assert_called_once_with(
+                    client._on_circuit_state_change_callback
+                )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
