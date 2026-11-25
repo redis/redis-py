@@ -2116,19 +2116,25 @@ def _cache_owned_command(args) -> str | None:
     case, padded with whitespace or not.
     """
     command = args[0]
-    if not isinstance(command, (str, bytes)):
-        if not isinstance(command, (bytearray, memoryview)):
-            return None
+    if isinstance(command, str):
+        first_char_sets = (_RESET_FIRST_CHARS, _CLIENT_FIRST_CHARS, _WHITESPACE_CHARS)
+    elif isinstance(command, bytes):
+        first_char_sets = (
+            _RESET_FIRST_CHARS_BYTES,
+            _CLIENT_FIRST_CHARS_BYTES,
+            _WHITESPACE_CHARS_BYTES,
+        )
+    elif isinstance(command, (bytearray, memoryview)):
         command = bytes(command)
-    first_char = command[:1]
-    if isinstance(first_char, bytes):
-        reset_first_chars = _RESET_FIRST_CHARS_BYTES
-        client_first_chars = _CLIENT_FIRST_CHARS_BYTES
-        whitespace_chars = _WHITESPACE_CHARS_BYTES
+        first_char_sets = (
+            _RESET_FIRST_CHARS_BYTES,
+            _CLIENT_FIRST_CHARS_BYTES,
+            _WHITESPACE_CHARS_BYTES,
+        )
     else:
-        reset_first_chars = _RESET_FIRST_CHARS
-        client_first_chars = _CLIENT_FIRST_CHARS
-        whitespace_chars = _WHITESPACE_CHARS
+        return None
+    reset_first_chars, client_first_chars, whitespace_chars = first_char_sets
+    first_char = command[:1]
     if first_char in reset_first_chars:
         # ``RESET`` takes no arguments, so only a five-character name, or one followed by
         # whitespace, can match. The check keeps the many other ``R`` commands (``RPOP``,

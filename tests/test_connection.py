@@ -360,19 +360,52 @@ def test_hiredis_socket_can_read_under_fd_exhaustion():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+_CACHE_OWNED_COMMAND_BB_SCRIPT = textwrap.dedent(
+    """
+    import redis
+    import redis.asyncio
+    from redis.connection import _cache_owned_command
+
+    # Each spelling below must reach a first-character set of its own type:
+    # ``b"c"`` and ``"c"`` hash equal, so a ``bytes`` name looked up in a ``str``
+    # set compares ``bytes`` with ``str`` and raises ``BytesWarning`` under
+    # ``-bb``. The ``GET``/``RPOP`` names reach the reject paths, ``RESET`` and
+    # ``CLIENT`` reach the reset/client sets, and the padded and
+    # leading-whitespace names reach the whitespace set.
+    cases = [
+        (("GET",), None),
+        ((b"GET",), None),
+        (("RPOP",), None),
+        ((b"RPOP",), None),
+        (("RESET",), "RESET"),
+        ((b"RESET",), "RESET"),
+        (("RESET ",), "RESET"),
+        ((b"RESET ",), "RESET"),
+        (("CLIENT",), None),
+        ((b"CLIENT",), None),
+        ((" CLIENT CACHING",), "CLIENT CACHING"),
+        ((b" CLIENT CACHING",), "CLIENT CACHING"),
+    ]
+    for args, expected in cases:
+        assert _cache_owned_command(args) == expected, args
+    """
+)
+
+
 @pytest.mark.fixed_client
 def test_import_raises_no_byteswarning_under_bb():
-    # ``redis/connection.py`` used to build frozensets mixing ``str`` and ``bytes``
-    # first characters (``"c"`` and ``b"c"`` hash equal), so importing redis under
-    # ``python -bb`` raised ``BytesWarning``. The sets are split by type now;
-    # importing in a child interpreter keeps the ``-bb`` flag out of this process.
+    # Importing ``redis`` and calling ``_cache_owned_command`` run in a child
+    # interpreter so the ``-bb`` flag stays out of this process. Under ``-bb``
+    # any ``str``/``bytes`` comparison raises ``BytesWarning``: the
+    # first-character sets are split by type, and the child calls pin each set
+    # in both spellings, since CI never runs with ``-bb``.
     env = dict(os.environ)
     redis_root = os.path.dirname(os.path.dirname(redis.__file__))
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [redis_root, env.get("PYTHONPATH")])
     )
     result = subprocess.run(
-        [sys.executable, "-bb", "-c", "import redis; import redis.asyncio"],
+        [sys.executable, "-bb", "-c", _CACHE_OWNED_COMMAND_BB_SCRIPT],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
