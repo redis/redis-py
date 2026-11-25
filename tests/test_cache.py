@@ -47,6 +47,7 @@ from redis.utils import str_if_bytes
 from tests.conftest import (
     _get_client,
     assert_resp_response,
+    skip_if_redis_enterprise,
     skip_if_resp_version,
     skip_if_server_version_lt,
 )
@@ -297,6 +298,43 @@ class TestCache:
         assert r.get(42) in [b"int", "int"]
         assert r.get(42.0) in [b"float", "float"]
         assert cache.size == size + 2
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_equal_int_and_float_args_do_not_share_an_entry(self, r):
+        # 1 == 1.0 and 0.0 == -0.0, but they are sent as the different fields
+        # "1", "1.0", "0.0" and "-0.0", so a read of one must not be served the
+        # entry of the other.
+        cache = r.get_cache()
+        r.hset("h", 1, "int")
+        r.hset("h", 1.0, "float")
+        r.hset("h", 0.0, "zero")
+        r.hset("h", -0.0, "negzero")
+        size = cache.size
+        assert r.hget("h", 1) in [b"int", "int"]
+        assert r.hget("h", 1.0) in [b"float", "float"]
+        assert r.hget("h", 0.0) in [b"zero", "zero"]
+        assert r.hget("h", -0.0) in [b"negzero", "negzero"]
+        assert cache.size == size + 4
 
     @pytest.mark.parametrize(
         "r",
@@ -1153,6 +1191,7 @@ class TestCache:
         assert wait_for_invalidated_value(r, "foo", [b"baz"]) == b"baz"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_client_tracking_and_reset_without_a_cache_are_not_refused(self, request):
         # The guard lives on the cache's connections only. A dedicated client, because
         # RESET also drops the connection back to RESP2.
@@ -1284,6 +1323,7 @@ class TestCache:
         indirect=["r"],
     )
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_only_a_stored_read_enters_the_invalidation_table(
         self, r, r2, read_prefix, expected_tracked
     ):
@@ -1444,6 +1484,9 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
+    # Warms the cache with 2000 sequential reads, so it needs the short round trip
+    # of a co-located server; against a remote endpoint it outlasts the timeout.
+    @skip_if_redis_enterprise()
     def test_invalidation_burst_during_a_blocking_command(self, r, r2):
         """
         The server pushes one invalidation per key, so writes from another client
@@ -1773,6 +1816,7 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
+    @skip_if_redis_enterprise()
     def test_an_ask_redirected_read_is_not_paired(self, r):
         """
         The ASK suppression, through the real cluster retry loop.
@@ -2245,6 +2289,7 @@ class TestClusterCache:
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
+@skip_if_redis_enterprise()
 class TestSentinelCache:
     @pytest.mark.parametrize(
         "sentinel_setup",
@@ -2387,6 +2432,7 @@ class TestSentinelCache:
         assert cache.size == 0
 
 
+@pytest.mark.ssl
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -3747,3 +3793,35 @@ class TestUnitCacheProxyConnectionInvalidations:
         proxy._process_pending_invalidations()
 
         assert cache.size == 1
+
+    def test_deferred_auth_holds_the_pool_lock(self):
+        """
+        A cache hit on another connection drains this one under the pool lock,
+        and the drain reads ordinary replies too, so it must not run while the
+        AUTH reply is in flight.
+        """
+        pool_lock = threading.RLock()
+        conn = MagicMock()
+        proxy = redis.connection.CacheProxyConnection(
+            conn, DefaultCache(CacheConfig(max_size=5)), pool_lock
+        )
+        auth_in_flight = threading.Event()
+        finish_auth = threading.Event()
+
+        def re_auth():
+            auth_in_flight.set()
+            assert finish_auth.wait(timeout=5)
+
+        conn.re_auth.side_effect = re_auth
+        worker = threading.Thread(target=proxy.re_auth)
+        worker.start()
+        try:
+            assert auth_in_flight.wait(timeout=5)
+            # What a draining connection would have to take first
+            assert not pool_lock.acquire(blocking=False)
+        finally:
+            finish_auth.set()
+            worker.join(timeout=5)
+
+        assert pool_lock.acquire(blocking=False)
+        pool_lock.release()

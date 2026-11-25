@@ -38,6 +38,8 @@ from redis.cluster import (
     LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
+    _can_be_resent_after_failover,
+    _shows_failover,
     _resolve_localhost,
     get_node_name,
     parse_cluster_shards,
@@ -81,6 +83,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     NoPermissionError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -472,6 +475,7 @@ class TestRedisClusterObj:
             conn = replica.redis_connection.connection
             assert conn.read_response.called is not True
 
+    @skip_if_redis_enterprise()
     def test_execute_command_node_flag_replicas(self, r):
         """
         Test command execution with nodes flag REPLICAS
@@ -915,6 +919,10 @@ class TestRedisClusterObj:
         with patch.object(Redis, "parse_response") as parse_response:
 
             def moved_redirect_effect(connection, *args, **options):
+                # Only GET times out: the topology refresh the timeouts ask for
+                # runs once due, and its CLUSTER SLOTS must reach the nodes
+                if args[0] != "GET":
+                    return real_func(connection, *args, **options)
                 # raise a timeout for 5 times so we'll need to reinitialize the topology
                 if count.val == 4:
                     parse_response.side_effect = real_func
@@ -954,6 +962,7 @@ class TestRedisClusterObj:
         new_conn = rand_node.redis_connection.connection_pool.get_connection()
         assert new_conn.retry._retries == 0
 
+    @skip_if_redis_enterprise()
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
         # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
@@ -1004,6 +1013,206 @@ class TestRedisClusterObj:
         assert "myself" not in nodes.get(curr_default_node.name).get("flags")
         assert r.get_default_node() != curr_default_node
 
+    @pytest.mark.parametrize("refresh_due", [False, True])
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_refused_default_node_is_replaced_for_command_keys(self, r, refresh_due):
+        """
+        The keys of XREAD are found by asking the default node (COMMAND GETKEYS).
+        When that node refuses connections, the lookup asks for a topology refresh
+        that tries it last and replaces the default node, so the retry asks another
+        node rather than dialing the refusing one again until the refresh runs.
+        """
+        bad_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) != bad_node
+        )
+        r.xadd(stream, {"f": "v"})
+        events = []
+        real_connect = Connection.connect
+
+        def connect(connection):
+            if (connection.host, connection.port) == (bad_node.host, bad_node.port):
+                events.append("dial")
+                raise ConnectionError(
+                    f"Error 61 connecting to {bad_node.name}. Connection refused."
+                )
+            return real_connect(connection)
+
+        def initialize(nodes_manager, **kwargs):
+            events.append(("refresh", kwargs.get("last_failed_node_name")))
+
+        nm = r.nodes_manager
+        # The last refresh ended long ago, or just now
+        nm._last_refresh_at = None if refresh_due else monotonic()
+        nm._refresh_due_at = None
+        bad_node.redis_connection.connection_pool.disconnect()
+        with (
+            patch.object(Connection, "connect", autospec=True, side_effect=connect),
+            patch.object(
+                NodesManager, "initialize", autospec=True, side_effect=initialize
+            ),
+            patch.object(
+                RedisCluster, "_record_error_metric", autospec=True
+            ) as record_error_metric,
+        ):
+            assert r.xread({stream: "0-0"}, count=1)
+
+        # The failed attempt is reported with the node that refused
+        assert [
+            call.kwargs["connection"] for call in record_error_metric.call_args_list
+        ] == [bad_node]
+        # One refused connect, and a refresh run before the retry once due
+        if refresh_due:
+            assert events == ["dial", ("refresh", bad_node.name)]
+        else:
+            assert events == ["dial"]
+            assert nm._refresh_requested
+            assert nm._requested_last_failed_node_name == bad_node.name
+        assert r.get_default_node() != bad_node
+
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_default_node_is_replaced_once_per_failed_attempt(self, r):
+        """
+        An attempt that fails on the default node replaces it. When the next
+        attempt fails in the lookup of the keys of XREAD (COMMAND GETKEYS) on the
+        new default node, that node is replaced once, by the lookup: the attempt
+        failed before its nodes were determined, so it does not replace the
+        default node again.
+        """
+        default_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) == default_node
+        )
+        r.xadd(stream, {"f": "v"})
+        failed = []
+        real_execute_command = RedisCluster._execute_command
+        real_get_keys = r.commands_parser.get_keys
+        real_replace_default_node = RedisCluster.replace_default_node
+
+        def execute_command(cluster, target_node, *args, **kwargs):
+            if not failed:
+                failed.append("command")
+                raise ConnectionError(f"Error 61 connecting to {target_node.name}.")
+            return real_execute_command(cluster, target_node, *args, **kwargs)
+
+        def get_keys(*args):
+            if failed == ["command"]:
+                failed.append("lookup")
+                raise ConnectionError("Error 61 connecting. Connection refused.")
+            return real_get_keys(*args)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so none runs between the attempts
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        with (
+            patch.object(
+                RedisCluster,
+                "_execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            patch.object(r.commands_parser, "get_keys", side_effect=get_keys),
+            patch.object(
+                RedisCluster,
+                "replace_default_node",
+                autospec=True,
+                side_effect=real_replace_default_node,
+            ) as replace_default_node,
+        ):
+            assert r.xread({stream: "0-0"}, count=1)
+
+        assert failed == ["command", "lookup"]
+        assert replace_default_node.call_count == 2
+
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_default_node_is_replaced_once_for_lookup_failure_after_moved(self, r):
+        """
+        A command sent to the default node that gets MOVED looks its keys up again
+        (COMMAND GETKEYS). When that lookup fails on the default node, the lookup
+        replaces it, and the attempt, although it targeted the default node, does
+        not replace the new default node as well.
+        """
+        default_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) == default_node
+        )
+        r.xadd(stream, {"f": "v"})
+        events = []
+        real_parse_response = Redis.parse_response
+        real_get_keys = r.commands_parser.get_keys
+        real_replace_default_node = RedisCluster.replace_default_node
+
+        def parse_response(redis_node, connection, command_name, **kwargs):
+            response = real_parse_response(
+                redis_node, connection, command_name, **kwargs
+            )
+            if command_name == "XREAD" and not events:
+                events.append("moved")
+                raise MovedError(
+                    f"{r.keyslot(stream)} {default_node.host}:{default_node.port}"
+                )
+            return response
+
+        def get_keys(*args):
+            if events == ["moved"]:
+                events.append("lookup")
+                raise ConnectionError("Error 61 connecting. Connection refused.")
+            return real_get_keys(*args)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so none runs between the attempts
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        with (
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(r.commands_parser, "get_keys", side_effect=get_keys),
+            patch.object(
+                RedisCluster,
+                "replace_default_node",
+                autospec=True,
+                side_effect=real_replace_default_node,
+            ) as replace_default_node,
+        ):
+            assert r.xread({stream: "0-0"}, count=1)
+
+        assert events == ["moved", "lookup"]
+        assert replace_default_node.call_count == 1
+        assert r.get_default_node() != default_node
+
+    def test_exhausted_default_node_pool_is_kept_for_command_keys(self, r):
+        """
+        An exhausted pool of the default node is not a node failure. A lookup of the
+        keys of XREAD that fails with it is raised as it is: no topology refresh is
+        asked for, and the default node and its place in the cached nodes are kept.
+        """
+        default_node = r.get_default_node()
+        nm = r.nodes_manager
+        cached_nodes = list(nm.nodes_cache)
+        assert not nm._refresh_requested
+
+        with patch.object(
+            default_node.redis_connection.connection_pool,
+            "get_connection",
+            side_effect=MaxConnectionsError("Too many connections"),
+        ):
+            with pytest.raises(MaxConnectionsError):
+                r.xread({"stream": "0-0"}, count=1)
+
+        assert not nm._refresh_requested
+        assert nm._requested_last_failed_node_name is None
+        assert r.get_default_node() is default_node
+        assert list(nm.nodes_cache) == cached_nodes
+
+    @skip_if_redis_enterprise()
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     def test_address_remap(self, request, master_host):
         """Test that we can create a rediscluster object with
@@ -1050,6 +1259,7 @@ class TestRedisClusterObj:
         n_used = sum((1 if p.n_connections else 0) for p in proxies)
         assert n_used > 1
 
+    @skip_if_redis_enterprise()
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize(
         "remap_host, offset",
@@ -1548,6 +1758,7 @@ class TestClusterRedisCommands:
             == r.cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
+    @skip_if_redis_enterprise()
     @pytest.mark.parametrize(
         "load_balancing_strategy",
         [
@@ -1596,6 +1807,7 @@ class TestClusterRedisCommands:
     def test_config_set(self, r):
         assert r.config_set("slowlog-log-slower-than", 0)
 
+    @skip_if_redis_enterprise()
     def test_cluster_config_resetstat(self, r):
         r.ping(target_nodes="all")
         all_info = r.info(target_nodes="all")
@@ -1641,6 +1853,7 @@ class TestClusterRedisCommands:
         # is reclaimed in the background
         assert r.unlink(*d.keys()) == 0
 
+    @skip_if_redis_enterprise()
     def test_pubsub_channels_merge_results(self, r):
         nodes = r.get_nodes()
         channels = []
@@ -1668,6 +1881,7 @@ class TestClusterRedisCommands:
         result.sort()
         assert result == channels
 
+    @skip_if_redis_enterprise()
     def test_pubsub_numsub_merge_results(self, r):
         nodes = r.get_nodes()
         pubsub_nodes = []
@@ -1720,6 +1934,7 @@ class TestClusterRedisCommands:
             [channel in r.pubsub_channels(target_nodes="all") for channel in expected]
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_pubsub_numsub(self, r):
         p1 = r.pubsub()
@@ -2018,6 +2233,7 @@ class TestClusterRedisCommands:
             == "r4xfga22229cf3c652b6fca0d09ff69f3e0d4d"
         )
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     def test_cluster_links(self, r):
         node = r.get_random_node()
@@ -2053,6 +2269,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.cluster_bumpepoch()
 
+    @skip_if_redis_enterprise()
     def test_info(self, r):
         # Map keys to same slot
         r.set("x{1}", 1)
@@ -2082,6 +2299,8 @@ class TestClusterRedisCommands:
             is True
         )
 
+    # Redis Enterprise's SLOWLOG GET does not include the SLOWLOG RESET entry.
+    @skip_if_redis_enterprise()
     def test_slowlog_get(self, r, slowlog):
         unicode_string = chr(3456) + "abcd" + chr(3421)
         node = r.get_node_from_key(unicode_string)
@@ -2172,6 +2391,7 @@ class TestClusterRedisCommands:
         with pytest.raises(NotImplementedError):
             r.debug_segfault()
 
+    @skip_if_redis_enterprise()
     def test_config_resetstat(self, r):
         node = r.get_primaries()[0]
         r.ping(target_nodes=node)
@@ -2216,6 +2436,7 @@ class TestClusterRedisCommands:
         with pytest.raises(DataError):
             assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):
         node = r.get_primaries()[0]
@@ -3072,6 +3293,7 @@ class TestClusterRedisCommands:
         assert set(r.keys(pattern="test*", target_nodes="primaries")) == keys
 
     # SCAN COMMANDS
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan(self, r):
         r.set("a", 1)
@@ -3091,6 +3313,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     def test_cluster_scan_type(self, r):
         r.sadd("a-set", 1)
@@ -3112,6 +3335,7 @@ class TestClusterRedisCommands:
             assert sorted(cursors.keys()) == sorted(node.name for node in nodes)
             assert all(cursor == 0 for cursor in cursors.values())
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_cluster_scan_iter(self, r):
         keys_all = []
@@ -5468,6 +5692,569 @@ class TestTopologyRefreshPacing:
             rc.nodes_manager._last_refresh_at = rc.nodes_manager._refresh_due_at = None
             assert rc.get("foo") == b"value"
             init.assert_called_once()
+
+    @staticmethod
+    def _readonly():
+        return ReadOnlyError("You can't write against a read only replica.")
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("due", [True, False])
+    def test_readonly_from_a_primary_asks_for_a_refresh_and_is_retried(self, due):
+        """
+        Only a replica answers READONLY, so a node cached as a primary that
+        does was demoted by a failover. A command without keys gets no MOVED to
+        learn that from: the error asks for a topology refresh, which the retry
+        of the command runs once due.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        if due:
+            nm._last_refresh_at = nm._refresh_due_at = None
+        # The first primary answers READONLY, then every primary answers
+        replies = [self._readonly()] + [b"OK"] * len(rc.get_primaries())
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            rc.execute_command("FLUSHALL")
+
+        assert parse.call_count == len(replies)
+        if due:
+            init.assert_called_once()
+            assert nm._refresh_requested is False
+        else:
+            init.assert_not_called()
+            assert nm._refresh_requested is True
+
+    @pytest.mark.fixed_client
+    def test_readonly_from_a_primary_is_raised_once_out_of_retries(self):
+        rc = get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 2)
+        )
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(
+                Redis, "parse_response", side_effect=self._readonly()
+            ) as parse,
+        ):
+            with pytest.raises(ReadOnlyError):
+                rc.execute_command("FLUSHALL")
+
+        assert parse.call_count == 3
+        assert rc.nodes_manager._refresh_requested is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    def test_readonly_from_a_replica_is_raised_at_once(self, pipeline):
+        """
+        A write sent to a replica, here by a nodes flag, is answered READONLY
+        whatever the topology is: no refresh is asked for, and it is not retried.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        replicas = len(rc.get_replicas())
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(
+                Redis, "parse_response", side_effect=self._readonly()
+            ) as parse,
+        ):
+            with pytest.raises(ReadOnlyError):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command("FLUSHALL", target_nodes=RedisCluster.REPLICAS)
+                    pipe.execute()
+                else:
+                    rc.execute_command("FLUSHALL", target_nodes=RedisCluster.REPLICAS)
+
+        # The pipeline reads every replica it wrote to; the command stops at
+        # the first error
+        assert parse.call_count == (replicas if pipeline else 1)
+        assert rc.nodes_manager._refresh_requested is False
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_pipeline_readonly_from_a_primary_asks_for_a_refresh_and_is_retried(self):
+        """
+        A pipeline retries a READONLY reply of a node cached as a primary as a
+        command does, after the refresh it asked for, and resends only the
+        command that got it.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        replies = [b"value", self._readonly(), b"OK"]
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            pipe = rc.pipeline()
+            pipe.get("foo")
+            pipe.execute_command("FT.CREATE", "idx", "SCHEMA", "t", "TEXT")
+            assert pipe.execute() == [b"value", b"OK"]
+
+        assert parse.call_count == len(replies)
+        init.assert_called_once()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("commands", [1, 3])
+    def test_pipeline_readonly_from_primaries_asks_for_one_refresh(self, commands):
+        """
+        However many READONLY replies of nodes cached as primaries an attempt
+        reads, it asks for one topology refresh, and the retry for one more.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        replies = [self._readonly()] * commands + [b"OK"] * commands
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(Redis, "parse_response", side_effect=replies),
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+            patch.object(
+                nm, "_request_refresh", wraps=nm._request_refresh
+            ) as request_refresh,
+        ):
+            pipe = rc.pipeline()
+            for i in range(commands):
+                pipe.execute_command("FT.CREATE", f"idx{i}", "SCHEMA", "t", "TEXT")
+            assert pipe.execute() == [b"OK"] * commands
+
+        assert request_refresh.call_count == 2
+        init.assert_called_once()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_readonly_from_the_default_node_replaces_it(self, raise_on_error):
+        """
+        A pipeline that reads a READONLY of the default node replaces the node at
+        once, as a command does, without waiting for the refresh: a retry goes to
+        another primary, and so do the default-node commands that follow.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        demoted = rc.get_default_node()
+        demoted_redis = rc.get_redis_connection(demoted)
+
+        def parse_response(redis, connection, command_name, **options):
+            if redis is demoted_redis:
+                raise self._readonly()
+            return b"OK"
+
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            pipe = rc.pipeline()
+            pipe.execute_command(
+                "FT.CREATE",
+                "idx",
+                "SCHEMA",
+                "t",
+                "TEXT",
+                target_nodes=RedisCluster.DEFAULT_NODE,
+            )
+            result = pipe.execute(raise_on_error=raise_on_error)
+
+        # The refresh it asked for is not due yet
+        init.assert_not_called()
+        assert rc.get_default_node() != demoted
+        if raise_on_error:
+            assert result == [b"OK"]
+        else:
+            assert isinstance(result[0], ReadOnlyError)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("retried_with", [None, "GET"])
+    def test_pipeline_readonly_from_a_named_primary_is_not_rerouted(self, retried_with):
+        """
+        A command sent to a node the caller named is not retried on READONLY,
+        as a command with target nodes is not, and an attempt retried for
+        another command sends it to the same node again: routed by its own
+        policy, a FLUSHALL would run on every primary.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        target = rc.get_redis_connection(rc.get_primaries()[0])
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            sent.append((command_name, redis))
+            if command_name == "FLUSHALL" or sent.count((command_name, redis)) == 1:
+                raise self._readonly()
+            return b"OK"
+
+        with (
+            patch("redis.cluster.get_connection", return_value=Mock()),
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            pipe = rc.pipeline()
+            if retried_with:
+                pipe.execute_command(retried_with, "foo")
+            pipe.execute_command("FLUSHALL", target_nodes=rc.get_primaries()[0])
+            with pytest.raises(ReadOnlyError):
+                pipe.execute()
+
+        flushed = [redis for name, redis in sent if name == "FLUSHALL"]
+        assert flushed == [target] * (2 if retried_with else 1)
+        assert nm._refresh_requested is True
+
+    # What a primary that turns into a replica answers its blocked clients
+    UNBLOCKED_BY_FAILOVER = (
+        "UNBLOCKED force unblock from blocking operation, "
+        "instance state changed (master -> replica?)"
+    )
+
+    @staticmethod
+    def _new_connection_each_checkout():
+        """
+        Patch ``get_connection`` to hand out a new mocked connection on every
+        checkout, and return the patch and the connections it handed out.
+        """
+        connections = []
+
+        def get_connection(redis_node, *args, **options):
+            connections.append(Mock())
+            return connections[-1]
+
+        return (
+            patch("redis.cluster.get_connection", side_effect=get_connection),
+            connections,
+        )
+
+    @staticmethod
+    def _assert_closed_for_unblocked(connection):
+        """
+        :connection: was disconnected once, with the UNBLOCKED error as the
+        reason, so the close is recorded as one an error caused.
+        """
+        connection.disconnect.assert_called_once()
+        error = connection.disconnect.call_args.kwargs["error"]
+        assert isinstance(error, ResponseError)
+        assert "UNBLOCKED" in str(error)
+
+    @staticmethod
+    def _blpop_client(**kwargs):
+        """
+        A mocked client whose commands parser also knows the keys of BLPOP.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port, **kwargs)
+        rc.commands_parser.commands["blpop"] = {
+            "name": "blpop",
+            "arity": -3,
+            "flags": ["write", "blocking"],
+            "first_key_pos": 1,
+            "last_key_pos": -2,
+            "step_count": 1,
+        }
+        return rc
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_unblocked_from_a_primary_asks_for_a_refresh_and_is_retried(self):
+        """
+        A primary that turns into a replica answers UNBLOCKED to every client
+        blocked on it and closes their connections. Nothing was popped, so the
+        command asks for a topology refresh and is retried, and the connection
+        that got the error is disconnected instead of being reused.
+        """
+        rc = self._blpop_client()
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        checkout, connections = self._new_connection_each_checkout()
+        replies = [ResponseError(self.UNBLOCKED_BY_FAILOVER), [b"foo", b"bar"]]
+        with (
+            checkout,
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            assert rc.execute_command("BLPOP", "foo", 0) == [b"foo", b"bar"]
+
+        assert parse.call_count == len(replies)
+        init.assert_called_once()
+        assert [c.disconnect.call_count for c in connections] == [1, 0]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "message, named_target",
+        [
+            (UNBLOCKED_BY_FAILOVER, True),
+            ("UNBLOCKED client unblocked via CLIENT UNBLOCK", False),
+            ("ERR some other error", False),
+        ],
+        ids=["unblocked-with-a-named-target", "client-unblock", "other-error"],
+    )
+    def test_unblocked_with_a_named_target_or_another_error_is_raised_at_once(
+        self, pipeline, message, named_target
+    ):
+        """
+        A command sent to a node the caller named is never retried, so its
+        UNBLOCKED is raised, but the connection the server closed is
+        disconnected and a refresh is asked for. CLIENT UNBLOCK ... ERROR, which
+        keeps the connection open, and any other error are raised as before.
+        """
+        rc = self._blpop_client()
+        targets = {"target_nodes": rc.get_replicas()[0]} if named_target else {}
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", side_effect=ResponseError(message)
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match=message.split(" ")[0]):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command("BLPOP", "foo", 0, **targets)
+                    pipe.execute()
+                else:
+                    rc.execute_command("BLPOP", "foo", 0, **targets)
+
+        assert parse.call_count == 1
+        closed = message == self.UNBLOCKED_BY_FAILOVER
+        assert rc.nodes_manager._refresh_requested is closed
+        assert [c.disconnect.call_count for c in connections] == [int(closed)]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "command", [("WAIT", 1, 0), ("WAITAOF", 1, 1, 0)], ids=["wait", "waitaof"]
+    )
+    def test_wait_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, pipeline, command
+    ):
+        """
+        WAIT and WAITAOF ask about the earlier writes of their own connection.
+        A retry would run on another connection and report them as replicated,
+        so their UNBLOCKED is raised. The refresh is still asked for and the
+        connection the server closed is still disconnected.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis,
+                "parse_response",
+                side_effect=ResponseError(self.UNBLOCKED_BY_FAILOVER),
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match="UNBLOCKED"):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command(*command)
+                    pipe.execute()
+                else:
+                    rc.execute_command(*command)
+
+        assert parse.call_count == 1
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c.disconnect.call_count for c in connections] == [1]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_unblocked_from_a_replica_asks_for_a_refresh_and_is_retried(self):
+        """
+        A replica that is moved to a new primary answers UNBLOCKED to the
+        clients blocked on it as well. A read that was routed to it is retried
+        like a command a demoted primary unblocked.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        asked = []
+
+        def get_connection(redis_node, *args, **options):
+            asked.append(redis_node)
+            return Mock()
+
+        replies = [ResponseError(self.UNBLOCKED_BY_FAILOVER), b"value"]
+        with (
+            patch("redis.cluster.get_connection", side_effect=get_connection),
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            assert rc.get("foo") == b"value"
+
+        assert parse.call_count == len(replies)
+        init.assert_called_once()
+        replicas = [rc.get_redis_connection(node) for node in rc.get_replicas()]
+        assert asked[0] in replicas
+
+    @pytest.mark.fixed_client
+    def test_unblocked_shows_a_failover_from_a_primary_and_from_a_replica(self):
+        """
+        A replica that is moved to a new primary answers UNBLOCKED to its
+        blocked clients too, so the reply counts whatever the node is cached
+        as. READONLY counts only from a node cached as a primary.
+        """
+        primary = ClusterNode(default_host, 7000, PRIMARY)
+        replica = ClusterNode(default_host, 7003, REPLICA)
+        unblocked = ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        assert _shows_failover(unblocked, primary) is True
+        assert _shows_failover(unblocked, replica) is True
+        assert _shows_failover(ReadOnlyError("READONLY"), primary) is True
+        assert _shows_failover(ReadOnlyError("READONLY"), replica) is False
+        assert _shows_failover(ResponseError("ERR other"), primary) is False
+
+    @pytest.mark.fixed_client
+    def test_unblocked_is_not_retried_when_retries_are_disabled(self):
+        """
+        The UNBLOCKED reply is retried within the limits of ``retry``. With no
+        retries allowed the command is sent once and its error is raised.
+        """
+        rc = self._blpop_client(retry=Retry(NoBackoff(), 0))
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis,
+                "parse_response",
+                side_effect=ResponseError(self.UNBLOCKED_BY_FAILOVER),
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match="UNBLOCKED"):
+                rc.execute_command("BLPOP", "foo", 0)
+
+        assert parse.call_count == 1
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c.disconnect.call_count for c in connections] == [1]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "command_name, resent",
+        [
+            ("BLPOP", True),
+            ("WAIT", False),
+            ("waitaof", False),
+            (b"WAIT", False),
+            (b"waitaof", False),
+        ],
+    )
+    def test_wait_is_not_resent_whatever_the_form_of_its_name(
+        self, command_name, resent
+    ):
+        """
+        A command name can be passed as bytes and in any case. WAIT and WAITAOF
+        are not sent again after a failover in any of these forms.
+        """
+        assert _can_be_resent_after_failover(command_name) is resent
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, raise_on_error
+    ):
+        """
+        A pipeline does not retry an UNBLOCKED reply. The command keeps the
+        error as its result, which ``raise_on_error`` raises. The pipeline asks
+        for a topology refresh and disconnects only the connection the server
+        closed.
+        """
+        rc = self._blpop_client()
+        checkout, connections = self._new_connection_each_checkout()
+        unblocked = []
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            sent.append(command_name)
+            if command_name == "GET":
+                return b"value"
+            unblocked.append(connection)
+            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+        ):
+            pipe = rc.pipeline()
+            pipe.get("foo")
+            pipe.execute_command("BLPOP", "bar", 0)
+            if raise_on_error:
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    pipe.execute()
+            else:
+                result = pipe.execute(raise_on_error=False)
+                assert result[0] == b"value"
+                assert isinstance(result[1], ResponseError)
+                assert "UNBLOCKED" in str(result[1])
+
+        assert sent == ["GET", "BLPOP"]
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c for c in connections if c.disconnect.called] == unblocked
+        self._assert_closed_for_unblocked(unblocked[0])
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_unblocked_followed_by_commands_resends_those_of_its_node(
+        self, raise_on_error
+    ):
+        """
+        The server closes the connection after an UNBLOCKED reply, so reading
+        the reply of a command the pipeline sent after it fails with a
+        connection error. That path is intentionally left as it was: the
+        pipeline sends all commands of that node again, one at a time, the
+        blocking command included.
+        """
+        rc = self._blpop_client()
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        node = rc.get_default_node()
+        key = next(
+            k for k in ("foo", "bar", "baz", "qux") if rc.get_node_from_key(k) == node
+        )
+        checkout, _ = self._new_connection_each_checkout()
+        closed = []
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            if connection in closed:
+                raise ConnectionError("Connection closed by server.")
+            sent.append(command_name)
+            if command_name == "BLPOP":
+                if not closed:
+                    closed.append(connection)
+                    raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+                return [key.encode(), b"x"]
+            return b"value"
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            pipe = rc.pipeline()
+            pipe.get(key)
+            pipe.execute_command("BLPOP", key, 0)
+            pipe.get(key)
+            assert pipe.execute(raise_on_error=raise_on_error) == [
+                b"value",
+                [key.encode(), b"x"],
+                b"value",
+            ]
+
+        assert sent == ["GET", "BLPOP", "GET", "BLPOP", "GET"]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
@@ -9171,6 +9958,7 @@ class TestClusterPipeline:
             )
 
 
+@skip_if_redis_enterprise()
 @pytest.mark.onlycluster
 class TestReadOnlyPipeline:
     """

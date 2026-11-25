@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import pytest
 import redis
@@ -211,6 +211,9 @@ def _redis_url_from_endpoints_config():
     endpoints config at ``REDIS_ENDPOINTS_CONFIG_PATH`` and returns a redis URL
     carrying the resolved host, port, credentials and (for ``rediss``) TLS. This
     is the same endpoints-config shape consumed by ``tests/test_scenario``.
+    ``RE_SOCKET_CONNECT_TIMEOUT``, when set, is passed as the URL's
+    ``socket_connect_timeout`` (seconds), for runners whose DNS lookups of the
+    database endpoints can stall past the client default.
     """
     db_name = os.getenv("RE_DB_NAME", "standalone")
     config_path = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH")
@@ -232,9 +235,16 @@ def _redis_url_from_endpoints_config():
     if password is not None:
         userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
 
-    url = f"{scheme}://{userinfo}{host}:{port}"
+    query = []
+    connect_timeout = os.getenv("RE_SOCKET_CONNECT_TIMEOUT")
+    if connect_timeout:
+        query.append(f"socket_connect_timeout={float(connect_timeout)}")
     if scheme == "rediss":
-        url += "?ssl_cert_reqs=none&ssl_check_hostname=false"
+        query.append("ssl_cert_reqs=none&ssl_check_hostname=false")
+
+    url = f"{scheme}://{userinfo}{host}:{port}"
+    if query:
+        url += "?" + "&".join(query)
     return url
 
 
@@ -389,6 +399,19 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
 def skip_if_redis_enterprise() -> _TestDecorator:
     check = REDIS_INFO.get("enterprise", False) is True
     return pytest.mark.skipif(check, reason="Redis enterprise")
+
+
+def is_redis_enterprise_cluster() -> bool:
+    # INFO reports cluster_enabled as an integer, so test it for truthiness.
+    return REDIS_INFO.get("enterprise", False) is True and bool(
+        REDIS_INFO.get("cluster_enabled", False)
+    )
+
+
+def skip_if_redis_enterprise_cluster() -> _TestDecorator:
+    return pytest.mark.skipif(
+        is_redis_enterprise_cluster(), reason="Redis enterprise cluster"
+    )
 
 
 def skip_ifnot_redis_enterprise() -> _TestDecorator:
@@ -801,6 +824,23 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     return parts.hostname, (parts.port or 6379)
+
+
+@pytest.fixture(scope="session")
+def master_connection_kwargs(request):
+    """
+    Connection kwargs for the server under test: the host and port of
+    ``master_host`` plus the username and password of ``--redis-url``, if it
+    has them, so a test that builds its own connection can authenticate.
+    """
+    url = request.config.getoption("--redis-url")
+    parts = urlparse(url)
+    kwargs = {"host": parts.hostname, "port": parts.port or 6379}
+    if parts.username:
+        kwargs["username"] = unquote(parts.username)
+    if parts.password:
+        kwargs["password"] = unquote(parts.password)
+    return kwargs
 
 
 @pytest.fixture()

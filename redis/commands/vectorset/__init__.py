@@ -15,10 +15,13 @@ from ..helpers import (
     get_protocol_version,
 )
 from .commands import (
+    VADD_CMD,
     VEMB_CMD,
     VGETATTR_CMD,
     VINFO_CMD,
     VLINKS_CMD,
+    VREM_CMD,
+    VSETATTR_CMD,
     VSIM_CMD,
     VectorSetCommands,
 )
@@ -41,12 +44,22 @@ class _VectorSetBase(VectorSetCommands):
             VLINKS_CMD: parse_vlinks_result,
         }
         self._RESP3_MODULE_CALLBACKS = {}
+        # RESP2 replies to VADD, VREM and VSETATTR with 1 or 0, RESP3 with a
+        # boolean. Unified responses are booleans on both protocols, and the
+        # default client keeps the RESP2 integers.
         self._RESP2_UNIFIED_MODULE_CALLBACKS = {
             **self._RESP2_MODULE_CALLBACKS,
+            VADD_CMD: bool,
             VEMB_CMD: parse_vemb_result_unified,
+            VREM_CMD: bool,
+            VSETATTR_CMD: bool,
         }
         self._RESP3_UNIFIED_MODULE_CALLBACKS = dict(self._RESP3_MODULE_CALLBACKS)
-        self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {}
+        self._RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
+            VADD_CMD: int,
+            VREM_CMD: int,
+            VSETATTR_CMD: int,
+        }
 
         self.client = client
         self.execute_command = client.execute_command
