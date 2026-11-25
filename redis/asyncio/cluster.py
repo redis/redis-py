@@ -91,13 +91,15 @@ from redis.cluster import (
     LoadBalancingStrategy,
     _error_to_raise,
     _fill_missing_redirect_host,
-    _is_demoted_primary,
+    _is_resent_after_failover,
+    _is_unblocked_by_failover,
     _keep_target_replies,
     _merge_multi_shard_replies,
     _MultiShardSplit,
     _record_replies,
     _resolve_localhost,
     _should_request_refresh,
+    _shows_failover,
     _split_by_slot,
     _split_successes_and_failure,
     _topology_refresh_delay,
@@ -149,7 +151,6 @@ from redis.exceptions import (
     MaxClientsReachedError,
     MaxConnectionsError,
     MovedError,
-    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -445,7 +446,8 @@ class RedisCluster(
           Number of times to retry before raising an error when :class:`~.TimeoutError`,
           :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError`
           or :class:`~.ClusterDownError` are encountered, or when a node cached as a
-          primary answers with :class:`~.ReadOnlyError`
+          primary answers with :class:`~.ReadOnlyError`, or when a node answers
+          a blocking command with the UNBLOCKED error of a failover
     :param retry:
         | A retry object that defines the retry strategy and the number of
           retries for the cluster client. Its backoff sets the delay before each
@@ -1885,7 +1887,7 @@ class RedisCluster(
             except Exception as e:
                 if retry_attempts > 0 and (
                     type(e) in self.__class__.ERRORS_ALLOW_RETRY
-                    or getattr(e, "demoted_primary", False)
+                    or getattr(e, "failover_seen", False)
                 ):
                     if is_default_node:
                         # Replace the default cluster node
@@ -2216,8 +2218,9 @@ class RedisCluster(
                     connection=target_node,
                 )
             except ResponseError as e:
-                if _is_demoted_primary(e, target_node):
-                    e.demoted_primary = True
+                if _shows_failover(e, target_node):
+                    if _is_resent_after_failover(args[0]):
+                        e.failover_seen = True
                     # Ask for a topology refresh, run by the next attempt, of
                     # any command, once due; the caller retries this one
                     self._request_refresh()
@@ -2775,6 +2778,11 @@ class ClusterNode:
 
             # Read response
             return await self.parse_response(connection, args[0], **kwargs)
+        except ResponseError as e:
+            if _is_unblocked_by_failover(e):
+                # The server closes the connection after this reply
+                await connection.disconnect(nowait=True)
+            raise
         finally:
             try:
                 await self.disconnect_if_needed(connection)
@@ -2840,6 +2848,7 @@ class ClusterNode:
 
             # Read responses
             ret = False
+            unblocked = False
             may_yield = len(commands) >= _PIPELINE_YIELD_MIN_COMMANDS
             for i, cmd in enumerate(commands):
                 if may_yield and i and not i % _PIPELINE_YIELD_MIN_COMMANDS:
@@ -2851,6 +2860,11 @@ class ClusterNode:
                 except Exception as e:
                     cmd.result = e
                     ret = True
+                    if _is_unblocked_by_failover(e):
+                        unblocked = True
+            if unblocked:
+                # The server closes the connection after this reply
+                await connection.disconnect(nowait=True)
 
             return ret
         finally:
@@ -4186,7 +4200,8 @@ class PipelineStrategy(AbstractStrategy):
     ) -> List[Any]:
         """
         Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
-        a READONLY reply of a node cached as a primary, as many
+        a READONLY reply of a node cached as a primary and the UNBLOCKED reply
+        of a failover, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -4226,10 +4241,10 @@ class PipelineStrategy(AbstractStrategy):
 
                 except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                     raise
-                except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
-                    if isinstance(e, ReadOnlyError) and not getattr(
-                        e, "demoted_primary", False
-                    ):
+                except (*RedisCluster.ERRORS_ALLOW_RETRY, ResponseError) as e:
+                    if not isinstance(
+                        e, RedisCluster.ERRORS_ALLOW_RETRY
+                    ) and not getattr(e, "failover_seen", False):
                         raise
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
@@ -4267,11 +4282,16 @@ class PipelineStrategy(AbstractStrategy):
         allow_redirections: bool = True,
     ) -> List[Any]:
         # A retry resends only the commands no node answered and the ones that failed:
-        # resending one that succeeded would run a write twice.
+        # resending one that succeeded would run a write twice. A failed command that
+        # must not be sent again keeps its error.
         todo = [
             cmd
             for cmd in stack
-            if cmd.result is _UNANSWERED or isinstance(cmd.result, Exception)
+            if cmd.result is _UNANSWERED
+            or (
+                isinstance(cmd.result, Exception)
+                and not getattr(cmd.result, "not_resent", False)
+            )
         ]
 
         nodes = {}
@@ -4410,33 +4430,37 @@ class PipelineStrategy(AbstractStrategy):
         # Let every node task settle before raising, so a retry never resends
         # commands that a sibling task is still executing
         errors = await asyncio.gather(*tasks, return_exceptions=True)
-        # A primary that answered READONLY was demoted: ask for a topology refresh, run
-        # by the next attempt once due. Marked before the replies are merged and before
-        # a node error is raised below, so a retry resends the command either way.
-        demoted = False
+        # A READONLY reply of a primary or an UNBLOCKED reply shows a failover: ask for
+        # a topology refresh, run by the next attempt once due. Marked before the
+        # replies are merged and before a node error is raised below, so a retry
+        # resends the command either way.
+        failed_over = False
         for (node, commands), failed in zip(nodes.values(), errors):
             if failed is not True:
-                # Only a node whose replies hold an error can hold a READONLY
+                # Only a node whose replies hold an error can hold a READONLY or
+                # an UNBLOCKED
                 continue
-            node_demoted = False
+            node_failed_over = False
             for cmd in commands:
-                if _is_demoted_primary(cmd.result, node):
-                    node_demoted = True
+                if _shows_failover(cmd.result, node):
+                    node_failed_over = True
                     named = named_targets.get(cmd.position)
-                    if named is None:
-                        cmd.result.demoted_primary = True
-                    else:
+                    if named is not None:
                         # Not retried, as RedisCluster does not retry a command with
                         # target nodes, and resent to them if the attempt is retried
                         # for another command
                         cmd.target_nodes = named
-            if node_demoted:
-                demoted = True
+                    elif _is_resent_after_failover(cmd.args[0]):
+                        cmd.result.failover_seen = True
+                    else:
+                        cmd.result.not_resent = True
+            if node_failed_over:
+                failed_over = True
                 if node == client.get_default_node():
                     # Replace it now, as a command does: the refresh runs
                     # only once due
                     client.replace_default_node()
-        if demoted:
+        if failed_over:
             client._request_refresh()
 
         if fanned_out:
@@ -4517,7 +4541,10 @@ class PipelineStrategy(AbstractStrategy):
                 error=node_error,
             )
 
-        if any(errors):
+        # A retry leaves out a failed command that must not be sent again. Its error
+        # is still raised when the commands that were resent all succeed.
+        retried = len(todo) != len(stack)
+        if retried or any(errors):
             if allow_redirections:
                 # A split MULTI_SHARD command resends only the slots that failed, and a
                 # command sent to several nodes asks only the nodes that have not
@@ -4556,7 +4583,7 @@ class PipelineStrategy(AbstractStrategy):
                             cmd.result = e
 
             if raise_on_error:
-                for cmd in todo:
+                for cmd in stack if retried else todo:
                     result = cmd.result
                     if isinstance(result, Exception):
                         command = command_text(cmd.args)
