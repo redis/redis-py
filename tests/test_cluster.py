@@ -38,6 +38,8 @@ from redis.cluster import (
     LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
+    _can_be_resent_after_failover,
+    _shows_failover,
     _resolve_localhost,
     get_node_name,
     parse_cluster_shards,
@@ -5848,6 +5850,352 @@ class TestTopologyRefreshPacing:
         flushed = [redis for name, redis in sent if name == "FLUSHALL"]
         assert flushed == [target] * (2 if retried_with else 1)
         assert nm._refresh_requested is True
+
+    # What a primary that turns into a replica answers its blocked clients
+    UNBLOCKED_BY_FAILOVER = (
+        "UNBLOCKED force unblock from blocking operation, "
+        "instance state changed (master -> replica?)"
+    )
+
+    @staticmethod
+    def _new_connection_each_checkout():
+        """
+        Patch ``get_connection`` to hand out a new mocked connection on every
+        checkout, and return the patch and the connections it handed out.
+        """
+        connections = []
+
+        def get_connection(redis_node, *args, **options):
+            connections.append(Mock())
+            return connections[-1]
+
+        return (
+            patch("redis.cluster.get_connection", side_effect=get_connection),
+            connections,
+        )
+
+    @staticmethod
+    def _assert_closed_for_unblocked(connection):
+        """
+        :connection: was disconnected once, with the UNBLOCKED error as the
+        reason, so the close is recorded as one an error caused.
+        """
+        connection.disconnect.assert_called_once()
+        error = connection.disconnect.call_args.kwargs["error"]
+        assert isinstance(error, ResponseError)
+        assert "UNBLOCKED" in str(error)
+
+    @staticmethod
+    def _blpop_client(**kwargs):
+        """
+        A mocked client whose commands parser also knows the keys of BLPOP.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port, **kwargs)
+        rc.commands_parser.commands["blpop"] = {
+            "name": "blpop",
+            "arity": -3,
+            "flags": ["write", "blocking"],
+            "first_key_pos": 1,
+            "last_key_pos": -2,
+            "step_count": 1,
+        }
+        return rc
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_unblocked_from_a_primary_asks_for_a_refresh_and_is_retried(self):
+        """
+        A primary that turns into a replica answers UNBLOCKED to every client
+        blocked on it and closes their connections. Nothing was popped, so the
+        command asks for a topology refresh and is retried, and the connection
+        that got the error is disconnected instead of being reused.
+        """
+        rc = self._blpop_client()
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        checkout, connections = self._new_connection_each_checkout()
+        replies = [ResponseError(self.UNBLOCKED_BY_FAILOVER), [b"foo", b"bar"]]
+        with (
+            checkout,
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            assert rc.execute_command("BLPOP", "foo", 0) == [b"foo", b"bar"]
+
+        assert parse.call_count == len(replies)
+        init.assert_called_once()
+        assert [c.disconnect.call_count for c in connections] == [1, 0]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "message, named_target",
+        [
+            (UNBLOCKED_BY_FAILOVER, True),
+            ("UNBLOCKED client unblocked via CLIENT UNBLOCK", False),
+            ("ERR some other error", False),
+        ],
+        ids=["unblocked-with-a-named-target", "client-unblock", "other-error"],
+    )
+    def test_unblocked_with_a_named_target_or_another_error_is_raised_at_once(
+        self, pipeline, message, named_target
+    ):
+        """
+        A command sent to a node the caller named is never retried, so its
+        UNBLOCKED is raised, but the connection the server closed is
+        disconnected and a refresh is asked for. CLIENT UNBLOCK ... ERROR, which
+        keeps the connection open, and any other error are raised as before.
+        """
+        rc = self._blpop_client()
+        targets = {"target_nodes": rc.get_replicas()[0]} if named_target else {}
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", side_effect=ResponseError(message)
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match=message.split(" ")[0]):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command("BLPOP", "foo", 0, **targets)
+                    pipe.execute()
+                else:
+                    rc.execute_command("BLPOP", "foo", 0, **targets)
+
+        assert parse.call_count == 1
+        closed = message == self.UNBLOCKED_BY_FAILOVER
+        assert rc.nodes_manager._refresh_requested is closed
+        assert [c.disconnect.call_count for c in connections] == [int(closed)]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "command", [("WAIT", 1, 0), ("WAITAOF", 1, 1, 0)], ids=["wait", "waitaof"]
+    )
+    def test_wait_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, pipeline, command
+    ):
+        """
+        WAIT and WAITAOF ask about the earlier writes of their own connection.
+        A retry would run on another connection and report them as replicated,
+        so their UNBLOCKED is raised. The refresh is still asked for and the
+        connection the server closed is still disconnected.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis,
+                "parse_response",
+                side_effect=ResponseError(self.UNBLOCKED_BY_FAILOVER),
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match="UNBLOCKED"):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command(*command)
+                    pipe.execute()
+                else:
+                    rc.execute_command(*command)
+
+        assert parse.call_count == 1
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c.disconnect.call_count for c in connections] == [1]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    def test_unblocked_from_a_replica_asks_for_a_refresh_and_is_retried(self):
+        """
+        A replica that is moved to a new primary answers UNBLOCKED to the
+        clients blocked on it as well. A read that was routed to it is retried
+        like a command a demoted primary unblocked.
+        """
+        rc = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        asked = []
+
+        def get_connection(redis_node, *args, **options):
+            asked.append(redis_node)
+            return Mock()
+
+        replies = [ResponseError(self.UNBLOCKED_BY_FAILOVER), b"value"]
+        with (
+            patch("redis.cluster.get_connection", side_effect=get_connection),
+            patch.object(Redis, "parse_response", side_effect=replies) as parse,
+            patch.object(NodesManager, "initialize", autospec=True) as init,
+        ):
+            assert rc.get("foo") == b"value"
+
+        assert parse.call_count == len(replies)
+        init.assert_called_once()
+        replicas = [rc.get_redis_connection(node) for node in rc.get_replicas()]
+        assert asked[0] in replicas
+
+    @pytest.mark.fixed_client
+    def test_unblocked_shows_a_failover_from_a_primary_and_from_a_replica(self):
+        """
+        A replica that is moved to a new primary answers UNBLOCKED to its
+        blocked clients too, so the reply counts whatever the node is cached
+        as. READONLY counts only from a node cached as a primary.
+        """
+        primary = ClusterNode(default_host, 7000, PRIMARY)
+        replica = ClusterNode(default_host, 7003, REPLICA)
+        unblocked = ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        assert _shows_failover(unblocked, primary) is True
+        assert _shows_failover(unblocked, replica) is True
+        assert _shows_failover(ReadOnlyError("READONLY"), primary) is True
+        assert _shows_failover(ReadOnlyError("READONLY"), replica) is False
+        assert _shows_failover(ResponseError("ERR other"), primary) is False
+
+    @pytest.mark.fixed_client
+    def test_unblocked_is_not_retried_when_retries_are_disabled(self):
+        """
+        The UNBLOCKED reply is retried within the limits of ``retry``. With no
+        retries allowed the command is sent once and its error is raised.
+        """
+        rc = self._blpop_client(retry=Retry(NoBackoff(), 0))
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis,
+                "parse_response",
+                side_effect=ResponseError(self.UNBLOCKED_BY_FAILOVER),
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match="UNBLOCKED"):
+                rc.execute_command("BLPOP", "foo", 0)
+
+        assert parse.call_count == 1
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c.disconnect.call_count for c in connections] == [1]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "command_name, resent",
+        [
+            ("BLPOP", True),
+            ("WAIT", False),
+            ("waitaof", False),
+            (b"WAIT", False),
+            (b"waitaof", False),
+        ],
+    )
+    def test_wait_is_not_resent_whatever_the_form_of_its_name(
+        self, command_name, resent
+    ):
+        """
+        A command name can be passed as bytes and in any case. WAIT and WAITAOF
+        are not sent again after a failover in any of these forms.
+        """
+        assert _can_be_resent_after_failover(command_name) is resent
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, raise_on_error
+    ):
+        """
+        A pipeline does not retry an UNBLOCKED reply. The command keeps the
+        error as its result, which ``raise_on_error`` raises. The pipeline asks
+        for a topology refresh and disconnects only the connection the server
+        closed.
+        """
+        rc = self._blpop_client()
+        checkout, connections = self._new_connection_each_checkout()
+        unblocked = []
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            sent.append(command_name)
+            if command_name == "GET":
+                return b"value"
+            unblocked.append(connection)
+            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+        ):
+            pipe = rc.pipeline()
+            pipe.get("foo")
+            pipe.execute_command("BLPOP", "bar", 0)
+            if raise_on_error:
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    pipe.execute()
+            else:
+                result = pipe.execute(raise_on_error=False)
+                assert result[0] == b"value"
+                assert isinstance(result[1], ResponseError)
+                assert "UNBLOCKED" in str(result[1])
+
+        assert sent == ["GET", "BLPOP"]
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c for c in connections if c.disconnect.called] == unblocked
+        self._assert_closed_for_unblocked(unblocked[0])
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_unblocked_followed_by_commands_resends_those_of_its_node(
+        self, raise_on_error
+    ):
+        """
+        The server closes the connection after an UNBLOCKED reply, so reading
+        the reply of a command the pipeline sent after it fails with a
+        connection error. That path is intentionally left as it was: the
+        pipeline sends all commands of that node again, one at a time, the
+        blocking command included.
+        """
+        rc = self._blpop_client()
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        node = rc.get_default_node()
+        key = next(
+            k for k in ("foo", "bar", "baz", "qux") if rc.get_node_from_key(k) == node
+        )
+        checkout, _ = self._new_connection_each_checkout()
+        closed = []
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            if connection in closed:
+                raise ConnectionError("Connection closed by server.")
+            sent.append(command_name)
+            if command_name == "BLPOP":
+                if not closed:
+                    closed.append(connection)
+                    raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+                return [key.encode(), b"x"]
+            return b"value"
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            pipe = rc.pipeline()
+            pipe.get(key)
+            pipe.execute_command("BLPOP", key, 0)
+            pipe.get(key)
+            assert pipe.execute(raise_on_error=raise_on_error) == [
+                b"value",
+                [key.encode(), b"x"],
+                b"value",
+            ]
+
+        assert sent == ["GET", "BLPOP", "GET", "BLPOP", "GET"]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
