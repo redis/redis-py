@@ -1775,6 +1775,15 @@ def collect_groups(client, res, alias, group_field="color"):
     }
 
 
+def _aggregate_scores(res):
+    """Return the sorted ``__score`` values from an FT.AGGREGATE result."""
+    if isinstance(res, dict):
+        return sorted(
+            float(row["extra_attributes"]["__score"]) for row in res["results"]
+        )
+    return sorted(float(row[row.index("__score") + 1]) for row in res.rows)
+
+
 class TestAggregations(AsyncSearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.onlynoncluster
@@ -2552,7 +2561,9 @@ class TestAggregations(AsyncSearchTestsBase):
         assert await decoded_r.hset("doc1", mapping={"name": "bar", "age": "25"})
         assert await decoded_r.hset("doc2", mapping={"name": "foo", "age": "19"})
 
-        req = aggregations.AggregateRequest("*").add_scores()
+        # Pin the scorer so this response-shape test does not depend on the
+        # server-version-dependent default scorer.
+        req = aggregations.AggregateRequest("*").scorer("TFIDF").add_scores()
         res = await decoded_r.ft().aggregate(req)
 
         if isinstance(res, dict):
@@ -2563,6 +2574,45 @@ class TestAggregations(AsyncSearchTestsBase):
             assert len(res.rows) == 2
             assert res.rows[0] == ["__score", "0.2"]
             assert res.rows[1] == ["__score", "0.2"]
+
+    def test_aggregate_request_scorer_is_opt_in(self):
+        args = aggregations.AggregateRequest("*").build_args()
+        assert "SCORER" not in args
+
+        args = aggregations.AggregateRequest("*").scorer("BM25").build_args()
+        assert args[args.index("SCORER") + 1] == "BM25"
+
+    @pytest.mark.redismod
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.9.0")
+    async def test_aggregation_uses_server_default_scorer(self, decoded_r: redis.Redis):
+        assert await decoded_r.ft().create_index((TextField("description"),))
+        assert await decoded_r.hset(
+            "doc1",
+            mapping={"description": "The quick brown fox jumps over the lazy dog"},
+        )
+        assert await decoded_r.hset(
+            "doc2",
+            mapping={
+                "description": "Quick alice was beginning to get very tired of "
+                "sitting by her quick sister on the bank, and of having nothing to do."
+            },
+        )
+        await self.waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
+
+        default_res = await decoded_r.ft().aggregate(
+            aggregations.AggregateRequest("quick").add_scores()
+        )
+        bm25_res = await decoded_r.ft().aggregate(
+            aggregations.AggregateRequest("quick").scorer("BM25STD").add_scores()
+        )
+        tfidf_res = await decoded_r.ft().aggregate(
+            aggregations.AggregateRequest("quick").scorer("TFIDF").add_scores()
+        )
+
+        bm25_scores = _aggregate_scores(bm25_res)
+        assert bm25_scores != _aggregate_scores(tfidf_res)
+        assert _aggregate_scores(default_res) == pytest.approx(bm25_scores)
 
     @pytest.mark.redismod
     @skip_ifmodversion_lt("2.10.05", "search")
