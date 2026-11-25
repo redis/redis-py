@@ -4216,6 +4216,68 @@ class TestRedisClusterObj:
         assert failed == ["command", "lookup"]
         assert replace_default_node.call_count == 2
 
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_default_node_is_replaced_once_for_lookup_failure_after_moved(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        A command sent to the default node that gets MOVED looks its keys up again
+        (COMMAND GETKEYS). When that lookup fails on the default node, the lookup
+        replaces it, and the attempt, although it targeted the default node, does
+        not replace the new default node as well.
+        """
+        default_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) == default_node
+        )
+        await r.xadd(stream, {"f": "v"})
+        events = []
+        real_execute_command = ClusterNode.execute_command
+        real_get_keys = r.commands_parser.get_keys
+        real_replace_default_node = RedisCluster.replace_default_node
+
+        async def execute_command(node, *args, **kwargs):
+            response = await real_execute_command(node, *args, **kwargs)
+            if args[0] == "XREAD" and not events:
+                events.append("moved")
+                raise MovedError(
+                    f"{r.keyslot(stream)} {default_node.host}:{default_node.port}"
+                )
+            return response
+
+        async def get_keys(*args):
+            if events == ["moved"]:
+                events.append("lookup")
+                raise ConnectionError("Error 61 connecting. Connection refused.")
+            return await real_get_keys(*args)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so none runs between the attempts
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(r.commands_parser, "get_keys", side_effect=get_keys),
+            mock.patch.object(
+                RedisCluster,
+                "replace_default_node",
+                autospec=True,
+                side_effect=real_replace_default_node,
+            ) as replace_default_node,
+        ):
+            assert await r.xread({stream: "0-0"}, count=1)
+
+        assert events == ["moved", "lookup"]
+        assert replace_default_node.call_count == 1
+        assert r.get_default_node() != default_node
+
     async def test_exhausted_default_node_pool_is_kept_for_command_keys(
         self, r: RedisCluster
     ) -> None:

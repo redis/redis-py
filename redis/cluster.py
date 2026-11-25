@@ -2625,8 +2625,10 @@ class RedisCluster(
                     type(e) in self.__class__.ERRORS_ALLOW_RETRY
                     or getattr(e, "failover_seen", False)
                 ):
-                    if is_default_node:
-                        # Replace the default cluster node
+                    if is_default_node and target_nodes[0] == self.get_default_node():
+                        # Replace the default cluster node, unless the attempt
+                        # replaced it already: a lookup of the command's keys
+                        # that fails on it after a MOVED does
                         self.replace_default_node()
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
