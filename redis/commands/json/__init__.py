@@ -5,6 +5,7 @@ from typing import Literal
 
 import redis
 
+from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
     apply_module_callbacks,
     get_legacy_responses,
@@ -274,12 +275,30 @@ class Pipeline(JSONCommands, redis.client.Pipeline):
     """Pipeline for the module."""
 
 
+class AsyncPipeline(JSONCommands, AsyncioPipeline):
+    """Asyncio pipeline for the module."""
+
+
 class JSON(_JSONBase):
     _is_async_client: Literal[False] = False
 
 
 class AsyncJSON(_JSONBase):
     _is_async_client: Literal[True] = True
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates an asyncio pipeline for the JSON module, that can be used for
+        executing JSON commands, as well as classic core commands.
+        """
+        p = AsyncPipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=dict(self.client.response_callbacks),
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        p._encode = self._encode
+        p._decode = self._decode
+        return p
 
     async def set_file(
         self,
