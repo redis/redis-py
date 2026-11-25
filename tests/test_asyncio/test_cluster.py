@@ -8,6 +8,7 @@ import platform
 import ssl
 import warnings
 import weakref
+from time import monotonic
 from typing import (
     Any,
     Awaitable,
@@ -4003,6 +4004,8 @@ class TestRedisClusterObj:
             nodes = await r.cluster_nodes()
             assert "myself" not in nodes.get(curr_default_node.name).get("flags")
             assert r.get_default_node() != curr_default_node
+            # The commands parser asks the new default node too
+            assert r.commands_parser.node is r.get_default_node()
         finally:
             # Restore original connections so teardown can work
             while curr_default_node._free:
@@ -4011,6 +4014,305 @@ class TestRedisClusterObj:
                 curr_default_node._free.append(conn)
             # Rollback to the old default node
             r.replace_default_node(curr_default_node)
+
+    @pytest.mark.parametrize("refresh_due", [False, True])
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_refused_default_node_is_replaced_for_command_keys(
+        self, r: RedisCluster, refresh_due: bool
+    ) -> None:
+        """
+        The keys of XREAD are found by asking the commands parser's node, the default
+        node (COMMAND GETKEYS). When that node refuses connections, the lookup asks for
+        a topology refresh that tries it last and replaces the default node, so the
+        retry asks another node rather than dialing the refusing one again until the
+        refresh runs.
+        """
+        bad_node = r.get_default_node()
+        assert r.commands_parser.node == bad_node
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) != bad_node
+        )
+        await r.xadd(stream, {"f": "v"})
+        events = []
+        real_connect = Connection.connect_check_health
+
+        async def connect(connection, *args, **kwargs):
+            if not connection.is_connected and (connection.host, connection.port) == (
+                bad_node.host,
+                bad_node.port,
+            ):
+                events.append("dial")
+                raise ConnectionError(
+                    f"Error 61 connecting to {bad_node.name}. Connection refused."
+                )
+            return await real_connect(connection, *args, **kwargs)
+
+        async def initialize(nodes_manager, **kwargs):
+            events.append(("refresh", nodes_manager._requested_last_failed_node_name))
+
+        nm = r.nodes_manager
+        # The last refresh ended long ago, or just now
+        nm._last_refresh_at = None if refresh_due else monotonic()
+        nm._refresh_due_at = None
+        await bad_node.disconnect()
+        with (
+            mock.patch.object(
+                Connection, "connect_check_health", autospec=True, side_effect=connect
+            ),
+            mock.patch.object(
+                NodesManager, "initialize", autospec=True, side_effect=initialize
+            ),
+            mock.patch.object(
+                RedisCluster, "_record_error_metric", autospec=True
+            ) as record_error_metric,
+        ):
+            assert await r.xread({stream: "0-0"}, count=1)
+
+        # The failed attempt is reported with the node that refused
+        assert [
+            call.kwargs["connection"] for call in record_error_metric.call_args_list
+        ] == [bad_node]
+        # One refused connect, and a refresh run before the retry once due
+        if refresh_due:
+            assert events == ["dial", ("refresh", bad_node.name)]
+        else:
+            assert events == ["dial"]
+            assert r._initialize
+            assert nm._requested_last_failed_node_name == bad_node.name
+        assert r.get_default_node() != bad_node
+        assert r.commands_parser.node == r.get_default_node()
+
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_refused_commands_parser_node_is_replaced_for_command_keys(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        A commands parser's node that is not the default node, and refuses connections
+        when asked for the keys of XREAD, is replaced by the default node. The default
+        node, which did not fail, is kept.
+        """
+        default_node = r.get_default_node()
+        bad_node = next(node for node in r.get_primaries() if node != default_node)
+        r.commands_parser.node = bad_node
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) != bad_node
+        )
+        await r.xadd(stream, {"f": "v"})
+        events = []
+        real_connect = Connection.connect_check_health
+
+        async def connect(connection, *args, **kwargs):
+            if not connection.is_connected and (connection.host, connection.port) == (
+                bad_node.host,
+                bad_node.port,
+            ):
+                events.append("dial")
+                raise ConnectionError(
+                    f"Error 61 connecting to {bad_node.name}. Connection refused."
+                )
+            return await real_connect(connection, *args, **kwargs)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so the one asked for is not due
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        await bad_node.disconnect()
+        with mock.patch.object(
+            Connection, "connect_check_health", autospec=True, side_effect=connect
+        ):
+            assert await r.xread({stream: "0-0"}, count=1)
+
+        assert events == ["dial"]
+        assert r._initialize
+        assert nm._requested_last_failed_node_name == bad_node.name
+        assert r.get_default_node() is default_node
+        assert r.commands_parser.node is default_node
+
+    def test_replace_default_node_repoints_commands_parser(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        A commands parser that asks the default node follows it when it is replaced.
+        One that asks another node is left as it is.
+        """
+        prev_default_node = r.get_default_node()
+        assert r.commands_parser.node is prev_default_node
+
+        r.replace_default_node()
+        assert r.get_default_node() != prev_default_node
+        assert r.commands_parser.node is r.get_default_node()
+
+        r.commands_parser.node = prev_default_node
+        r.replace_default_node(prev_default_node)
+        assert r.commands_parser.node is prev_default_node
+
+        other_node = next(
+            node for node in r.get_primaries() if node != prev_default_node
+        )
+        r.commands_parser.node = other_node
+        r.replace_default_node()
+        assert r.commands_parser.node is other_node
+
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_default_node_is_replaced_once_per_failed_attempt(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        An attempt that fails on the default node replaces it. When the next
+        attempt fails in the lookup of the keys of XREAD (COMMAND GETKEYS) on the
+        new default node, that node is replaced once, by the lookup: the attempt
+        failed before its nodes were determined, so it does not replace the
+        default node again.
+        """
+        default_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) == default_node
+        )
+        await r.xadd(stream, {"f": "v"})
+        failed = []
+        real_execute_command = RedisCluster._execute_command
+        real_get_keys = r.commands_parser.get_keys
+        real_replace_default_node = RedisCluster.replace_default_node
+
+        async def execute_command(cluster, target_node, *args, **kwargs):
+            if not failed:
+                failed.append("command")
+                raise ConnectionError(f"Error 61 connecting to {target_node.name}.")
+            return await real_execute_command(cluster, target_node, *args, **kwargs)
+
+        async def get_keys(*args):
+            if failed == ["command"]:
+                failed.append("lookup")
+                raise ConnectionError("Error 61 connecting. Connection refused.")
+            return await real_get_keys(*args)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so none runs between the attempts
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        with (
+            mock.patch.object(
+                RedisCluster,
+                "_execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(r.commands_parser, "get_keys", side_effect=get_keys),
+            mock.patch.object(
+                RedisCluster,
+                "replace_default_node",
+                autospec=True,
+                side_effect=real_replace_default_node,
+            ) as replace_default_node,
+        ):
+            assert await r.xread({stream: "0-0"}, count=1)
+
+        assert failed == ["command", "lookup"]
+        assert replace_default_node.call_count == 2
+
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_default_node_is_replaced_once_for_lookup_failure_after_moved(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        A command sent to the default node that gets MOVED looks its keys up again
+        (COMMAND GETKEYS). When that lookup fails on the default node, the lookup
+        replaces it, and the attempt, although it targeted the default node, does
+        not replace the new default node as well.
+        """
+        default_node = r.get_default_node()
+        stream = next(
+            key
+            for key in _keys_on_every_shard(r, "stream")
+            if r.get_node_from_key(key) == default_node
+        )
+        await r.xadd(stream, {"f": "v"})
+        events = []
+        real_execute_command = ClusterNode.execute_command
+        real_get_keys = r.commands_parser.get_keys
+        real_replace_default_node = RedisCluster.replace_default_node
+
+        async def execute_command(node, *args, **kwargs):
+            response = await real_execute_command(node, *args, **kwargs)
+            if args[0] == "XREAD" and not events:
+                events.append("moved")
+                raise MovedError(
+                    f"{r.keyslot(stream)} {default_node.host}:{default_node.port}"
+                )
+            return response
+
+        async def get_keys(*args):
+            if events == ["moved"]:
+                events.append("lookup")
+                raise ConnectionError("Error 61 connecting. Connection refused.")
+            return await real_get_keys(*args)
+
+        nm = r.nodes_manager
+        # The last refresh ended just now, so none runs between the attempts
+        nm._last_refresh_at = monotonic()
+        nm._refresh_due_at = None
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(r.commands_parser, "get_keys", side_effect=get_keys),
+            mock.patch.object(
+                RedisCluster,
+                "replace_default_node",
+                autospec=True,
+                side_effect=real_replace_default_node,
+            ) as replace_default_node,
+        ):
+            assert await r.xread({stream: "0-0"}, count=1)
+
+        assert events == ["moved", "lookup"]
+        assert replace_default_node.call_count == 1
+        assert r.get_default_node() != default_node
+
+    async def test_exhausted_default_node_pool_is_kept_for_command_keys(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        An exhausted pool of the commands parser's node, the default node, is not a
+        node failure. A lookup of the keys of XREAD that fails with it is raised as it
+        is: no topology refresh is asked for, and the default node, the parser's node
+        and the node's place in the cached nodes are kept.
+        """
+        default_node = r.get_default_node()
+        assert r.commands_parser.node is default_node
+        nm = r.nodes_manager
+        cached_nodes = list(nm.nodes_cache)
+        assert not r._initialize
+        real_acquire_connection = ClusterNode.acquire_connection
+
+        def acquire_connection(node):
+            if node is default_node:
+                raise MaxConnectionsError("Too many connections")
+            return real_acquire_connection(node)
+
+        with mock.patch.object(
+            ClusterNode,
+            "acquire_connection",
+            autospec=True,
+            side_effect=acquire_connection,
+        ):
+            with pytest.raises(MaxConnectionsError):
+                await r.xread({"stream": "0-0"}, count=1)
+
+        assert not r._initialize
+        assert nm._requested_last_failed_node_name is None
+        assert r.get_default_node() is default_node
+        assert r.commands_parser.node is default_node
+        assert list(nm.nodes_cache) == cached_nodes
 
     @skip_if_redis_enterprise()
     async def test_address_remap(self, create_redis, master_host):
@@ -10979,6 +11281,79 @@ class TestClusterPipelineMocked:
             assert len(private_connections) == 1
             private_connections[0].disconnect.assert_awaited_once()
             assert not private_connections[0].is_connected
+        finally:
+            await client.aclose()
+
+    async def test_transaction_movablekeys_unreachable_parser_node_is_replaced(
+        self,
+    ) -> None:
+        """
+        A parser node that cannot be reached while a transaction resolves a slot on
+        its private loop is replaced by another node, as on the caller's loop. The
+        cleanup keeps that replacement, and disconnects only the private loop's node,
+        not the node the parser now points at.
+        """
+        client = RedisCluster(host=default_host, port=default_port)
+        parser_node = ClusterNode(
+            default_host,
+            default_port,
+            PRIMARY,
+            **client.nodes_manager.connection_kwargs,
+        )
+        other_node = ClusterNode(
+            default_host,
+            default_port + 1,
+            PRIMARY,
+            **client.nodes_manager.connection_kwargs,
+        )
+        disconnect_nodes = []
+
+        def make_private_connection(**kwargs):
+            connection = mock.AsyncMock(spec=Connection)
+            connection._resp2_fallback = False
+            connection.is_connected = False
+            connection.should_reconnect.return_value = False
+            connection.pack_command.return_value = [b"COMMAND GETKEYS"]
+            connection.read_response.side_effect = ConnectionError(
+                "Connection refused."
+            )
+            return connection
+
+        node_disconnect = ClusterNode.disconnect
+
+        async def disconnect_node(node):
+            disconnect_nodes.append(node)
+            await node_disconnect(node)
+
+        client.nodes_manager.connection_kwargs["connection_class"] = (
+            make_private_connection
+        )
+        client.nodes_manager.default_node = parser_node
+        client.nodes_manager.nodes_cache[parser_node.name] = parser_node
+        client.nodes_manager.nodes_cache[other_node.name] = other_node
+        client._initialize = False
+        client._topology_ready = True
+        client.commands_parser.node = parser_node
+        client.commands_parser.commands = {
+            "zunionstore": {"name": "zunionstore", "flags": ["movablekeys"]}
+        }
+
+        try:
+            with mock.patch.object(ClusterNode, "disconnect", disconnect_node):
+                pipe = client.pipeline(transaction=True)
+                with pytest.raises(ConnectionError):
+                    pipe.zunionstore("{tag}out", ["{tag}a", "{tag}b"])
+
+            assert client.get_default_node() is other_node
+            assert client.commands_parser.node is other_node
+            assert client._initialize
+            assert (
+                client.nodes_manager._requested_last_failed_node_name
+                == parser_node.name
+            )
+            assert len(disconnect_nodes) == 1
+            assert disconnect_nodes[0] is not parser_node
+            assert disconnect_nodes[0] is not other_node
         finally:
             await client.aclose()
 
