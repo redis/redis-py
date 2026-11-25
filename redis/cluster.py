@@ -836,7 +836,7 @@ def _shows_failover(error: Any, node: "ClusterNode") -> bool:
 _NOT_RESENT_AFTER_FAILOVER = frozenset(("WAIT", "WAITAOF"))
 
 
-def _is_resent_after_failover(command_name: str) -> bool:
+def _is_resent_after_failover(command_name: str | bytes) -> bool:
     """
     Return whether a command that got an error ``_shows_failover`` accepts
     can be sent again. A command of the server that was unblocked while it
@@ -847,7 +847,7 @@ def _is_resent_after_failover(command_name: str) -> bool:
     their error. With ``raise_on_error`` it then raises without a retry. Without
     it, a retry that another error leads to leaves them out.
     """
-    return command_name.upper() not in _NOT_RESENT_AFTER_FAILOVER
+    return str_if_bytes(command_name).upper() not in _NOT_RESENT_AFTER_FAILOVER
 
 
 def _error_to_raise(
@@ -6957,26 +6957,25 @@ class PipelineStrategy(AbstractStrategy):
         # runs before the commands of its node that got no reply, in the order of
         # the pipeline. It is left out when an error that is raised anyway makes
         # the pipeline fail: a blocking pop would lose the element it takes.
-        if never_resent and raise_on_error:
-            resend_unblocked = False
+        unblocked = None
+        if resend_unblocked and not (never_resent and raise_on_error):
+            unblocked = [
+                c
+                for c in attempt
+                if getattr(c.result, "failover_seen", False)
+                and _is_unblocked_by_failover(c.result)
+            ]
         attempt = sorted(
             (
                 c
                 for c in attempt
-                if (
-                    isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
-                    and not isinstance(
-                        c.result, ClusterPipeline.NOT_NODE_FAILURE_ERRORS
-                    )
-                )
-                or (
-                    resend_unblocked
-                    and getattr(c.result, "failover_seen", False)
-                    and _is_unblocked_by_failover(c.result)
-                )
+                if isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
+                and not isinstance(c.result, ClusterPipeline.NOT_NODE_FAILURE_ERRORS)
             ),
             key=lambda x: x.position,
         )
+        if unblocked:
+            attempt = sorted(attempt + unblocked, key=lambda x: x.position)
         parsed_here.difference_update(c.position for c in attempt)
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
