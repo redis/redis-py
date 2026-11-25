@@ -18,6 +18,11 @@ from redis.sentinel import (
     SlaveNotFoundError,
 )
 
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = skip_if_redis_enterprise()
+
 
 @pytest.fixture(scope="module")
 def master_ip(master_host):

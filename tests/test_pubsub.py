@@ -37,6 +37,7 @@ from redis.utils import str_if_bytes
 from .conftest import (
     REDIS_INFO,
     _get_client,
+    is_redis_enterprise_cluster,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
@@ -44,9 +45,16 @@ from .conftest import (
 )
 
 
+# A Redis Enterprise cluster proxy can take up to about one second to confirm
+# the first SUBSCRIBE or PSUBSCRIBE on a connection.
+RE_CLUSTER_MIN_MESSAGE_WAIT = 2.0
+
+
 def wait_for_message(
     pubsub, timeout=0.5, ignore_subscribe_messages=False, node=None, func=None
 ):
+    if is_redis_enterprise_cluster():
+        timeout = max(timeout, RE_CLUSTER_MIN_MESSAGE_WAIT)
     now = time.monotonic()
     timeout = now + timeout
     while now < timeout:
@@ -201,6 +209,7 @@ class TestPubSubSubscriberModeProtocol:
         finally:
             p.close()
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     def test_subscriber_mode_rejects_regular_command_after_ssubscribe(self, request):
         r = self._get_resp2_client(request, cluster=True)
@@ -1559,6 +1568,7 @@ class TestPubSubSubcommands:
             assert wait_for_message(p)["type"] == "psubscribe"
         assert r.pubsub_numpat() == 3
 
+    @skip_if_redis_enterprise()
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("7.0.0")
     def test_pubsub_shardnumsub(self, r):
@@ -2096,8 +2106,8 @@ class TestPubSubWorkerThread:
 
 class TestPubSubDeadlock:
     @pytest.mark.timeout(30, method="thread")
-    def test_pubsub_deadlock(self, master_host):
-        pool = redis.ConnectionPool(host=master_host[0], port=master_host[1])
+    def test_pubsub_deadlock(self, master_connection_kwargs):
+        pool = redis.ConnectionPool(**master_connection_kwargs)
         r = redis.Redis(connection_pool=pool)
 
         for i in range(60):
@@ -2863,7 +2873,9 @@ class TestPubSubTimeoutPropagation:
         p.subscribe("partly-received")
         assert wait_for_message(p, timeout=1.0) is not None
         r.publish("partly-received", "hello")
-        assert p.connection.can_read(timeout=1.0)
+        assert p.connection.can_read(
+            timeout=5.0 if is_redis_enterprise_cluster() else 1.0
+        )
 
         # What the parser raises when the rest of the message does not arrive
         # within the read timeout; the unread data stays on the connection.
@@ -2884,7 +2896,9 @@ class TestPubSubTimeoutPropagation:
         """
         p = r.pubsub(push_handler_func=lambda message: None)
         p.subscribe("partly-received")
-        assert p.connection.can_read(timeout=1.0)
+        assert p.connection.can_read(
+            timeout=5.0 if is_redis_enterprise_cluster() else 1.0
+        )
 
         with (
             mock.patch.object(p.connection, "read_response", side_effect=TimeoutError),

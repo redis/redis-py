@@ -198,6 +198,9 @@ python -m benchmarks.measure_read_path.recorder_micro --trees $TREES
 
 # Cluster command routing, no network after setup: sync and async
 python -m benchmarks.measure_read_path.routing_micro --trees $TREES
+
+# Pool re-authentication with a renewed token: sync and async
+python -m benchmarks.measure_read_path.re_auth_micro --trees $TREES
 ```
 
 `run_bench` covers the pure-Python parser and hiredis, each on RESP3 and RESP2,
@@ -261,14 +264,25 @@ scenario checks that every command went to the node that owns its key's
 slot. Routing costs a few microseconds per command, which the
 round-trip scenarios cannot resolve either.
 
+`re_auth_micro` times what a token renewal costs the connection pool, on the
+standalone server at `--port` (default 6379). It creates an ACL user, logs in
+as it, and deletes it at the end. `release` times a `get_connection()` and
+`release()` pair with no AUTH pending, the release path every command pays.
+`deferred_auth_release` times the same pair with a renewed token pending on
+the connection, so the release sends the AUTH. `refresh_20` times one
+`re_auth_callback()` on a pool with 20 free connections, which holds the pool
+lock for all of it. All three run on the sync and the async pool, and the
+renewal is checked to leave every connection connected and with no AUTH
+pending.
+
 Every tool reports how long each test took, and writes JSON and Markdown
 results under `benchmarks/measure_read_path/results/` (ignored by git), with the
 tree SHAs in the file name. Use `--output-dir` to write them elsewhere.
 
 ### Regression gate
 
-`run_bench`, `mem_probe`, `parser_micro`, `recorder_micro`, `routing_micro` and
-`csc_bench`
+`run_bench`, `mem_probe`, `parser_micro`, `recorder_micro`, `routing_micro`,
+`re_auth_micro` and `csc_bench`
 end with a regression summary for every `--compare candidate:baseline`
 pair: whether
 the gate passed, and for every regressed or inconclusive cell the baseline

@@ -98,7 +98,31 @@ Retry in Redis Cluster
 Retry behaviour in Redis Cluster is a little bit different from Standalone:
 
 * ``retry``: :class:`~.Retry` instance with a :ref:`backoff-label` strategy and the max number of retries, default value is ``Retry(ExponentialWithJitterBackoff(base=0.01, cap=1), cluster_error_retry_attempts)``
-* ``cluster_error_retry_attempts``: number of times to retry before raising an error when :class:`~.TimeoutError`, :class:`~.ConnectionError`, :class:`~.ClusterDownError` or :class:`~.SlotNotCoveredError` are encountered, default value is ``10``
+* ``cluster_error_retry_attempts``: number of times to retry before raising an error, default value is ``10``
+    * The client retries in these cases:
+
+        * :class:`~.TimeoutError`, :class:`~.ConnectionError`, :class:`~.ClusterDownError`
+          or :class:`~.SlotNotCoveredError` is encountered.
+        * A node the client takes for a primary answers with :class:`~.ReadOnlyError`.
+          A failover demoted it.
+        * A failover makes a node answer a blocking command with the UNBLOCKED error.
+          ``WAIT`` and ``WAITAOF`` are not retried.
+
+    .. warning::
+
+        A pipeline does not retry the UNBLOCKED error. This is intentional. The
+        blocking command keeps the error as its result, and ``raise_on_error``
+        raises it. The pipeline only asks for a topology refresh and closes the
+        connection, as the server does. Send the blocking command again, or send
+        it outside a pipeline.
+
+        The handling of the commands that a pipeline sent after the blocking one
+        on the same connection is intentionally unchanged. The server does not
+        run them, and reading their replies fails with a connection error. The
+        sync pipeline then sends all commands of that node again, one at a time,
+        the blocking command included. The asyncio pipeline gives them a
+        :class:`~.ConnectionError` result.
+
     * This argument is deprecated - it is used to initialize the number of retries for the retry object,
       only in the case when the ``retry`` object is not provided.
       When the ``retry`` argument is provided, the ``cluster_error_retry_attempts`` argument is ignored!

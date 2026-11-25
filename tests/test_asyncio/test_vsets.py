@@ -9,6 +9,7 @@ import redis.asyncio as async_redis
 from redis.commands.vectorset.commands import QuantizationOptions
 
 from tests.conftest import (
+    skip_if_redis_enterprise,
     skip_if_server_version_lt,
 )
 
@@ -768,6 +769,38 @@ async def test_vemb_unified_responses_return_floats_on_both_protocols(
     assert embs[2] == embs[3] == [1.0, 0.5, 0.0]
 
 
+@pytest.mark.fixed_client
+@skip_if_server_version_lt("7.9.0")
+@pytest.mark.parametrize(
+    "client_kwargs, expected_type",
+    [
+        ({}, int),
+        ({"protocol": 2}, int),
+        ({"protocol": 3}, bool),
+        ({"protocol": 2, "legacy_responses": False}, bool),
+        ({"protocol": 3, "legacy_responses": False}, bool),
+    ],
+    ids=["default", "resp2", "resp3", "resp2-unified", "resp3-unified"],
+)
+async def test_vadd_vrem_vsetattr_reply_types(
+    create_redis, redis_url, client_kwargs, expected_type
+):
+    r = await create_redis(url=redis_url, **client_kwargs)
+    await r.delete("myset")
+    v = r.vset()
+    results = [
+        await v.vadd("myset", [1, 0.5], "elem"),
+        await v.vadd("myset", [1, 0.5], "elem"),
+        await v.vsetattr("myset", "elem", {"a": 1}),
+        await v.vsetattr("myset", "missing", {"a": 1}),
+        await v.vrem("myset", "elem"),
+        await v.vrem("myset", "elem"),
+    ]
+
+    assert [type(value) for value in results] == [expected_type] * 6
+    assert results == [1, 0, 1, 0, 1, 0]
+
+
 @skip_if_server_version_lt("7.9.0")
 async def test_vlinks(d_client):
     elements_count = 100
@@ -1112,6 +1145,7 @@ def _validate_quantization(original, quantized, tolerance=0.1):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_basic(d_client):
     """Test basic VRANGE functionality with lexicographical ordering."""
     # Add elements with different names
@@ -1136,6 +1170,7 @@ async def test_vrange_basic(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_with_count(d_client):
     """Test VRANGE with count parameter."""
     # Add elements
@@ -1166,6 +1201,7 @@ async def test_vrange_with_count(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_iteration(d_client):
     """Test VRANGE for stateless iteration."""
     # Add elements
@@ -1191,6 +1227,7 @@ async def test_vrange_iteration(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_empty_key(d_client):
     """Test VRANGE on non-existent key."""
     result = await d_client.vset().vrange("nonexistent", "-", "+")
@@ -1201,6 +1238,7 @@ async def test_vrange_empty_key(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_special_characters(d_client):
     """Test VRANGE with elements containing special characters."""
     # Add elements with special characters
@@ -1219,6 +1257,7 @@ async def test_vrange_special_characters(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_single_element(d_client):
     """Test VRANGE with a single element."""
     await d_client.vset().vadd("myset", [1.0, 2.0], "single")
@@ -1234,6 +1273,7 @@ async def test_vrange_single_element(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_lexicographical_order(d_client):
     """Test that VRANGE returns elements in correct lexicographical order."""
     # Add elements in random order
@@ -1250,6 +1290,7 @@ async def test_vrange_lexicographical_order(d_client):
 
 
 @skip_if_server_version_lt("8.4.0")
+@skip_if_redis_enterprise()
 async def test_vrange_numeric_strings(d_client):
     """Test VRANGE with numeric string elements."""
     # Add numeric strings (lexicographical order, not numeric)

@@ -40,7 +40,13 @@ from redis.exceptions import (
 )
 from redis.typing import EncodableT
 from redis.utils import str_if_bytes
-from tests.conftest import REDIS_INFO, get_protocol_version, skip_if_server_version_lt
+from tests.conftest import (
+    REDIS_INFO,
+    get_protocol_version,
+    is_redis_enterprise_cluster,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+)
 
 from .compat import aclosing, create_task
 
@@ -67,7 +73,14 @@ def with_timeout(t):
     return wrapper
 
 
+# A Redis Enterprise cluster proxy can take up to about one second to confirm
+# the first SUBSCRIBE or PSUBSCRIBE on a connection.
+RE_CLUSTER_MIN_MESSAGE_WAIT = 2.0
+
+
 async def wait_for_message(pubsub, timeout=0.5, ignore_subscribe_messages=False):
+    if is_redis_enterprise_cluster():
+        timeout = max(timeout, RE_CLUSTER_MIN_MESSAGE_WAIT)
     now = asyncio.get_running_loop().time()
     timeout = now + timeout
     while now < timeout:
@@ -226,6 +239,7 @@ class TestPubSubSubscriberModeProtocol:
             await p.aclose()
             await self._close_client(r)
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     async def test_subscriber_mode_rejects_regular_command_after_ssubscribe(
         self, request

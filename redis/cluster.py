@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
+from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
@@ -84,6 +85,7 @@ from redis.exceptions import (
     MaxClientsReachedError,
     MaxConnectionsError,
     MovedError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -795,6 +797,57 @@ def _should_request_refresh(reinitialize_steps: int, reinitialize_counter: int) 
     return bool(reinitialize_steps) and reinitialize_counter % reinitialize_steps == 0
 
 
+def _is_unblocked_by_failover(error: Any) -> bool:
+    """
+    Return whether :error: is the UNBLOCKED reply a node sends to every client
+    blocked on a blocking command (BLPOP, XREAD BLOCK, WAIT...) when it is made
+    a replica of another node: a primary that is demoted, or a replica that is
+    moved to a new primary. The server closes the connection after this reply,
+    so the caller disconnects it instead of returning it to the pool as healthy.
+    """
+    return isinstance(error, ResponseError) and str(error).startswith(
+        DEMOTED_MASTER_UNBLOCKED_ERROR
+    )
+
+
+def _shows_failover(error: Any, node: "ClusterNode") -> bool:
+    """
+    Return whether :error:, read from :node:, shows a failover the client has
+    not seen yet. Only a replica answers READONLY, so a node cached as a primary
+    that does was demoted, and a command without keys gets no MOVED to learn
+    that from. A node answers UNBLOCKED to its blocked clients only when its
+    primary changes (see ``_is_unblocked_by_failover``), whether it is cached
+    as a primary or as a replica.
+
+    The caller asks for a topology refresh. A command sets ``failover_seen`` on
+    the error, unless it must not be sent again (see
+    ``_can_be_resent_after_failover``), and a pipeline sets it on a READONLY
+    only: the retry loops of the commands and pipelines retry such an error
+    like one of ``ERRORS_ALLOW_RETRY``. A pipeline never retries an UNBLOCKED.
+    A READONLY from a node cached as a replica does not count: the write was
+    sent there, and no refresh changes its answer.
+    """
+    if isinstance(error, ReadOnlyError):
+        return node.server_type == PRIMARY
+    return _is_unblocked_by_failover(error)
+
+
+# The commands that report on the earlier writes of their own connection
+_NOT_RESENT_AFTER_FAILOVER = frozenset(("WAIT", "WAITAOF"))
+
+
+def _can_be_resent_after_failover(command_name: str | bytes) -> bool:
+    """
+    Return whether a command that got an error ``_shows_failover`` accepts
+    can be sent again. A command of the server that was unblocked while it
+    waited on a list, a sorted set or a stream popped or read nothing, so it
+    can. WAIT and WAITAOF cannot: the retry runs on another connection, which
+    made none of the writes they ask about, so they would report those writes
+    as replicated without checking them.
+    """
+    return str_if_bytes(command_name).upper() not in _NOT_RESENT_AFTER_FAILOVER
+
+
 def _error_to_raise(
     last_refresh_unreachable_args: Optional[Tuple[Any, ...]],
     error: Exception,
@@ -1083,7 +1136,7 @@ class AbstractRedisCluster:
             backoff.reset()
         return backoff.compute(failures)
 
-    def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
+    def replace_default_node(self, target_node: "ClusterNode | None" = None) -> None:
         """Replace the default cluster node.
         A random cluster node will be chosen if target_node isn't passed, and primaries
         will be prioritized. The default node will not be changed if there are no other
@@ -1240,7 +1293,11 @@ class RedisCluster(
 
             Number of times to retry before raising an error when
             :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
-            :class:`~.ClusterDownError` are encountered
+            :class:`~.ClusterDownError` are encountered, or when a node cached as a
+            primary answers with :class:`~.ReadOnlyError`, or when a node answers
+            a blocking command with the UNBLOCKED error of a failover. A pipeline
+            does not retry the UNBLOCKED error, and ``WAIT`` and ``WAITAOF`` are
+            never retried after it
         :param retry:
             A retry object that defines the retry strategy and the number of
             retries for the cluster client. Its backoff sets the delay before
@@ -2220,6 +2277,11 @@ class RedisCluster(
             RedisClusterException: If the cluster has no default node to resolve
                 the keys against, which is the case before the slots cache is
                 first populated and after the client is closed.
+            ConnectionError: If the default node cannot be reached. A topology
+                refresh is asked for and the default node is replaced first, so
+                a retry asks another node.
+            TimeoutError: If the default node times out; handled as a
+                ConnectionError.
         """
         default_node = self.get_default_node()
         if default_node is None:
@@ -2235,7 +2297,28 @@ class RedisCluster(
                 f"yet.\nCommand: {truncate_text(command_text(args))}"
             )
 
-        return self.commands_parser.get_keys(default_node.redis_connection, *args)
+        try:
+            return self.commands_parser.get_keys(default_node.redis_connection, *args)
+        except (ConnectionError, TimeoutError) as e:
+            if not isinstance(e, self.NOT_NODE_FAILURE_ERRORS):
+                # this is used to report the metrics based on host and port info
+                e.connection = default_node
+
+                # The keys of some commands, such as XREAD, are found by asking the
+                # default node (COMMAND GETKEYS), which is also asked for the
+                # command table when a command is missing from it (COMMAND). A
+                # failure to reach it is handled as for a command that fails on a
+                # node: the node moves to the end of the cached nodes, and a
+                # refresh that tries it last is asked for. The default node is also
+                # replaced now: the refresh runs only once due, and until then a
+                # retry would ask the same node again.
+                self.nodes_manager.move_node_to_end_of_cached_nodes(default_node.name)
+                self.nodes_manager._request_refresh(
+                    last_failed_node_name=default_node.name
+                )
+                if default_node == self.get_default_node():
+                    self.replace_default_node()
+            raise
 
     def determine_slot(self, *args) -> Optional[int]:
         """
@@ -2375,7 +2458,6 @@ class RedisCluster(
             dict<Any, ClusterNode>
         """
         target_nodes_specified = False
-        is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
         nodes_flag = False
@@ -2442,6 +2524,10 @@ class RedisCluster(
         replies: Optional[Dict[Any, Any]] = None
 
         for _ in range(execute_attempts):
+            # Whether the attempt targets the default node alone: only an
+            # attempt that failed on it replaces it, not one that failed before
+            # its nodes were determined
+            is_default_node = False
             # Run a topology refresh an earlier error asked for, once due. The
             # flag is read inline: this runs before every attempt.
             if self.nodes_manager._refresh_requested:
@@ -2487,8 +2573,6 @@ class RedisCluster(
                             "No targets were found to execute "
                             f"{truncate_text(command_text(args))} command on"
                         )
-                    # Per attempt: only an attempt that failed on the default
-                    # node replaces it
                     is_default_node = (
                         len(target_nodes) == 1
                         and target_nodes[0] == self.get_default_node()
@@ -2537,9 +2621,14 @@ class RedisCluster(
                     **kwargs,
                 )
             except Exception as e:
-                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                    if is_default_node:
-                        # Replace the default cluster node
+                if retry_attempts > 0 and (
+                    type(e) in self.__class__.ERRORS_ALLOW_RETRY
+                    or getattr(e, "failover_seen", False)
+                ):
+                    if is_default_node and target_nodes[0] == self.get_default_node():
+                        # Replace the default cluster node, unless the attempt
+                        # replaced it already: a lookup of the command's keys
+                        # that fails on it after a MOVED does
                         self.replace_default_node()
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
@@ -2941,6 +3030,15 @@ class RedisCluster(
                 )
                 raise
             except ResponseError as e:
+                if connection is not None and _is_unblocked_by_failover(e):
+                    # The server closes the connection after this reply
+                    connection.disconnect(error=e)
+                if _shows_failover(e, target_node):
+                    if _can_be_resent_after_failover(args[0]):
+                        e.failover_seen = True
+                    # Ask for a topology refresh, run by the next attempt, of
+                    # any command, once due; the caller retries this one
+                    self.nodes_manager._request_refresh()
                 # this is used to report the metrics based on host and port info
                 # ResponseError typically happens after get_connection() succeeds,
                 # so connection should be available
@@ -6128,6 +6226,7 @@ class NodeCommands:
     def read(self):
         """ """
         connection = self.connection
+        unblocked = None
         for c in self.commands:
             # if there is a result on this command,
             # it means we ran into an exception
@@ -6156,6 +6255,15 @@ class NodeCommands:
                     return
                 except RedisError:
                     c.result = sys.exc_info()[1]
+                    if _is_unblocked_by_failover(c.result):
+                        unblocked = c.result
+        if unblocked is not None:
+            # The server closes the connection after the UNBLOCKED reply. It
+            # was the last reply of this node: a command sent after it gets
+            # the connection error above, which already closed the connection
+            # and sends all commands of the node again. That path is left as
+            # it is on purpose.
+            connection.disconnect(error=unblocked)
 
 
 class ExecutionStrategy(ABC):
@@ -6403,7 +6511,8 @@ class PipelineStrategy(AbstractStrategy):
         self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
-        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY as many
+        Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
+        a READONLY reply of a node cached as a primary, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -6411,6 +6520,20 @@ class PipelineStrategy(AbstractStrategy):
         retries, the last error is raised, as RedisClusterUnreachableError when
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
+
+        Warning: a pipeline does not retry the UNBLOCKED reply a failover
+        sends to a blocking command (BLPOP, XREAD BLOCK, WAIT...). This is
+        intentional. The command keeps the error as its result, which
+        ``raise_on_error`` raises. The pipeline only asks for a topology
+        refresh and closes the connection, as the server does. Send the
+        blocking command again, or send it outside a pipeline, where the
+        client retries it.
+
+        One case is intentionally left as it was before: when the pipeline
+        sent other commands after the blocking one on the same connection,
+        reading their replies fails with a connection error. The pipeline then
+        sends all commands of that node again, one at a time, the blocking
+        command included.
         """
         if not stack:
             return []
@@ -6439,7 +6562,11 @@ class PipelineStrategy(AbstractStrategy):
                 )
             except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                 raise
-            except RedisCluster.ERRORS_ALLOW_RETRY as e:
+            except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
+                if isinstance(e, ReadOnlyError) and not getattr(
+                    e, "failover_seen", False
+                ):
+                    raise
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -6508,6 +6635,8 @@ class PipelineStrategy(AbstractStrategy):
                 Optional[List[_MultiShardSplit]],
             ]
         ] = []
+        # The nodes the caller named for a command, by its position
+        named_targets: Dict[int, Any] = {}
         nodes_written = 0
         nodes_read = 0
 
@@ -6526,6 +6655,7 @@ class PipelineStrategy(AbstractStrategy):
                 slot = None
                 if passed_targets and not self._is_nodes_flag(passed_targets):
                     target_nodes = self._parse_target_nodes(passed_targets)
+                    named_targets[c.position] = passed_targets
 
                     # The caller named its targets, so the command's own aggregation must
                     # not apply to their replies - see
@@ -6734,7 +6864,8 @@ class PipelineStrategy(AbstractStrategy):
                 nodes_written += 1
                 n.write()
 
-            for n in node_commands:
+            failed_over = False
+            for node_name, n in nodes.items():
                 n.read()
 
                 # Find the first error in this node's commands, if any
@@ -6743,6 +6874,31 @@ class PipelineStrategy(AbstractStrategy):
                     if isinstance(cmd.result, Exception):
                         node_error = cmd.result
                         break
+
+                if node_error is not None:
+                    # A READONLY or an UNBLOCKED reply shows a failover
+                    node_failed_over = False
+                    for cmd in n.commands:
+                        if _shows_failover(cmd.result, node_objs[node_name]):
+                            node_failed_over = True
+                            if not isinstance(cmd.result, ReadOnlyError):
+                                # An UNBLOCKED is not retried in a pipeline:
+                                # the command keeps it as its result
+                                continue
+                            named = named_targets.get(cmd.position)
+                            if named is None:
+                                cmd.result.failover_seen = True
+                            else:
+                                # Not retried, as RedisCluster does not retry a
+                                # command with target nodes, and resent to them
+                                # if the attempt is retried for another command
+                                cmd.target_nodes = named
+                    if node_failed_over:
+                        failed_over = True
+                        if node_objs[node_name] == self._pipe.get_default_node():
+                            # Replace it now, as a command does: the refresh
+                            # runs only once due
+                            self._pipe.replace_default_node()
 
                 record_operation_duration(
                     command_name="PIPELINE",
@@ -6753,6 +6909,10 @@ class PipelineStrategy(AbstractStrategy):
                     error=node_error,
                 )
                 nodes_read += 1
+
+            if failed_over:
+                # Ask for a topology refresh, run by the next attempt once due
+                self._nodes_manager._request_refresh()
         finally:
             # release all the redis connections we allocated earlier
             # back into the connection pool.

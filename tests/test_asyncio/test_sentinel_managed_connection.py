@@ -8,8 +8,12 @@ from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError, ResponseError
+from redis.observability.metrics import CloseReason
 
-pytestmark = pytest.mark.asyncio
+from tests.conftest import skip_if_redis_enterprise
+
+# Redis Enterprise has no Sentinel.
+pytestmark = [pytest.mark.asyncio, skip_if_redis_enterprise()]
 
 
 @pytest.mark.fixed_client
@@ -95,15 +99,24 @@ async def test_unblocked_by_demotion_is_a_connection_error(connect_args):
     conn = await _demoted_master_connection(connect_args)
     try:
         await conn.send_command("PING")
-        with mock.patch.object(
-            conn,
-            "_read_response_from_parser",
-            return_value=ResponseError(DEMOTION_ERROR),
+        unblocked = ResponseError(DEMOTION_ERROR)
+        with (
+            mock.patch.object(
+                conn, "_read_response_from_parser", return_value=unblocked
+            ),
+            mock.patch(
+                "redis.asyncio.connection.record_connection_closed",
+                new_callable=mock.AsyncMock,
+            ) as closed,
         ):
             with pytest.raises(ConnectionError) as e:
                 await conn.read_response()
         assert str(e.value) == "The previous master is now a slave"
         assert not conn.is_connected
+        # The close is recorded as one the error caused
+        closed.assert_awaited_once_with(
+            close_reason=CloseReason.ERROR, error_type=unblocked
+        )
     finally:
         await conn.disconnect()
 
