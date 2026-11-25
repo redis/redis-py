@@ -7,12 +7,17 @@ from redis.commands.vectorset.commands import CallbacksOptions
 def _loads_attributes(value, **options):
     """
     Parse stored attribute JSON. When the client does not decode responses,
-    the attributes arrive as bytes encoded with the connection encoding the
-    command passed along, so decode them with it before parsing.
+    the attributes arrive as bytes: parse them as UTF-8 first, which is what
+    json.loads assumed and what other clients' connections store, and fall
+    back to the connection encoding the command passed along for values this
+    client wrote itself.
     """
     encoding = options.get(CallbacksOptions.ENCODING.value, "utf-8")
     if isinstance(value, bytes):
-        value = value.decode(encoding)
+        try:
+            value = value.decode("utf-8")
+        except UnicodeDecodeError:
+            value = value.decode(encoding)
     return json.loads(value)
 
 

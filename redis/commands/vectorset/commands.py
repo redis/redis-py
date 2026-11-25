@@ -172,7 +172,7 @@ class VectorSetCommands(CommandsProtocol):
 
         if attributes is not None:
             if isinstance(attributes, dict):
-                attributes_json = json.dumps(attributes, ensure_ascii=False)
+                attributes_json = self._attributes_json(attributes)
             else:
                 attributes_json = attributes
             pieces.extend(["SETATTR", attributes_json])
@@ -189,6 +189,16 @@ class VectorSetCommands(CommandsProtocol):
         if get_connection_kwargs is None:
             return "utf-8"
         return get_connection_kwargs().get("encoding", "utf-8")
+
+    def _attributes_json(self, attributes: dict) -> str:
+        # Literal non-ASCII characters let the server match filters, but a
+        # connection that cannot carry them keeps the lossless ASCII escapes.
+        attributes_json = json.dumps(attributes, ensure_ascii=False)
+        try:
+            attributes_json.encode(self._attributes_encoding())
+        except UnicodeEncodeError:
+            attributes_json = json.dumps(attributes)
+        return attributes_json
 
     @overload
     def vsim(
@@ -510,7 +520,7 @@ class VectorSetCommands(CommandsProtocol):
         if attributes is None:
             attributes_json = "{}"
         elif isinstance(attributes, dict):
-            attributes_json = json.dumps(attributes, ensure_ascii=False)
+            attributes_json = self._attributes_json(attributes)
         else:
             attributes_json = attributes
 

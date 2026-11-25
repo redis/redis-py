@@ -569,6 +569,26 @@ async def test_unicode_attributes_round_trip_with_custom_encoding(
         b"elem"
     }
 
+    # Attributes a default UTF-8 connection wrote still parse as UTF-8.
+    utf8 = await create_redis(url=redis_url, decode_responses=False)
+    await utf8.delete("utf8_cities")
+    assert (
+        await utf8.vset().vadd("utf8_cities", [1.0, 0.0], "elem", attributes=attributes)
+        == 1
+    )
+    assert await vset.vgetattr("utf8_cities", "elem") == attributes
+
+    # A character the connection encoding cannot carry keeps the lossless
+    # ASCII escapes.
+    unencodable = {"name": "東京"}
+    assert (
+        await vset.vadd("latin1_cities", [1.0, 0.0], "elem", attributes=unencodable)
+        == 1
+    )
+    assert await vset.vgetattr("latin1_cities", "elem") == unencodable
+    assert await vset.vsetattr("latin1_cities", "elem", unencodable) == 1
+    assert await vset.vgetattr("latin1_cities", "elem") == unencodable
+
 
 @skip_if_server_version_lt("7.9.0")
 async def test_vsim_truth_no_thread_enabled(d_client):
