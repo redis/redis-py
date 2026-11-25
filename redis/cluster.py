@@ -6956,9 +6956,14 @@ class PipelineStrategy(AbstractStrategy):
         # A command an UNBLOCKED reply interrupted is sent again with them, so it
         # runs before the commands of its node that got no reply, in the order of
         # the pipeline. It is left out when an error that is raised anyway makes
-        # the pipeline fail: a blocking pop would lose the element it takes.
+        # the pipeline fail: a blocking pop would lose the element it takes. It is
+        # left out as well when ``retry`` allows no retry.
         unblocked = None
-        if resend_unblocked and not (never_resent and raise_on_error):
+        if (
+            resend_unblocked
+            and not (never_resent and raise_on_error)
+            and self._pipe.retry.get_retries() > 0
+        ):
             unblocked = [
                 c
                 for c in attempt

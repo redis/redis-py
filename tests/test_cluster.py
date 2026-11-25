@@ -5735,11 +5735,11 @@ class TestTopologyRefreshPacing:
         )
 
     @staticmethod
-    def _blpop_client():
+    def _blpop_client(**kwargs):
         """
         A mocked client whose commands parser also knows the keys of BLPOP.
         """
-        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        rc = get_mocked_redis_client(host=default_host, port=default_port, **kwargs)
         rc.commands_parser.commands["blpop"] = {
             "name": "blpop",
             "arity": -3,
@@ -5946,6 +5946,36 @@ class TestTopologyRefreshPacing:
         assert _shows_failover(ReadOnlyError("READONLY"), primary) is True
         assert _shows_failover(ReadOnlyError("READONLY"), replica) is False
         assert _shows_failover(ResponseError("ERR other"), primary) is False
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    def test_unblocked_is_not_retried_when_retries_are_disabled(self, pipeline):
+        """
+        The UNBLOCKED reply is retried within the limits of ``retry``. With no
+        retries allowed the command is sent once and its error is raised, by a
+        command and by a pipeline.
+        """
+        rc = self._blpop_client(retry=Retry(NoBackoff(), 0))
+        checkout, connections = self._new_connection_each_checkout()
+        with (
+            checkout,
+            patch.object(
+                Redis,
+                "parse_response",
+                side_effect=ResponseError(self.UNBLOCKED_BY_FAILOVER),
+            ) as parse,
+        ):
+            with pytest.raises(ResponseError, match="UNBLOCKED"):
+                if pipeline:
+                    pipe = rc.pipeline()
+                    pipe.execute_command("BLPOP", "foo", 0)
+                    pipe.execute()
+                else:
+                    rc.execute_command("BLPOP", "foo", 0)
+
+        assert parse.call_count == 1
+        assert rc.nodes_manager._refresh_requested is True
+        assert [c.disconnect.call_count for c in connections] == [1]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize(

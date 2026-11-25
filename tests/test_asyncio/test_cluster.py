@@ -1448,11 +1448,13 @@ class TestTopologyRefreshPacing:
     )
 
     @staticmethod
-    async def _blpop_client() -> RedisCluster:
+    async def _blpop_client(**kwargs: Any) -> RedisCluster:
         """
         A mocked client whose commands parser also knows the keys of BLPOP.
         """
-        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, **kwargs
+        )
         r.commands_parser.commands["blpop"] = {
             "name": "blpop",
             "arity": -3,
@@ -1549,6 +1551,32 @@ class TestTopologyRefreshPacing:
         assert [c.disconnect.await_count for c in connections] == [
             int(closed and c in read) for c in connections
         ]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    async def test_unblocked_is_not_retried_when_retries_are_disabled(
+        self, pipeline: bool
+    ) -> None:
+        """
+        The UNBLOCKED reply is retried within the limits of ``retry``. With no
+        retries allowed the command is sent once and its error is raised, by a
+        command and by a pipeline.
+        """
+        r = await self._blpop_client(retry=Retry(NoBackoff(), 0))
+        connection = self._mock_connection(
+            r.get_node_from_key("foo"), ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        )
+        with pytest.raises(ResponseError, match="UNBLOCKED"):
+            if pipeline:
+                async with r.pipeline() as pipe:
+                    pipe.execute_command("BLPOP", "foo", 0)
+                    await pipe.execute()
+            else:
+                await r.execute_command("BLPOP", "foo", 0)
+
+        assert connection.read_response.await_count == 1
+        assert r._initialize is True
+        connection.disconnect.assert_awaited_once_with(nowait=True)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
