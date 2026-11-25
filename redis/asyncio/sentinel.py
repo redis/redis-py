@@ -12,6 +12,7 @@ from typing import (
     Type,
 )
 
+from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
     Connection,
@@ -28,7 +29,6 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.sentinel import DEMOTED_MASTER_UNBLOCKED_ERROR
 
 
 class MasterNotFoundError(ConnectionError):
@@ -114,7 +114,7 @@ class SentinelManagedConnection(Connection):
                 # this error and closes the connection, as when Sentinel runs
                 # a coordinated failover. Same meaning as the ReadOnlyError
                 # above: re-query Sentinel on the next connect() attempt.
-                await self.disconnect()
+                await self.disconnect(error=e)
                 raise ConnectionError("The previous master is now a slave")
             raise
 
