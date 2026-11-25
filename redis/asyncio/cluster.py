@@ -152,6 +152,7 @@ from redis.exceptions import (
     MaxClientsReachedError,
     MaxConnectionsError,
     MovedError,
+    ReadOnlyError,
     RedisClusterException,
     RedisClusterUnreachableError,
     RedisError,
@@ -448,7 +449,9 @@ class RedisCluster(
           :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError`
           or :class:`~.ClusterDownError` are encountered, or when a node cached as a
           primary answers with :class:`~.ReadOnlyError`, or when a node answers
-          a blocking command with the UNBLOCKED error of a failover
+          a blocking command with the UNBLOCKED error of a failover. A pipeline
+          does not retry the UNBLOCKED error, and ``WAIT`` and ``WAITAOF`` are
+          never retried after it
     :param retry:
         | A retry object that defines the retry strategy and the number of
           retries for the cluster client. Its backoff sets the delay before each
@@ -4208,8 +4211,7 @@ class PipelineStrategy(AbstractStrategy):
     ) -> List[Any]:
         """
         Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
-        a READONLY reply of a node cached as a primary and the UNBLOCKED reply
-        of a failover, as many
+        a READONLY reply of a node cached as a primary, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -4218,9 +4220,14 @@ class PipelineStrategy(AbstractStrategy):
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
 
-        With ``raise_on_error``, an error is raised without a retry when a WAIT
-        or a WAITAOF got the UNBLOCKED reply: that command is never sent again,
-        so no retry makes the pipeline succeed.
+        Warning: the UNBLOCKED reply a failover sends to a blocking command
+        (BLPOP, XREAD BLOCK, WAIT...) is not retried in a pipeline. The command
+        keeps the error as its result, which ``raise_on_error`` raises. The
+        pipeline only asks for a topology refresh and closes the connection,
+        as the server does. The server runs none of the commands sent after it
+        on that connection: they get a ConnectionError as their result. Send
+        the blocking command again, or send it outside a pipeline, where the
+        client retries it.
         """
         if not self._command_queue:
             return []
@@ -4253,19 +4260,10 @@ class PipelineStrategy(AbstractStrategy):
 
                 except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                     raise
-                except (*RedisCluster.ERRORS_ALLOW_RETRY, ResponseError) as e:
-                    if not isinstance(
-                        e, RedisCluster.ERRORS_ALLOW_RETRY
-                    ) and not getattr(e, "failover_seen", False):
-                        raise
-                    if raise_on_error and any(
-                        getattr(cmd.result, "not_resent", False)
-                        for cmd in self._command_queue
+                except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
+                    if isinstance(e, ReadOnlyError) and not getattr(
+                        e, "failover_seen", False
                     ):
-                        # A WAIT or WAITAOF that got UNBLOCKED is never sent
-                        # again, so the pipeline fails. It is not retried: a
-                        # resent blocking pop would take an element that the
-                        # failure discards.
                         raise
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
@@ -4303,16 +4301,11 @@ class PipelineStrategy(AbstractStrategy):
         allow_redirections: bool = True,
     ) -> List[Any]:
         # A retry resends only the commands no node answered and the ones that failed:
-        # resending one that succeeded would run a write twice. A failed command that
-        # must not be sent again keeps its error.
+        # resending one that succeeded would run a write twice.
         todo = [
             cmd
             for cmd in stack
-            if cmd.result is _UNANSWERED
-            or (
-                isinstance(cmd.result, Exception)
-                and not getattr(cmd.result, "not_resent", False)
-            )
+            if cmd.result is _UNANSWERED or isinstance(cmd.result, Exception)
         ]
 
         nodes = {}
@@ -4452,12 +4445,10 @@ class PipelineStrategy(AbstractStrategy):
         # commands that a sibling task is still executing
         errors = await asyncio.gather(*tasks, return_exceptions=True)
         # A READONLY reply of a primary or an UNBLOCKED reply shows a failover: ask for
-        # a topology refresh, run by the next attempt once due. Marked before the
-        # replies are merged and before a node error is raised below, so a retry
-        # resends the command either way.
+        # a topology refresh, run by the next attempt once due. A READONLY is marked
+        # before the replies are merged and before a node error is raised below, so a
+        # retry resends the command either way.
         failed_over = False
-        # The first command whose error was marked as never sent again
-        never_resent = None
         for (node, commands), failed in zip(nodes.values(), errors):
             if failed is not True:
                 # Only a node whose replies hold an error can hold a READONLY or
@@ -4467,19 +4458,18 @@ class PipelineStrategy(AbstractStrategy):
             for cmd in commands:
                 if _shows_failover(cmd.result, node):
                     node_failed_over = True
+                    if not isinstance(cmd.result, ReadOnlyError):
+                        # An UNBLOCKED is not retried in a pipeline: the command
+                        # keeps it as its result
+                        continue
                     named = named_targets.get(cmd.position)
-                    if named is not None:
+                    if named is None:
+                        cmd.result.failover_seen = True
+                    else:
                         # Not retried, as RedisCluster does not retry a command with
                         # target nodes, and resent to them if the attempt is retried
-                        # for another command, unless
-                        # ``not_resent`` is set below
+                        # for another command
                         cmd.target_nodes = named
-                    if not _can_be_resent_after_failover(cmd.args[0]):
-                        cmd.result.not_resent = True
-                        if never_resent is None:
-                            never_resent = cmd
-                    elif named is None:
-                        cmd.result.failover_seen = True
             if node_failed_over:
                 failed_over = True
                 if node == client.get_default_node():
@@ -4572,12 +4562,7 @@ class PipelineStrategy(AbstractStrategy):
             )
 
         if any(errors):
-            # A WAIT or WAITAOF that got UNBLOCKED is never sent again, so with
-            # ``raise_on_error`` the pipeline fails with its error. No redirect is
-            # followed then: a resent blocking pop would take an element that the
-            # failure discards.
-            raised_anyway = never_resent is not None and raise_on_error
-            if allow_redirections and not raised_anyway:
+            if allow_redirections:
                 # A split MULTI_SHARD command resends only the slots that failed, and a
                 # command sent to several nodes asks only the nodes that have not
                 # answered
@@ -4615,7 +4600,7 @@ class PipelineStrategy(AbstractStrategy):
                             cmd.result = e
 
             if raise_on_error:
-                for cmd in (never_resent,) if raised_anyway else todo:
+                for cmd in todo:
                     result = cmd.result
                     if isinstance(result, Exception):
                         command = command_text(cmd.args)

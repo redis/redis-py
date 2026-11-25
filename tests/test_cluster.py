@@ -5866,50 +5866,6 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
-    @pytest.mark.parametrize("named_target", [False, True])
-    def test_pipeline_with_an_unblocked_wait_is_raised_at_once(self, named_target):
-        """
-        A WAIT that got UNBLOCKED is never sent again, so its error is raised
-        whatever a retry does. The pipeline is not retried for a blocking
-        command that got UNBLOCKED as well: a resent pop would lose the element
-        it takes. The same holds when the WAIT names its target node.
-        """
-        rc = self._blpop_client()
-        nm = rc.nodes_manager
-        nm._last_refresh_at = nm._refresh_due_at = None
-        # WAIT has no key, so the pipeline sends it to the default node. The
-        # server closes a connection after one UNBLOCKED reply, so the two
-        # commands get theirs from different nodes.
-        wait_node = rc.get_default_node()
-        key = next(k for k in ("foo", "bar") if rc.get_node_from_key(k) != wait_node)
-        checkout, _ = self._new_connection_each_checkout()
-        sent = []
-
-        def parse_response(redis, connection, command_name, **options):
-            sent.append(command_name)
-            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
-
-        with (
-            checkout,
-            patch.object(
-                Redis, "parse_response", autospec=True, side_effect=parse_response
-            ),
-            patch.object(NodesManager, "initialize", autospec=True),
-        ):
-            pipe = rc.pipeline()
-            pipe.execute_command("BLPOP", key, 0)
-            if named_target:
-                pipe.execute_command("WAIT", 1, 0, target_nodes=wait_node)
-            else:
-                pipe.wait(1, 0)
-            with pytest.raises(ResponseError, match="UNBLOCKED"):
-                pipe.execute()
-
-        assert sorted(sent) == ["BLPOP", "WAIT"]
-        assert nm._refresh_requested is True
-
-    @pytest.mark.fixed_client
-    @pytest.mark.usefixtures("no_cluster_retry_delay")
     def test_unblocked_from_a_replica_asks_for_a_refresh_and_is_retried(self):
         """
         A replica that is moved to a new primary answers UNBLOCKED to the
@@ -5959,45 +5915,10 @@ class TestTopologyRefreshPacing:
         assert _shows_failover(ResponseError("ERR other"), primary) is False
 
     @pytest.mark.fixed_client
-    def test_pipeline_raises_the_unblocked_wait_and_follows_no_redirect(self):
-        """
-        A pipeline that fails for a WAIT that got UNBLOCKED raises that error,
-        not the MOVED of an earlier command, and does not follow the redirect:
-        nothing is sent again in a pipeline that fails anyway.
-        """
-        rc = get_mocked_redis_client(host=default_host, port=default_port)
-        checkout, _ = self._new_connection_each_checkout()
-        owner = rc.get_node_from_key("foo")
-        sent = []
-
-        def parse_response(redis, connection, command_name, **options):
-            sent.append(command_name)
-            if command_name == "GET":
-                raise MovedError(f"{key_slot(b'foo')} {owner.host}:{owner.port}")
-            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
-
-        with (
-            checkout,
-            patch.object(
-                Redis, "parse_response", autospec=True, side_effect=parse_response
-            ),
-        ):
-            pipe = rc.pipeline()
-            pipe.get("foo")
-            pipe.wait(1, 0)
-            with pytest.raises(ResponseError, match="UNBLOCKED") as raised:
-                pipe.execute()
-
-        assert not isinstance(raised.value, MovedError)
-        assert sorted(sent) == ["GET", "WAIT"]
-
-    @pytest.mark.fixed_client
-    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
-    def test_unblocked_is_not_retried_when_retries_are_disabled(self, pipeline):
+    def test_unblocked_is_not_retried_when_retries_are_disabled(self):
         """
         The UNBLOCKED reply is retried within the limits of ``retry``. With no
-        retries allowed the command is sent once and its error is raised, by a
-        command and by a pipeline.
+        retries allowed the command is sent once and its error is raised.
         """
         rc = self._blpop_client(retry=Retry(NoBackoff(), 0))
         checkout, connections = self._new_connection_each_checkout()
@@ -6010,12 +5931,7 @@ class TestTopologyRefreshPacing:
             ) as parse,
         ):
             with pytest.raises(ResponseError, match="UNBLOCKED"):
-                if pipeline:
-                    pipe = rc.pipeline()
-                    pipe.execute_command("BLPOP", "foo", 0)
-                    pipe.execute()
-                else:
-                    rc.execute_command("BLPOP", "foo", 0)
+                rc.execute_command("BLPOP", "foo", 0)
 
         assert parse.call_count == 1
         assert rc.nodes_manager._refresh_requested is True
@@ -6042,18 +5958,17 @@ class TestTopologyRefreshPacing:
         assert _can_be_resent_after_failover(command_name) is resent
 
     @pytest.mark.fixed_client
-    @pytest.mark.usefixtures("no_cluster_retry_delay")
-    def test_pipeline_unblocked_from_a_primary_asks_for_a_refresh_and_is_retried(
-        self,
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    def test_pipeline_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, raise_on_error
     ):
         """
-        A pipeline retries an UNBLOCKED reply as a
-        command does, after the refresh it asked for, resends only the command
-        that got it, and disconnects only the connection the server closed.
+        A pipeline does not retry an UNBLOCKED reply. The command keeps the
+        error as its result, which ``raise_on_error`` raises. The pipeline asks
+        for a topology refresh and disconnects only the connection the server
+        closed.
         """
         rc = self._blpop_client()
-        nm = rc.nodes_manager
-        nm._last_refresh_at = nm._refresh_due_at = None
         checkout, connections = self._new_connection_each_checkout()
         unblocked = []
         sent = []
@@ -6062,48 +5977,48 @@ class TestTopologyRefreshPacing:
             sent.append(command_name)
             if command_name == "GET":
                 return b"value"
-            if not unblocked:
-                unblocked.append(connection)
-                raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
-            return [b"bar", b"x"]
+            unblocked.append(connection)
+            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
 
         with (
             checkout,
             patch.object(
                 Redis, "parse_response", autospec=True, side_effect=parse_response
             ),
-            patch.object(NodesManager, "initialize", autospec=True) as init,
         ):
             pipe = rc.pipeline()
             pipe.get("foo")
             pipe.execute_command("BLPOP", "bar", 0)
-            assert pipe.execute() == [b"value", [b"bar", b"x"]]
+            if raise_on_error:
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    pipe.execute()
+            else:
+                result = pipe.execute(raise_on_error=False)
+                assert result[0] == b"value"
+                assert isinstance(result[1], ResponseError)
+                assert "UNBLOCKED" in str(result[1])
 
-        assert sent == ["GET", "BLPOP", "BLPOP"]
-        init.assert_called_once()
+        assert sent == ["GET", "BLPOP"]
+        assert rc.nodes_manager._refresh_requested is True
         assert [c for c in connections if c.disconnect.called] == unblocked
         self._assert_closed_for_unblocked(unblocked[0])
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("raise_on_error", [True, False])
-    @pytest.mark.parametrize("unblocked_command", ["BLPOP", "WAIT"])
     def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
-        self, unblocked_command, raise_on_error
+        self, raise_on_error
     ):
         """
         The server closes the connection after an UNBLOCKED reply and runs none
         of the commands the pipeline sent after it. No reply is read for them:
-        they are sent again after the unblocked command, in the order of the
-        pipeline, with and without ``raise_on_error``, and the earlier commands
-        of the node keep their results. A WAIT that got the error is not sent
-        again and keeps it, and with ``raise_on_error`` nothing is sent again
-        after it: the pipeline raises anyway.
+        they are sent again, with and without ``raise_on_error``. The earlier
+        commands of the node keep their results, and the unblocked command
+        keeps its error and is not sent again.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
         nm._last_refresh_at = nm._refresh_due_at = None
-        # WAIT has no key, so the pipeline sends it to the default node
         node = rc.get_default_node()
         key = next(
             k for k in ("foo", "bar", "baz", "qux") if rc.get_node_from_key(k) == node
@@ -6116,10 +6031,10 @@ class TestTopologyRefreshPacing:
             if connection in closed:
                 raise ConnectionError("Connection closed by server.")
             sent.append(command_name)
-            if command_name == unblocked_command and not closed:
+            if command_name == "BLPOP":
                 closed.append(connection)
                 raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
-            return [key.encode(), b"x"] if command_name == "BLPOP" else b"value"
+            return b"value"
 
         with (
             checkout,
@@ -6130,32 +6045,18 @@ class TestTopologyRefreshPacing:
         ):
             pipe = rc.pipeline()
             pipe.get(key)
-            if unblocked_command == "BLPOP":
-                pipe.execute_command("BLPOP", key, 0)
-                pipe.get(key)
-                assert pipe.execute(raise_on_error=raise_on_error) == [
-                    b"value",
-                    [key.encode(), b"x"],
-                    b"value",
-                ]
+            pipe.execute_command("BLPOP", key, 0)
+            pipe.get(key)
+            if raise_on_error:
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    pipe.execute()
             else:
-                pipe.wait(1, 0)
-                pipe.get(key)
-                if raise_on_error:
-                    with pytest.raises(ResponseError, match="UNBLOCKED"):
-                        pipe.execute()
-                else:
-                    result = pipe.execute(raise_on_error=False)
-                    assert result[0] == result[2] == b"value"
-                    assert isinstance(result[1], ResponseError)
+                result = pipe.execute(raise_on_error=False)
+                assert result[0] == result[2] == b"value"
+                assert isinstance(result[1], ResponseError)
 
-        # The earlier GET is not sent again
-        if unblocked_command == "BLPOP":
-            assert sent == ["GET", "BLPOP", "BLPOP", "GET"]
-        elif raise_on_error:
-            assert sent == ["GET", "WAIT"]
-        else:
-            assert sent == ["GET", "WAIT", "GET"]
+        # The earlier GET and the BLPOP are not sent again
+        assert sent == ["GET", "BLPOP", "GET"]
         self._assert_closed_for_unblocked(closed[0])
 
     @pytest.mark.fixed_client

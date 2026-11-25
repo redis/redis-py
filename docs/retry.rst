@@ -108,6 +108,13 @@ Retry behaviour in Redis Cluster is a little bit different from Standalone:
         * A failover makes a node answer a blocking command with the UNBLOCKED error.
           ``WAIT`` and ``WAITAOF`` are not retried.
 
+    .. warning::
+
+        A pipeline does not retry the UNBLOCKED error. The blocking command keeps
+        the error as its result, and ``raise_on_error`` raises it. The pipeline
+        only asks for a topology refresh and closes the connection, as the server
+        does. Send the blocking command again, or send it outside a pipeline.
+
     * This argument is deprecated - it is used to initialize the number of retries for the retry object,
       only in the case when the ``retry`` object is not provided.
       When the ``retry`` argument is provided, the ``cluster_error_retry_attempts`` argument is ignored!

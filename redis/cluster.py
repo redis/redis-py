@@ -820,12 +820,13 @@ def _shows_failover(error: Any, node: "ClusterNode") -> bool:
     primary changes (see ``_is_unblocked_by_failover``), whether it is cached
     as a primary or as a replica.
 
-    The caller asks for a topology refresh and, unless the command must not be
-    sent again (see ``_can_be_resent_after_failover``), sets ``failover_seen`` on
-    the error, and the retry loops of the commands and pipelines retry such an
-    error like one of ``ERRORS_ALLOW_RETRY``. A READONLY from a node cached as a
-    replica does not count: the write was sent there, and no refresh changes
-    its answer.
+    The caller asks for a topology refresh. A command sets ``failover_seen`` on
+    the error, unless it must not be sent again (see
+    ``_can_be_resent_after_failover``), and a pipeline sets it on a READONLY
+    only: the retry loops of the commands and pipelines retry such an error
+    like one of ``ERRORS_ALLOW_RETRY``. A pipeline never retries an UNBLOCKED.
+    A READONLY from a node cached as a replica does not count: the write was
+    sent there, and no refresh changes its answer.
     """
     if isinstance(error, ReadOnlyError):
         return node.server_type == PRIMARY
@@ -843,9 +844,7 @@ def _can_be_resent_after_failover(command_name: str | bytes) -> bool:
     waited on a list, a sorted set or a stream popped or read nothing, so it
     can. WAIT and WAITAOF cannot: the retry runs on another connection, which
     made none of the writes they ask about, so they would report those writes
-    as replicated without checking them. A pipeline sets ``not_resent`` on
-    their error. With ``raise_on_error`` it then raises without a retry. Without
-    it, a retry that another error leads to leaves them out.
+    as replicated without checking them.
     """
     return str_if_bytes(command_name).upper() not in _NOT_RESENT_AFTER_FAILOVER
 
@@ -1297,7 +1296,9 @@ class RedisCluster(
             :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
             :class:`~.ClusterDownError` are encountered, or when a node cached as a
             primary answers with :class:`~.ReadOnlyError`, or when a node answers
-            a blocking command with the UNBLOCKED error of a failover
+            a blocking command with the UNBLOCKED error of a failover. A pipeline
+            does not retry the UNBLOCKED error, and ``WAIT`` and ``WAITAOF`` are
+            never retried after it
         :param retry:
             A retry object that defines the retry strategy and the number of
             retries for the cluster client. Its backoff sets the delay before
@@ -6486,8 +6487,7 @@ class PipelineStrategy(AbstractStrategy):
     ):
         """
         Send the commands, retrying on RedisCluster.ERRORS_ALLOW_RETRY, and on
-        a READONLY reply of a node cached as a primary and the UNBLOCKED reply
-        of a failover, as many
+        a READONLY reply of a node cached as a primary, as many
         times as ``retry`` allows, with the backoff delay before each attempt
         and a fixed 0.25 seconds first after CLUSTERDOWN or an uncovered slot.
         Every retried error asks for a topology refresh, which the next attempt
@@ -6496,9 +6496,14 @@ class PipelineStrategy(AbstractStrategy):
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
 
-        With ``raise_on_error``, an error is raised without a retry when a WAIT
-        or a WAITAOF got the UNBLOCKED reply: that command is never sent again,
-        so no retry makes the pipeline succeed.
+        Warning: the UNBLOCKED reply a failover sends to a blocking command
+        (BLPOP, XREAD BLOCK, WAIT...) is not retried in a pipeline. The command
+        keeps the error as its result, which ``raise_on_error`` raises. The
+        pipeline only asks for a topology refresh and closes the connection,
+        as the server does. The server runs none of the commands sent after it
+        on that connection: they are sent again, one at a time. Send the
+        blocking command again, or send it outside a pipeline, where the
+        client retries it.
         """
         if not stack:
             return []
@@ -6527,17 +6532,10 @@ class PipelineStrategy(AbstractStrategy):
                 )
             except RedisCluster.NOT_NODE_FAILURE_ERRORS:
                 raise
-            except (*RedisCluster.ERRORS_ALLOW_RETRY, ResponseError) as e:
-                if not isinstance(e, RedisCluster.ERRORS_ALLOW_RETRY) and not getattr(
+            except (*RedisCluster.ERRORS_ALLOW_RETRY, ReadOnlyError) as e:
+                if isinstance(e, ReadOnlyError) and not getattr(
                     e, "failover_seen", False
                 ):
-                    raise
-                if raise_on_error and any(
-                    getattr(c.result, "not_resent", False) for c in stack
-                ):
-                    # A WAIT or WAITAOF that got UNBLOCKED is never sent again,
-                    # so the pipeline fails. It is not retried: a resent blocking
-                    # pop would take an element that the failure discards.
                     raise
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
@@ -6580,16 +6578,11 @@ class PipelineStrategy(AbstractStrategy):
         # if we have to run through it again, we only retry
         # the commands that failed, or that no node answered:
         # resending one that succeeded would run a write twice.
-        # A failed command that must not be sent again keeps its error.
         attempt = sorted(
             (
                 c
                 for c in stack
-                if c.result is _UNANSWERED
-                or (
-                    isinstance(c.result, Exception)
-                    and not getattr(c.result, "not_resent", False)
-                )
+                if c.result is _UNANSWERED or isinstance(c.result, Exception)
             ),
             key=lambda x: x.position,
         )
@@ -6842,11 +6835,6 @@ class PipelineStrategy(AbstractStrategy):
                 n.write()
 
             failed_over = False
-            # Whether an UNBLOCKED reply interrupted a command that is sent
-            # again, and the first command whose error was marked as never
-            # sent again
-            resend_unblocked = False
-            never_resent = None
             for node_name, n in nodes.items():
                 n.read()
 
@@ -6863,21 +6851,18 @@ class PipelineStrategy(AbstractStrategy):
                     for cmd in n.commands:
                         if _shows_failover(cmd.result, node_objs[node_name]):
                             node_failed_over = True
+                            if not isinstance(cmd.result, ReadOnlyError):
+                                # An UNBLOCKED is not retried in a pipeline:
+                                # the command keeps it as its result
+                                continue
                             named = named_targets.get(cmd.position)
-                            if named is not None:
+                            if named is None:
+                                cmd.result.failover_seen = True
+                            else:
                                 # Not retried, as RedisCluster does not retry a
                                 # command with target nodes, and resent to them
-                                # if the attempt is retried for another command, unless
-                                # ``not_resent`` is set below
+                                # if the attempt is retried for another command
                                 cmd.target_nodes = named
-                            if not _can_be_resent_after_failover(cmd.args[0]):
-                                cmd.result.not_resent = True
-                                if never_resent is None:
-                                    never_resent = cmd
-                            elif named is None:
-                                cmd.result.failover_seen = True
-                                if _is_unblocked_by_failover(cmd.result):
-                                    resend_unblocked = True
                     if node_failed_over:
                         failed_over = True
                         if node_objs[node_name] == self._pipe.get_default_node():
@@ -6957,26 +6942,6 @@ class PipelineStrategy(AbstractStrategy):
         # if we have more commands to attempt, we've run into problems.
         # collect all the commands we are allowed to retry.
         # (MOVED, ASK, or connection errors or timeout errors)
-        # A command an UNBLOCKED reply interrupted is sent again with them, so it
-        # runs before the commands of its node that got no reply, in the order of
-        # the pipeline. It is left out when ``retry`` allows no retry.
-        # A WAIT or WAITAOF that got UNBLOCKED is never sent again, so with
-        # ``raise_on_error`` the pipeline fails with its error. No command is
-        # resent then, and no redirect is followed: a resent blocking pop would
-        # take an element that the failure discards.
-        raised_anyway = never_resent is not None and raise_on_error
-        unblocked = None
-        if (
-            resend_unblocked
-            and not raised_anyway
-            and self._pipe.retry.get_retries() > 0
-        ):
-            unblocked = [
-                c
-                for c in attempt
-                if getattr(c.result, "failover_seen", False)
-                and _is_unblocked_by_failover(c.result)
-            ]
         attempt = sorted(
             (
                 c
@@ -6986,10 +6951,8 @@ class PipelineStrategy(AbstractStrategy):
             ),
             key=lambda x: x.position,
         )
-        if unblocked:
-            attempt = sorted(attempt + unblocked, key=lambda x: x.position)
         parsed_here.difference_update(c.position for c in attempt)
-        if attempt and allow_redirections and not raised_anyway:
+        if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
             # send these remaining commands one at a time using `execute_command`
             # in the main client. This keeps our retry logic
@@ -7066,11 +7029,7 @@ class PipelineStrategy(AbstractStrategy):
             response.append(c.result)
 
         if raise_on_error:
-            # The error that fails the pipeline, not the one of an earlier
-            # command whose redirect was not followed
-            self._raise_first_error(
-                (never_resent,) if raised_anyway else stack, start_time
-            )
+            self._raise_first_error(stack, start_time)
 
         return response
 
