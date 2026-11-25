@@ -4220,14 +4220,14 @@ class PipelineStrategy(AbstractStrategy):
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
 
-        Warning: the UNBLOCKED reply a failover sends to a blocking command
-        (BLPOP, XREAD BLOCK, WAIT...) is not retried in a pipeline. The command
-        keeps the error as its result, which ``raise_on_error`` raises. The
-        pipeline only asks for a topology refresh and closes the connection,
-        as the server does. The server runs none of the commands sent after it
-        on that connection: they get a ConnectionError as their result. Send
-        the blocking command again, or send it outside a pipeline, where the
-        client retries it.
+        Warning: a pipeline does not retry the UNBLOCKED reply a failover
+        sends to a blocking command (BLPOP, XREAD BLOCK, WAIT...). This is
+        intentional. The command keeps the error as its result, which
+        ``raise_on_error`` raises. The pipeline only asks for a topology
+        refresh and closes the connection, as the server does. The server runs
+        none of the commands sent after it on that connection: they get a
+        ConnectionError as their result, as before. Send the blocking command
+        again, or send it outside a pipeline, where the client retries it.
         """
         if not self._command_queue:
             return []

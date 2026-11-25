@@ -39,7 +39,6 @@ from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis._parsers.helpers import parse_scan
-from redis._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
@@ -6199,7 +6198,6 @@ class NodeCommands:
         """ """
         connection = self.connection
         unblocked = None
-        closed = None
         for c in self.commands:
             # if there is a result on this command,
             # it means we ran into an exception
@@ -6220,11 +6218,6 @@ class NodeCommands:
             # pool and on the next write, it will
             # explicitly open the connection and all will be well.
             if c.result is _UNANSWERED:
-                if closed is not None:
-                    # The server ran none of the commands after the unblocked
-                    # one, so only they fail and no reply is read for them
-                    c.result = closed
-                    continue
                 try:
                     c.result = self.parse_response(connection, c.args[0], **c.options)
                 except (ConnectionError, TimeoutError) as e:
@@ -6235,9 +6228,12 @@ class NodeCommands:
                     c.result = sys.exc_info()[1]
                     if _is_unblocked_by_failover(c.result):
                         unblocked = c.result
-                        closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         if unblocked is not None:
-            # The server closes the connection after the UNBLOCKED reply
+            # The server closes the connection after the UNBLOCKED reply. It
+            # was the last reply of this node: a command sent after it gets
+            # the connection error above, which already closed the connection
+            # and sends all commands of the node again. That path is left as
+            # it is on purpose.
             connection.disconnect(error=unblocked)
 
 
@@ -6496,14 +6492,19 @@ class PipelineStrategy(AbstractStrategy):
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
 
-        Warning: the UNBLOCKED reply a failover sends to a blocking command
-        (BLPOP, XREAD BLOCK, WAIT...) is not retried in a pipeline. The command
-        keeps the error as its result, which ``raise_on_error`` raises. The
-        pipeline only asks for a topology refresh and closes the connection,
-        as the server does. The server runs none of the commands sent after it
-        on that connection: they are sent again, one at a time. Send the
+        Warning: a pipeline does not retry the UNBLOCKED reply a failover
+        sends to a blocking command (BLPOP, XREAD BLOCK, WAIT...). This is
+        intentional. The command keeps the error as its result, which
+        ``raise_on_error`` raises. The pipeline only asks for a topology
+        refresh and closes the connection, as the server does. Send the
         blocking command again, or send it outside a pipeline, where the
         client retries it.
+
+        One case is intentionally left as it was before: when the pipeline
+        sent other commands after the blocking one on the same connection,
+        reading their replies fails with a connection error. The pipeline then
+        sends all commands of that node again, one at a time, the blocking
+        command included.
         """
         if not stack:
             return []

@@ -6006,15 +6006,15 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("raise_on_error", [True, False])
-    def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
+    def test_pipeline_unblocked_followed_by_commands_resends_those_of_its_node(
         self, raise_on_error
     ):
         """
-        The server closes the connection after an UNBLOCKED reply and runs none
-        of the commands the pipeline sent after it. No reply is read for them:
-        they are sent again, with and without ``raise_on_error``. The earlier
-        commands of the node keep their results, and the unblocked command
-        keeps its error and is not sent again.
+        The server closes the connection after an UNBLOCKED reply, so reading
+        the reply of a command the pipeline sent after it fails with a
+        connection error. That path is intentionally left as it was: the
+        pipeline sends all commands of that node again, one at a time, the
+        blocking command included.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
@@ -6023,7 +6023,7 @@ class TestTopologyRefreshPacing:
         key = next(
             k for k in ("foo", "bar", "baz", "qux") if rc.get_node_from_key(k) == node
         )
-        checkout, connections = self._new_connection_each_checkout()
+        checkout, _ = self._new_connection_each_checkout()
         closed = []
         sent = []
 
@@ -6032,8 +6032,10 @@ class TestTopologyRefreshPacing:
                 raise ConnectionError("Connection closed by server.")
             sent.append(command_name)
             if command_name == "BLPOP":
-                closed.append(connection)
-                raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+                if not closed:
+                    closed.append(connection)
+                    raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+                return [key.encode(), b"x"]
             return b"value"
 
         with (
@@ -6047,17 +6049,13 @@ class TestTopologyRefreshPacing:
             pipe.get(key)
             pipe.execute_command("BLPOP", key, 0)
             pipe.get(key)
-            if raise_on_error:
-                with pytest.raises(ResponseError, match="UNBLOCKED"):
-                    pipe.execute()
-            else:
-                result = pipe.execute(raise_on_error=False)
-                assert result[0] == result[2] == b"value"
-                assert isinstance(result[1], ResponseError)
+            assert pipe.execute(raise_on_error=raise_on_error) == [
+                b"value",
+                [key.encode(), b"x"],
+                b"value",
+            ]
 
-        # The earlier GET and the BLPOP are not sent again
-        assert sent == ["GET", "BLPOP", "GET"]
-        self._assert_closed_for_unblocked(closed[0])
+        assert sent == ["GET", "BLPOP", "GET", "BLPOP", "GET"]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
