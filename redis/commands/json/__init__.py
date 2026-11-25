@@ -151,7 +151,7 @@ class _JSONBase(JSONCommands):
         """
         if obj is None:
             return obj
-        return decode_list(obj, decoder=str_if_bytes)
+        return [str_if_bytes(key) for key in obj]
 
     def _decode_json_numop(self, obj, **kwargs):
         """Decode a JSON.NUMINCRBY / JSON.NUMMULTBY result and normalise

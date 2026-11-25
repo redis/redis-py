@@ -1199,6 +1199,26 @@ async def test_query_index(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+async def test_null_key_and_label_on_server(decoded_r: redis.Redis):
+    # Live: a series key and a label value literally named "null" stay
+    # "null" when read back with TS.INFO, TS.MGET and TS.QUERYINDEX
+    # (the JSON null mapping applies to values, not names).
+    await decoded_r.ts().create("null", labels={"region": "null", "env": "prod"})
+    await decoded_r.ts().add("null", 1, 1.0)
+    info = await decoded_r.ts().info("null")
+    assert info["labels"] == {"region": "null", "env": "prod"}
+    assert await decoded_r.ts().queryindex(["region=null"]) == ["null"]
+    res = await decoded_r.ts().mget(["region=null"], with_labels=True)
+    assert_resp_response(
+        decoded_r,
+        res,
+        [{"null": [{"region": "null", "env": "prod"}, 1, 1.0]}],
+        {"null": [{"region": "null", "env": "prod"}, [1, 1.0]]},
+    )
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")

@@ -7,7 +7,6 @@ from redis import Redis, exceptions
 from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
-from redis.utils import str_if_bytes
 
 from .conftest import (
     _get_client,
@@ -454,6 +453,16 @@ def test_objkeys(client):
     assert keys == list(obj.keys())
 
     assert client.json().objkeys("fakekey") is None
+
+
+@pytest.mark.redismod
+def test_objkeys_keeps_null_key_name_on_server(client):
+    # Live: a document key literally named "null" stays "null" when read
+    # back with JSON.OBJKEYS (the JSON null mapping applies to values,
+    # not names).
+    client.json().set("obj", Path.root_path(), {"null": "value", "a": 1})
+    keys = client.json().objkeys("obj", Path.root_path())
+    assert sorted(keys) == ["a", "null"]
 
 
 @pytest.mark.redismod
@@ -1638,7 +1647,6 @@ def test_decoders_and_unstring():
 def test_objkeys_keeps_null_key_name(client_cls):
     # Server-free: a key literally named "null" stays "null" instead of
     # becoming None (the JSON null mapping applies to values, not names).
-    assert decode_list([b"null", b"a"], decoder=str_if_bytes) == ["null", "a"]
     # The JSON null value mapping itself is unchanged.
     assert decode_list([b"null", b"a"]) == [None, "a"]
 

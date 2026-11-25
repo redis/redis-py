@@ -1,6 +1,7 @@
 from typing import Literal
 
 from redis._parsers.helpers import bool_ok
+from redis.utils import str_if_bytes
 
 from ..helpers import (
     apply_module_callbacks,
@@ -15,6 +16,16 @@ from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
 def _parse_to_float_list(response):
     """Parse a list of doubles, which RESP2 sends as bulk strings."""
     return [float(item) for item in response]
+
+
+def _parse_topk_items(response, **kwargs):
+    """Parse a TOPK.LIST / TOPK.ADD / TOPK.INCRBY reply as item names.
+
+    The items are names, not JSON values, so a literal ``"null"`` stays
+    ``"null"`` instead of becoming ``None``. Numeric coercion is kept:
+    an item spelled as a number still comes back as a number.
+    """
+    return parse_to_list(response, decoder=str_if_bytes)
 
 
 def _parse_topk_info_resp2_unified(response):
@@ -166,10 +177,10 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
         }
 
         _RESP2_MODULE_CALLBACKS = {
-            TOPK_ADD: parse_to_list,
-            TOPK_INCRBY: parse_to_list,
+            TOPK_ADD: _parse_topk_items,
+            TOPK_INCRBY: _parse_topk_items,
             TOPK_INFO: TopKInfo,
-            TOPK_LIST: parse_to_list,
+            TOPK_LIST: _parse_topk_items,
         }
         _RESP3_MODULE_CALLBACKS = {}
         _RESP2_UNIFIED_MODULE_CALLBACKS = {
@@ -179,10 +190,10 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_INFO: TopKInfo,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
-            TOPK_ADD: parse_to_list,
-            TOPK_INCRBY: parse_to_list,
+            TOPK_ADD: _parse_topk_items,
+            TOPK_INCRBY: _parse_topk_items,
             TOPK_INFO: TopKInfo,
-            TOPK_LIST: parse_to_list,
+            TOPK_LIST: _parse_topk_items,
         }
 
         self.client = client

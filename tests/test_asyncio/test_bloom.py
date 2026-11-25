@@ -471,6 +471,30 @@ async def test_topk_incrby(decoded_r: redis.Redis):
         )
 
 
+@pytest.mark.redismod
+async def test_topk_list_keeps_null_item_name(decoded_r: redis.Redis):
+    # Live: an item literally named "null" stays "null" in TOPK.LIST
+    # (items are names, not JSON values).
+    assert await decoded_r.topk().reserve("topk:null", 5, 20, 4, 0.9)
+    assert [None] * 7 == await decoded_r.topk().add(
+        "topk:null", "null", "B", "null", "D", "null", "B", "null"
+    )
+    assert sorted(await decoded_r.topk().list("topk:null")) == ["B", "D", "null"]
+
+
+@pytest.mark.redismod
+async def test_topk_incrby_keeps_null_item_name(decoded_r: redis.Redis):
+    # Live: an item literally named "null" stays "null" when TOPK.INCRBY
+    # evicts it (items are names, not JSON values).
+    assert await decoded_r.topk().reserve("topk:null:incrby", 3, 10, 3, 1)
+    assert [None, None, None] == await decoded_r.topk().incrby(
+        "topk:null:incrby", ["null", "baz", "42"], [3, 6, 2]
+    )
+    assert [None, "null"] == await decoded_r.topk().incrby(
+        "topk:null:incrby", ["42", "xyzzy"], [8, 4]
+    )
+
+
 @pytest.mark.experimental
 @pytest.mark.redismod
 async def test_tdigest_reset(decoded_r: redis.Redis):

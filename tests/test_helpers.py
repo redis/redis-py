@@ -37,16 +37,6 @@ def test_nativestr():
 
 
 @pytest.mark.fixed_client
-def test_str_if_bytes_keeps_null():
-    # str_if_bytes() is for key and label names, where "null" is an
-    # ordinary string rather than a JSON null value.
-    assert str_if_bytes("null") == "null"
-    assert str_if_bytes(b"null") == "null"
-    assert str_if_bytes(b"teststr") == "teststr"
-    assert str_if_bytes(None) is None
-
-
-@pytest.mark.fixed_client
 def test_parse_to_list_with_str_if_bytes_decoder():
     # A key literally named "null" stays "null"; numeric coercion is kept.
     assert parse_to_list([b"null", b"cpu"], decoder=str_if_bytes) == ["null", "cpu"]

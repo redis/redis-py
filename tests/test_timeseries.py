@@ -1554,6 +1554,26 @@ def test_query_index(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+def test_null_key_and_label_on_server(client):
+    # Live: a series key and a label value literally named "null" stay
+    # "null" when read back with TS.INFO, TS.MGET and TS.QUERYINDEX
+    # (the JSON null mapping applies to values, not names).
+    client.ts().create("null", labels={"region": "null", "env": "prod"})
+    client.ts().add("null", 1, 1.0)
+    info = client.ts().info("null")
+    assert info["labels"] == {"region": "null", "env": "prod"}
+    assert client.ts().queryindex(["region=null"]) == ["null"]
+    res = client.ts().mget(["region=null"], with_labels=True)
+    assert_resp_response(
+        client,
+        res,
+        [{"null": [{"region": "null", "env": "prod"}, 1, 1.0]}],
+        {"null": [{"region": "null", "env": "prod"}, [1, 1.0]]},
+    )
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
 @skip_if_server_version_lt("8.9.0")
 def test_query_labels(client):
     client.ts().create(

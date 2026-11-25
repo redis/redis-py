@@ -13,7 +13,6 @@ from typing import (
 
 import redis
 from redis.typing import ChannelT, PubSubHandler, Subscription
-from redis.utils import str_if_bytes
 
 
 def list_or_args(keys: Any, args: Iterable[Any] | None) -> List[Any]:
@@ -63,7 +62,7 @@ def nativestr(x):
     Key and label names must use :func:`redis.utils.str_if_bytes`
     instead, so a literal ``"null"`` stays ``"null"``.
     """
-    r = str_if_bytes(x)
+    r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
     if r == "null":
         return
     return r
