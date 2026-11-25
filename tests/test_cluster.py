@@ -5855,12 +5855,12 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("named_target", [False, True])
-    def test_pipeline_retry_of_another_command_does_not_resend_wait(self, named_target):
+    def test_pipeline_with_an_unblocked_wait_is_raised_at_once(self, named_target):
         """
-        A pipeline that is retried for a blocking command resends only that
-        command. A WAIT of the same pipeline that got UNBLOCKED keeps its
-        error, which is raised once the retry is done, also when the WAIT
-        names its target node.
+        A WAIT that got UNBLOCKED is never sent again, so its error is raised
+        whatever a retry does. The pipeline is not retried for a blocking
+        command that got UNBLOCKED as well: a resent pop would lose the element
+        it takes. The same holds when the WAIT names its target node.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
@@ -5875,8 +5875,6 @@ class TestTopologyRefreshPacing:
 
         def parse_response(redis, connection, command_name, **options):
             sent.append(command_name)
-            if command_name == "BLPOP" and sent.count("BLPOP") == 2:
-                return [key.encode(), b"x"]
             raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
 
         with (
@@ -5895,7 +5893,8 @@ class TestTopologyRefreshPacing:
             with pytest.raises(ResponseError, match="UNBLOCKED"):
                 pipe.execute()
 
-        assert sorted(sent) == ["BLPOP", "BLPOP", "WAIT"]
+        assert sorted(sent) == ["BLPOP", "WAIT"]
+        assert nm._refresh_requested is True
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
@@ -5999,8 +5998,9 @@ class TestTopologyRefreshPacing:
         """
         The server closes the connection after an UNBLOCKED reply and runs none
         of the commands the pipeline sent after it. No reply is read for them:
-        they are sent again, the earlier commands of the node keep their
-        results, and a WAIT that got the error is still not sent again.
+        they are sent again after the unblocked command, in the order of the
+        pipeline, and the earlier commands of the node keep their results. A
+        WAIT that got the error is raised at once, so nothing is sent again.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
@@ -6042,11 +6042,11 @@ class TestTopologyRefreshPacing:
                 with pytest.raises(ResponseError, match="UNBLOCKED"):
                     pipe.execute()
 
-        # Each GET once: the earlier one is not sent again
-        assert sent.count("GET") == 2
-        assert sent.count(unblocked_command) == (
-            2 if unblocked_command == "BLPOP" else 1
-        )
+        # The earlier GET is not sent again
+        if unblocked_command == "BLPOP":
+            assert sent == ["GET", "BLPOP", "BLPOP", "GET"]
+        else:
+            assert sent == ["GET", "WAIT"]
         closed[0].disconnect.assert_called_once_with()
 
     @pytest.mark.fixed_client

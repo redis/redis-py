@@ -6232,6 +6232,9 @@ class NodeCommands:
                     c.result = sys.exc_info()[1]
                     if _is_unblocked_by_failover(c.result):
                         closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+                        # Sent again by the retry of the whole attempt, after
+                        # the unblocked command, to keep the order of the two
+                        closed.failover_seen = True
         if closed is not None:
             # The server closes the connection after the UNBLOCKED reply
             connection.disconnect()
@@ -6524,6 +6527,13 @@ class PipelineStrategy(AbstractStrategy):
                 if not isinstance(e, RedisCluster.ERRORS_ALLOW_RETRY) and not getattr(
                     e, "failover_seen", False
                 ):
+                    raise
+                if raise_on_error and any(
+                    getattr(c.result, "not_resent", False) for c in stack
+                ):
+                    # The error of a command that is never sent again is raised
+                    # whatever a retry does, and a blocking pop that is resent
+                    # would lose the element it takes
                     raise
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
@@ -6940,6 +6950,9 @@ class PipelineStrategy(AbstractStrategy):
                 for c in attempt
                 if isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
                 and not isinstance(c.result, ClusterPipeline.NOT_NODE_FAILURE_ERRORS)
+                # The commands an UNBLOCKED reply left unanswered wait for the
+                # retry of the attempt (see ``NodeCommands.read``)
+                and not getattr(c.result, "failover_seen", False)
             ),
             key=lambda x: x.position,
         )

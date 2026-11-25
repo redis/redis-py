@@ -1588,14 +1588,14 @@ class TestTopologyRefreshPacing:
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
     @pytest.mark.parametrize("named_target", [False, True])
-    async def test_pipeline_retry_of_another_command_does_not_resend_wait(
+    async def test_pipeline_with_an_unblocked_wait_is_raised_at_once(
         self, named_target: bool
     ) -> None:
         """
-        A pipeline that is retried for a blocking command resends only that
-        command. A WAIT of the same pipeline that got UNBLOCKED keeps its
-        error, which is raised once the retry is done, also when the WAIT
-        names its target node.
+        A WAIT that got UNBLOCKED is never sent again, so its error is raised
+        whatever a retry does. The pipeline is not retried for a blocking
+        command that got UNBLOCKED as well: a resent pop would lose the element
+        it takes. The same holds when the WAIT names its target node.
         """
         r = await self._blpop_client()
         r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
@@ -1607,8 +1607,7 @@ class TestTopologyRefreshPacing:
             wait_node, ResponseError(self.UNBLOCKED_BY_FAILOVER)
         )
         blpop_connection = self._mock_connection(
-            blpop_node,
-            [ResponseError(self.UNBLOCKED_BY_FAILOVER), [key.encode(), b"x"]],
+            blpop_node, ResponseError(self.UNBLOCKED_BY_FAILOVER)
         )
         with mock.patch.object(RedisCluster, "_refresh_topology", autospec=True):
             with pytest.raises(ResponseError, match="UNBLOCKED"):
@@ -1620,8 +1619,54 @@ class TestTopologyRefreshPacing:
                         pipe.wait(1, 0)
                     await pipe.execute()
 
-        assert blpop_connection.read_response.await_count == 2
+        assert blpop_connection.read_response.await_count == 1
         assert wait_connection.read_response.await_count == 1
+        assert r._initialize is True
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("unblocked_command", ["BLPOP", "WAIT"])
+    async def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
+        self, unblocked_command: str
+    ) -> None:
+        """
+        The server closes the connection after an UNBLOCKED reply and runs none
+        of the commands the pipeline sent after it. No reply is read for them:
+        they are sent again, the earlier commands of the node keep their
+        results, and a WAIT that got the error is not sent again.
+        """
+        r = await self._blpop_client()
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        # WAIT has no key, so the pipeline sends it to the default node
+        node = r.get_default_node()
+        key = next(
+            k for k in ("foo", "bar", "baz", "qux") if r.get_node_from_key(k) == node
+        )
+        unblocked = ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        if unblocked_command == "BLPOP":
+            # GET, BLPOP, then the BLPOP and the later GET that are sent again
+            replies = [b"value", unblocked, [key.encode(), b"x"], b"value"]
+        else:
+            replies = [b"value", unblocked]
+        connection = self._mock_connection(node, replies)
+        with mock.patch.object(RedisCluster, "_refresh_topology", autospec=True):
+            async with r.pipeline() as pipe:
+                pipe.get(key)
+                if unblocked_command == "BLPOP":
+                    pipe.execute_command("BLPOP", key, 0)
+                    pipe.get(key)
+                    result = await pipe.execute()
+                    assert result[0] == result[2] == b"value"
+                    assert list(result[1]) == [key.encode(), b"x"]
+                else:
+                    pipe.wait(1, 0)
+                    pipe.get(key)
+                    with pytest.raises(ResponseError, match="UNBLOCKED"):
+                        await pipe.execute()
+
+        # No reply is read for the commands after the unblocked one
+        assert connection.read_response.await_count == len(replies)
+        connection.disconnect.assert_awaited_once_with(nowait=True)
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")

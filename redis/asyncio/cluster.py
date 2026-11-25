@@ -51,6 +51,7 @@ from redis._defaults import (
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import decode_info, get_response_callbacks
 from redis._parsers.response_callbacks import _get_response_callback
+from redis._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from redis.asyncio import _himport_exec
 from redis.asyncio.client import (
     _PIPELINE_YIELD_MIN_COMMANDS,
@@ -2848,9 +2849,14 @@ class ClusterNode:
 
             # Read responses
             ret = False
-            unblocked = False
+            closed = None
             may_yield = len(commands) >= _PIPELINE_YIELD_MIN_COMMANDS
             for i, cmd in enumerate(commands):
+                if closed is not None:
+                    # The server ran none of the commands after the unblocked
+                    # one, so only they fail and no reply is read for them
+                    cmd.result = closed
+                    continue
                 if may_yield and i and not i % _PIPELINE_YIELD_MIN_COMMANDS:
                     await _yield_in_read_loop(connection)
                 try:
@@ -2861,9 +2867,9 @@ class ClusterNode:
                     cmd.result = e
                     ret = True
                     if _is_unblocked_by_failover(e):
-                        unblocked = True
-            if unblocked:
-                # The server closes the connection after this reply
+                        closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            if closed is not None:
+                # The server closes the connection after the UNBLOCKED reply
                 await connection.disconnect(nowait=True)
 
             return ret
@@ -4246,6 +4252,14 @@ class PipelineStrategy(AbstractStrategy):
                         e, RedisCluster.ERRORS_ALLOW_RETRY
                     ) and not getattr(e, "failover_seen", False):
                         raise
+                    if raise_on_error and any(
+                        getattr(cmd.result, "not_resent", False)
+                        for cmd in self._command_queue
+                    ):
+                        # The error of a command that is never sent again is
+                        # raised whatever a retry does, and a blocking pop that
+                        # is resent would lose the element it takes
+                        raise
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
                         # should be raised.
@@ -4542,10 +4556,7 @@ class PipelineStrategy(AbstractStrategy):
                 error=node_error,
             )
 
-        # A retry leaves out a failed command that must not be sent again. Its error
-        # is still raised when the commands that were resent all succeed.
-        retried = len(todo) != len(stack)
-        if retried or any(errors):
+        if any(errors):
             if allow_redirections:
                 # A split MULTI_SHARD command resends only the slots that failed, and a
                 # command sent to several nodes asks only the nodes that have not
@@ -4584,7 +4595,7 @@ class PipelineStrategy(AbstractStrategy):
                             cmd.result = e
 
             if raise_on_error:
-                for cmd in stack if retried else todo:
+                for cmd in todo:
                     result = cmd.result
                     if isinstance(result, Exception):
                         command = command_text(cmd.args)
