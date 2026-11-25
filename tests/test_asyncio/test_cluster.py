@@ -1587,13 +1587,15 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("named_target", [False, True])
     async def test_pipeline_retry_of_another_command_does_not_resend_wait(
-        self,
+        self, named_target: bool
     ) -> None:
         """
         A pipeline that is retried for a blocking command resends only that
         command. A WAIT of the same pipeline that got UNBLOCKED keeps its
-        error, which is raised once the retry is done.
+        error, which is raised once the retry is done, also when the WAIT
+        names its target node.
         """
         r = await self._blpop_client()
         r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
@@ -1612,7 +1614,10 @@ class TestTopologyRefreshPacing:
             with pytest.raises(ResponseError, match="UNBLOCKED"):
                 async with r.pipeline() as pipe:
                     pipe.execute_command("BLPOP", key, 0)
-                    pipe.wait(1, 0)
+                    if named_target:
+                        pipe.execute_command("WAIT", 1, 0, target_nodes=wait_node)
+                    else:
+                        pipe.wait(1, 0)
                     await pipe.execute()
 
         assert blpop_connection.read_response.await_count == 2

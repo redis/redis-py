@@ -6842,12 +6842,13 @@ class PipelineStrategy(AbstractStrategy):
                             if named is not None:
                                 # Not retried, as RedisCluster does not retry a
                                 # command with target nodes, and resent to them
-                                # if the attempt is retried for another command
+                                # if the attempt is retried for another command, unless
+                                # ``not_resent`` is set below
                                 cmd.target_nodes = named
-                            elif _is_resent_after_failover(cmd.args[0]):
-                                cmd.result.failover_seen = True
-                            else:
+                            if not _is_resent_after_failover(cmd.args[0]):
                                 cmd.result.not_resent = True
+                            elif named is None:
+                                cmd.result.failover_seen = True
                     if node_failed_over:
                         failed_over = True
                         if node_objs[node_name] == self._pipe.get_default_node():
