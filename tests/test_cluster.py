@@ -5735,6 +5735,17 @@ class TestTopologyRefreshPacing:
         )
 
     @staticmethod
+    def _assert_closed_for_unblocked(connection):
+        """
+        :connection: was disconnected once, with the UNBLOCKED error as the
+        reason, so the close is recorded as one an error caused.
+        """
+        connection.disconnect.assert_called_once()
+        error = connection.disconnect.call_args.kwargs["error"]
+        assert isinstance(error, ResponseError)
+        assert "UNBLOCKED" in str(error)
+
+    @staticmethod
     def _blpop_client(**kwargs):
         """
         A mocked client whose commands parser also knows the keys of BLPOP.
@@ -6038,7 +6049,7 @@ class TestTopologyRefreshPacing:
         assert sent == ["GET", "BLPOP", "BLPOP"]
         init.assert_called_once()
         assert [c for c in connections if c.disconnect.called] == unblocked
-        unblocked[0].disconnect.assert_called_once_with()
+        self._assert_closed_for_unblocked(unblocked[0])
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
@@ -6053,7 +6064,8 @@ class TestTopologyRefreshPacing:
         they are sent again after the unblocked command, in the order of the
         pipeline, with and without ``raise_on_error``, and the earlier commands
         of the node keep their results. A WAIT that got the error is not sent
-        again and keeps it.
+        again and keeps it, and with ``raise_on_error`` nothing is sent again
+        after it: the pipeline raises anyway.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
@@ -6107,9 +6119,11 @@ class TestTopologyRefreshPacing:
         # The earlier GET is not sent again
         if unblocked_command == "BLPOP":
             assert sent == ["GET", "BLPOP", "BLPOP", "GET"]
+        elif raise_on_error:
+            assert sent == ["GET", "WAIT"]
         else:
             assert sent == ["GET", "WAIT", "GET"]
-        closed[0].disconnect.assert_called_once_with()
+        self._assert_closed_for_unblocked(closed[0])
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])

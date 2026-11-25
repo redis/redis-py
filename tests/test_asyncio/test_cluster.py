@@ -1448,6 +1448,18 @@ class TestTopologyRefreshPacing:
     )
 
     @staticmethod
+    def _assert_closed_for_unblocked(connection: mock.AsyncMock) -> None:
+        """
+        :connection: was disconnected once, with the UNBLOCKED error as the
+        reason, so the close is recorded as one an error caused.
+        """
+        connection.disconnect.assert_awaited_once()
+        kwargs = connection.disconnect.await_args.kwargs
+        assert kwargs["nowait"] is True
+        assert isinstance(kwargs["error"], ResponseError)
+        assert "UNBLOCKED" in str(kwargs["error"])
+
+    @staticmethod
     async def _blpop_client(**kwargs: Any) -> RedisCluster:
         """
         A mocked client whose commands parser also knows the keys of BLPOP.
@@ -1508,7 +1520,7 @@ class TestTopologyRefreshPacing:
 
         assert connection.read_response.await_count == 2
         refresh.assert_awaited_once()
-        connection.disconnect.assert_awaited_once_with(nowait=True)
+        self._assert_closed_for_unblocked(connection)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
@@ -1576,7 +1588,7 @@ class TestTopologyRefreshPacing:
 
         assert connection.read_response.await_count == 1
         assert r._initialize is True
-        connection.disconnect.assert_awaited_once_with(nowait=True)
+        self._assert_closed_for_unblocked(connection)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
@@ -1699,7 +1711,7 @@ class TestTopologyRefreshPacing:
 
         # No reply is read for the commands after the unblocked one
         assert connection.read_response.await_count == len(replies)
-        connection.disconnect.assert_awaited_once_with(nowait=True)
+        self._assert_closed_for_unblocked(connection)
         # The server closed the connection: the node did not fail
         tried_last.assert_not_called()
 
@@ -1803,7 +1815,7 @@ class TestTopologyRefreshPacing:
         assert blpop_connection.read_response.await_count == 2
         refresh.assert_awaited_once()
         get_connection.disconnect.assert_not_awaited()
-        blpop_connection.disconnect.assert_awaited_once_with(nowait=True)
+        self._assert_closed_for_unblocked(blpop_connection)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])

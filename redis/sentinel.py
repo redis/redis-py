@@ -103,7 +103,7 @@ class SentinelManagedConnection(Connection):
                 # this error and closes the connection, as when Sentinel runs
                 # a coordinated failover. Same meaning as the ReadOnlyError
                 # above: re-query Sentinel on the next connect() attempt.
-                self.disconnect()
+                self.disconnect(error=e)
                 raise ConnectionError("The previous master is now a slave")
             raise
 

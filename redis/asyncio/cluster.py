@@ -2782,7 +2782,7 @@ class ClusterNode:
         except ResponseError as e:
             if _is_unblocked_by_failover(e):
                 # The server closes the connection after this reply
-                await connection.disconnect(nowait=True)
+                await connection.disconnect(nowait=True, error=e)
             raise
         finally:
             try:
@@ -2849,6 +2849,7 @@ class ClusterNode:
 
             # Read responses
             ret = False
+            unblocked = None
             closed = None
             may_yield = len(commands) >= _PIPELINE_YIELD_MIN_COMMANDS
             for i, cmd in enumerate(commands):
@@ -2867,10 +2868,11 @@ class ClusterNode:
                     cmd.result = e
                     ret = True
                     if _is_unblocked_by_failover(e):
+                        unblocked = e
                         closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-            if closed is not None:
+            if unblocked is not None:
                 # The server closes the connection after the UNBLOCKED reply
-                await connection.disconnect(nowait=True)
+                await connection.disconnect(nowait=True, error=unblocked)
 
             return ret
         finally:
@@ -4260,9 +4262,10 @@ class PipelineStrategy(AbstractStrategy):
                         getattr(cmd.result, "not_resent", False)
                         for cmd in self._command_queue
                     ):
-                        # The error of a command that is never sent again is
-                        # raised whatever a retry does, and a blocking pop that
-                        # is resent would lose the element it takes
+                        # A WAIT or WAITAOF that got UNBLOCKED is never sent
+                        # again, so the pipeline fails. It is not retried: a
+                        # resent blocking pop would take an element that the
+                        # failure discards.
                         raise
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
