@@ -476,28 +476,27 @@ async def test_objlen(decoded_r: redis.Redis):
     assert len(obj) == await decoded_r.json().objlen("obj")
 
 
-# @pytest.mark.redismod
-# async def test_json_commands_in_pipeline(decoded_r: redis.Redis):
-#     async with decoded_r.json().pipeline() as p:
-#         p.set("foo", Path.root_path(), "bar")
-#         p.get("foo")
-#         p.delete("foo")
-#         assert [True, "bar", 1] == await p.execute()
-#     assert await decoded_r.keys() == []
-#     assert await decoded_r.get("foo") is None
+@pytest.mark.redismod
+async def test_json_commands_in_pipeline(decoded_r: redis.Redis):
+    async with decoded_r.json().pipeline() as p:
+        p.set("foo", Path.root_path(), "bar")
+        p.get("foo")
+        p.delete("foo")
+        assert await p.execute() == [True, "bar", 1]
+    assert await decoded_r.keys() == []
+    assert await decoded_r.get("foo") is None
 
-#     # now with a true, json object
-#     await decoded_r.flushdb()
-#     p = await decoded_r.json().pipeline()
-#     d = {"hello": "world", "oh": "snap"}
-#     with pytest.deprecated_call():
-#         p.jsonset("foo", Path.root_path(), d)
-#         p.jsonget("foo")
-#     p.exists("notarealkey")
-#     p.delete("foo")
-#     assert [True, d, 0, 1] == p.execute()
-#     assert await decoded_r.keys() == []
-#     assert await decoded_r.get("foo") is None
+    await decoded_r.flushdb()
+    p = decoded_r.json().pipeline()
+    d = {"hello": "world", "oh": "snap"}
+    with pytest.deprecated_call():
+        p.jsonset("foo", Path.root_path(), d)
+        p.jsonget("foo")
+    p.exists("notarealkey")
+    p.delete("foo")
+    assert await p.execute() == [True, d, 0, 1]
+    assert await decoded_r.keys() == []
+    assert await decoded_r.get("foo") is None
 
 
 @pytest.mark.redismod
