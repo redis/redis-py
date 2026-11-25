@@ -253,13 +253,13 @@ def get_async_cluster_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
     enable_maintenance_notifications: bool = True,
-    endpoint_type: Optional[EndpointType] = None,
+    endpoint_type: EndpointType | None = None,
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
     auth_ssl_client_certs: bool = False,
-    socket_timeout: Optional[float] = None,
-    socket_connect_timeout: Optional[float] = None,
+    socket_timeout: float | None = None,
+    socket_connect_timeout: float | None = None,
     dynamic_startup_nodes: bool = True,
 ) -> RedisCluster:
     """Create async RedisCluster client with maintenance notifications enabled."""

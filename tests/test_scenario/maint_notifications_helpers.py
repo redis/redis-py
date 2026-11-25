@@ -342,9 +342,9 @@ def generate_params(
     fault_injector_client: FaultInjectorClient,
     effect_names: list[SlotMigrateEffects | TopologyChangeStandaloneEffects],
     skip_combinations: list[tuple[SlotMigrateEffects, str]] = [],
-    endpoint_types: Optional[list[EndpointType]] = None,
+    endpoint_types: list[EndpointType] | None = None,
     include_tls: bool = True,
-    triggers: Optional[list[str]] = None,
+    triggers: list[str] | None = None,
 ):
     """Build parametrize tuples for maint-notification scenario tests.
 

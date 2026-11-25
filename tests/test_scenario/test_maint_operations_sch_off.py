@@ -54,7 +54,7 @@ Each scenario adds its own checks on top. The scenarios:
 
 import logging
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 import pytest
 
@@ -89,9 +89,9 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
     def _run_failback(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
-        outage: Optional[AuthOutage] = None,
+        outage: AuthOutage | None = None,
     ):
         """Run the maintenance and the failback, and validate both.
 
@@ -108,7 +108,7 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
             node_id = self._node_maintenance("enter")["node_id"]
 
         time.sleep(HOLD_SECONDS)
-        removed: Set[str] = set()
+        removed: set[str] = set()
         for run in runs:
             during = _primaries(run.client)
             dropped = before - during
@@ -157,7 +157,10 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
                     run.monitor, run.app.stats, outage, timeline.steady_done
                 )
 
-        self._finish(None if outage is None else outage.expected, validate_run)
+        if outage is None:
+            self._finish(validate_run=validate_run)
+        else:
+            self._finish(outage.expected, validate_run, outage.expected_dial)
 
     @pytest.mark.timeout(FAILBACK_TEST_TIMEOUT)
     @pytest.mark.parametrize("dynamic_startup_nodes", [False, True])
@@ -165,7 +168,7 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
     def test_failback_without_connection_storm(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
         """A node maintenance and its failback under load cause no connection storm.
@@ -182,7 +185,7 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
     def test_failback_with_auth_errors_on_returning_node(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
         """A returning node that rejects AUTH for a while causes no connection storm.
@@ -206,7 +209,7 @@ class TestClusterSingleOperationSchOff(ClusterMaintScenarioBase):
     database is deleted.
     """
 
-    def _operate_maintenance_mode(self, before: Set[str]) -> Expectation:
+    def _operate_maintenance_mode(self, before: set[str]) -> Expectation:
         # The node stays in maintenance; _nodes_in_maintenance hands it to the
         # cleanup.
         self._node_maintenance("enter")
@@ -220,7 +223,7 @@ class TestClusterSingleOperationSchOff(ClusterMaintScenarioBase):
         self,
         monkeypatch,
         operation: str,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
         """One operation under load causes no connection storm, and the client

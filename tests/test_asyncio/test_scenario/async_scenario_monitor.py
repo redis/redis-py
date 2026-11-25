@@ -4,7 +4,7 @@ and the instrumentation wraps the asyncio connection and nodes manager classes.
 """
 
 import asyncio
-from typing import Callable, Optional
+from typing import Callable
 
 from redis.asyncio import RedisCluster
 from redis.asyncio.cluster import NodesManager
@@ -29,7 +29,7 @@ class AsyncClientMonitor(ClientMonitor):
 
     def __init__(self, snapshot: Callable[[], ClientSnapshot]):
         super().__init__(snapshot)
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
     def start(self):
         self.observe()

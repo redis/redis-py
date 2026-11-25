@@ -19,13 +19,7 @@ from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Callable,
-    Dict,
-    FrozenSet,
     Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
 )
 
 try:
@@ -38,7 +32,7 @@ except ImportError:
 from redis import RedisCluster
 from redis.asyncio import RedisCluster as AsyncRedisCluster
 from redis.cluster import NodesManager
-from redis.connection import AbstractConnection, Connection
+from redis.connection import AbstractConnection, Connection, SSLConnection
 from redis.exceptions import AuthenticationError
 
 if TYPE_CHECKING:
@@ -74,8 +68,8 @@ class Operation:
 
     name: str
     started: float
-    done: Optional[float] = None
-    settled: Optional[float] = None
+    done: float | None = None
+    settled: float | None = None
 
     @property
     def end(self) -> float:
@@ -88,7 +82,7 @@ class Operation:
 class Timeline:
     started: float = field(default_factory=_now)
     warmed_up: float = 0.0
-    operations: List[Operation] = field(default_factory=list)
+    operations: list[Operation] = field(default_factory=list)
     steady_started: float = 0.0
     steady_done: float = 0.0
 
@@ -108,7 +102,7 @@ class Timeline:
         """When the client had caught up with the last operation."""
         return self.operations[-1].end
 
-    def transition_windows(self) -> List[tuple]:
+    def transition_windows(self) -> list[tuple]:
         return [
             (op.started - TRANSITION_MARGIN, op.end + TRANSITION_MARGIN)
             for op in self.operations
@@ -117,12 +111,12 @@ class Timeline:
     def in_transition(self, at: float) -> bool:
         return any(start <= at <= end for start, end in self.transition_windows())
 
-    def operation_windows(self) -> List[tuple]:
+    def operation_windows(self) -> list[tuple]:
         """(name, start, end) of each operation up to the start of the next one."""
         starts = [op.started for op in self.operations[1:]] + [self.steady_started]
         return [(op.name, op.started, end) for op, end in zip(self.operations, starts)]
 
-    def phases(self) -> List[tuple]:
+    def phases(self) -> list[tuple]:
         """(name, start, end) of every phase, for the summary."""
         phases = [("warm-up", self.started, self.warmed_up)]
         starts = [op.started for op in self.operations[1:]] + [self.steady_started]
@@ -140,18 +134,18 @@ class Timeline:
 class _Event:
     at: float
     kind: str
-    address: Optional[str] = None
-    error: Optional[str] = None
+    address: str | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True)
 class ClientSnapshot:
     at: float
-    primaries: FrozenSet[str]
+    primaries: frozenset[str]
     # node name -> connections the node's pool holds, and how many of them are
     # connected
-    connections: Dict[str, int]
-    sockets: Dict[str, int]
+    connections: dict[str, int]
+    sockets: dict[str, int]
     # connected sockets of every node and startup node pool
     open_sockets: int
     # slots the client's slot map routes to a node
@@ -161,15 +155,16 @@ class ClientSnapshot:
 @dataclass(frozen=True)
 class TopologyChange:
     at: float
-    added: FrozenSet[str]
-    removed: FrozenSet[str]
+    added: frozenset[str]
+    removed: frozenset[str]
 
 
 class ClientMonitor:
     """What the client does while the app runs.
 
     Two sources feed it. The hooks installed by instrument() record every TCP dial
-    (Connection._connect), every failed connect including the handshake
+    (Connection._connect, with a failed TLS handshake counted as a failed dial),
+    every failed connect including the handshake
     (connect_check_health), every close of a connected socket (disconnect) and
     every topology refresh (NodesManager.initialize) of the client. A sampler takes
     a ClientSnapshot of the client every MONITOR_INTERVAL_SECONDS and records when
@@ -183,13 +178,13 @@ class ClientMonitor:
     def __init__(self, snapshot: Callable[[], ClientSnapshot]):
         self._snapshot = snapshot
         self._lock = threading.Lock()
-        self._events: List[_Event] = []
-        self.snapshots: List[ClientSnapshot] = []
-        self.topology_changes: List[TopologyChange] = []
+        self._events: list[_Event] = []
+        self.snapshots: list[ClientSnapshot] = []
+        self.topology_changes: list[TopologyChange] = []
         self._stop = threading.Event()
-        self._sampler: Optional[Thread] = None
+        self._sampler: Thread | None = None
 
-    def record(self, kind: str, address: Optional[str] = None, error=None):
+    def record(self, kind: str, address: str | None = None, error=None):
         event = _Event(
             _now(), kind, address, None if error is None else type(error).__name__
         )
@@ -234,8 +229,8 @@ class ClientMonitor:
         kind: str,
         start: float = 0.0,
         end: float = float("inf"),
-        addresses: Optional[Set[str]] = None,
-    ) -> List[_Event]:
+        addresses: set[str] | None = None,
+    ) -> list[_Event]:
         with self._lock:
             return [
                 e
@@ -248,31 +243,44 @@ class ClientMonitor:
     def count(self, kind: str, **kwargs) -> int:
         return len(self.events(kind, **kwargs))
 
-    def peak_second(self, kind: str, start: float, end: float) -> Tuple[int, float]:
-        """The most events of kind in one second between start and end, and when
-        that second starts."""
-        buckets: Dict[int, int] = defaultdict(int)
-        for event in self.events(kind, start=start, end=end):
-            buckets[int(event.at - start)] += 1
-        if not buckets:
-            return 0, start
-        second, count = max(buckets.items(), key=lambda item: item[1])
-        return count, start + second
+    def peak_second(
+        self,
+        kind: str,
+        start: float,
+        end: float,
+        skip: Callable[[_Event], bool] | None = None,
+    ) -> tuple[int, float]:
+        """The most events of kind in any one second between start and end, and
+        when that second starts. The events skip accepts are left out."""
+        times = sorted(
+            event.at
+            for event in self.events(kind, start=start, end=end)
+            if skip is None or not skip(event)
+        )
+        peak, peak_at = 0, start
+        first = 0
+        for last, at in enumerate(times):
+            # The second that ends with this event.
+            while at - times[first] >= 1:
+                first += 1
+            if last - first + 1 > peak:
+                peak, peak_at = last - first + 1, times[first]
+        return peak, peak_at
 
-    def by_address(self, kind: str, start: float, end: float) -> Dict[str, int]:
-        counts: Dict[str, int] = defaultdict(int)
+    def by_address(self, kind: str, start: float, end: float) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
         for event in self.events(kind, start=start, end=end):
             counts[event.address or ""] += 1
         return dict(counts)
 
-    def stable_nodes(self, start: float, end: float) -> Set[str]:
+    def stable_nodes(self, start: float, end: float) -> set[str]:
         """The nodes that were primaries in every snapshot between start and end."""
         snapshots = [s for s in self.snapshots if start <= s.at <= end]
         if not snapshots:
             return set()
         return set(frozenset.intersection(*(s.primaries for s in snapshots)))
 
-    def changes_between(self, start: float, end: float) -> List[TopologyChange]:
+    def changes_between(self, start: float, end: float) -> list[TopologyChange]:
         return [c for c in self.topology_changes if start <= c.at <= end]
 
 
@@ -281,11 +289,11 @@ class ClientMonitor:
 # into the one named here. A new thread starts with no value; a new task inherits
 # the value of the task that created it, so the client's own background tasks are
 # counted for it too.
-current_monitor: ContextVar[Optional[ClientMonitor]] = ContextVar(
+current_monitor: ContextVar[ClientMonitor | None] = ContextVar(
     "current_monitor", default=None
 )
 # Hook events no monitor was bound for, by kind. instrument() resets it.
-unattributed_events: Dict[str, int] = defaultdict(int)
+unattributed_events: dict[str, int] = defaultdict(int)
 
 
 @contextmanager
@@ -298,7 +306,7 @@ def bound_to(monitor: ClientMonitor) -> Iterator[None]:
         current_monitor.reset(token)
 
 
-def record(kind: str, address: Optional[str] = None, error=None):
+def record(kind: str, address: str | None = None, error=None):
     """Record a hook event into the monitor of the current thread or task."""
     monitor = current_monitor.get()
     if monitor is None:
@@ -314,6 +322,7 @@ def instrument(monkeypatch):
     original_connect_check_health = AbstractConnection.connect_check_health
     original_initialize = NodesManager.initialize
     original_disconnect = AbstractConnection.disconnect
+    original_wrap_socket_with_ssl = SSLConnection._wrap_socket_with_ssl
 
     def _connect(self):
         address = f"{self.host}:{self.port}"
@@ -336,6 +345,16 @@ def instrument(monkeypatch):
             record("drop", f"{self.host}:{self.port}")
         return original_disconnect(self, *args, **kwargs)
 
+    def _wrap_socket_with_ssl(self, sock):
+        # SSLConnection._connect dials through Connection._connect and then runs
+        # the TLS handshake here. A failed handshake closes the socket before the
+        # connection holds it, so it is a failed dial too.
+        try:
+            return original_wrap_socket_with_ssl(self, sock)
+        except BaseException as e:
+            record("dial_failure", f"{self.host}:{self.port}", e)
+            raise
+
     def initialize(self, *args, **kwargs):
         record("refresh")
         try:
@@ -345,6 +364,7 @@ def instrument(monkeypatch):
             raise
 
     monkeypatch.setattr(Connection, "_connect", _connect)
+    monkeypatch.setattr(SSLConnection, "_wrap_socket_with_ssl", _wrap_socket_with_ssl)
     monkeypatch.setattr(
         AbstractConnection, "connect_check_health", connect_check_health
     )
@@ -352,7 +372,7 @@ def instrument(monkeypatch):
     monkeypatch.setattr(NodesManager, "initialize", initialize)
 
 
-def process_sockets_to(port: int) -> Optional[int]:
+def process_sockets_to(port: int) -> int | None:
     """Established TCP sockets of this process to the database port.
 
     Counts what the operating system sees, so it also finds sockets that left the
@@ -361,7 +381,11 @@ def process_sockets_to(port: int) -> Optional[int]:
     if psutil is None:
         return None
     process = psutil.Process()
-    connections = getattr(process, "net_connections", process.connections)("tcp")
+    # psutil 6 renamed Process.connections to net_connections.
+    if hasattr(process, "net_connections"):
+        connections = process.net_connections("tcp")
+    else:
+        connections = process.connections("tcp")
     return sum(
         1
         for c in connections
@@ -373,8 +397,8 @@ def process_sockets_to(port: int) -> Optional[int]:
 
 
 class AuthOutage:
-    """Rejects AUTH on one node for a while, to simulation problematic server behaviour.
-    This will let us validate reasonable library behaviour with faulty server.
+    """Rejects AUTH on one node for a while, to simulate a faulty server and
+    validate that the library behaves reasonably against it.
 
     Nothing is rejected until arm() names the node. The outage then starts with the
     first handshake to that node and lasts AUTH_OUTAGE_SECONDS: the node accepts
@@ -385,8 +409,8 @@ class AuthOutage:
 
     def __init__(self, duration: float = AUTH_OUTAGE_SECONDS):
         self.duration = duration
-        self.node: Optional[str] = None
-        self.started: Optional[float] = None
+        self.node: str | None = None
+        self.started: float | None = None
         self.rejections = 0
         self._lock = threading.Lock()
 
@@ -394,7 +418,7 @@ class AuthOutage:
         self.node = node
 
     @property
-    def ended(self) -> Optional[float]:
+    def ended(self) -> float | None:
         return None if self.started is None else self.started + self.duration
 
     def over(self) -> bool:
@@ -412,6 +436,21 @@ class AuthOutage:
                 return False
             self.rejections += 1
             return True
+
+    def expected_dial(self, event: _Event) -> bool:
+        """Whether the monitor's event is a dial to the node while it rejects AUTH.
+
+        Every command the app routes to the node then dials it and fails, so the
+        app's command rate sets how many of these there are. validate_auth_outage
+        bounds them by the failed commands instead of by a rate.
+        """
+        ended = self.ended
+        return (
+            ended is not None
+            and event.kind == "dial"
+            and event.address == self.node
+            and self.started <= event.at <= ended
+        )
 
     def expected(self, error: "CommandError") -> bool:
         """Whether the app's error is one the outage causes."""
@@ -439,11 +478,11 @@ def inject_auth_outage(monkeypatch, outage: AuthOutage):
 # What the client holds: its topology and its connections.
 
 
-def _primaries(client: RedisCluster | AsyncRedisCluster) -> Set[str]:
+def _primaries(client: RedisCluster | AsyncRedisCluster) -> set[str]:
     return {node.name for node in client.get_primaries()}
 
 
-def _slot_owners(client: RedisCluster | AsyncRedisCluster) -> Set[str]:
+def _slot_owners(client: RedisCluster | AsyncRedisCluster) -> set[str]:
     return {
         nodes[0].name for nodes in client.nodes_manager.slots_cache.values() if nodes
     }

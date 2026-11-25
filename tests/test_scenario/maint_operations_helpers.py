@@ -13,7 +13,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Set
+from typing import Any, Callable, Literal
 
 import pytest
 
@@ -36,6 +36,7 @@ from tests.test_scenario.scenario_monitor import (
     ClientMonitor,
     Operation,
     Timeline,
+    _Event,
     _mapped_slots,
     _now,
     _open_sockets,
@@ -205,7 +206,7 @@ def log_summary(
 def validate_errors(
     stats: WorkloadStats,
     timeline: Timeline,
-    expected: Optional[Callable[[CommandError], bool]] = None,
+    expected: Callable[[CommandError], bool] | None = None,
 ):
     """Check the app's errors.
 
@@ -236,7 +237,7 @@ def validate_errors(
         )
 
 
-def phases_at(timeline: Timeline, at: float) -> List[str]:
+def phases_at(timeline: Timeline, at: float) -> list[str]:
     """The phases of the timeline the one second that starts at at overlaps."""
     return [
         name for name, start, end in timeline.phases() if start < at + 1 and at <= end
@@ -255,8 +256,16 @@ def second_activity(monitor: ClientMonitor, at: float) -> str:
     )
 
 
-def validate_connections(monitor: ClientMonitor, timeline: Timeline):
-    """Bound the new connections and refreshes."""
+def validate_connections(
+    monitor: ClientMonitor,
+    timeline: Timeline,
+    expected_dials: Callable[[_Event], bool] | None = None,
+):
+    """Bound the new connections and refreshes.
+
+    expected_dials marks the new connections a scenario causes on purpose. They
+    are left out of the peak per second, and the scenario validates them itself.
+    """
     after_warmup = timeline.warmed_up
     end = timeline.steady_done
 
@@ -271,7 +280,7 @@ def validate_connections(monitor: ClientMonitor, timeline: Timeline):
             f"which kept its shards (at most {STABLE_NODE_DIAL_SLACK})"
         )
 
-    peak, peak_at = monitor.peak_second("dial", after_warmup, end)
+    peak, peak_at = monitor.peak_second("dial", after_warmup, end, expected_dials)
     assert peak <= MAX_DIALS_PER_SECOND, (
         f"{peak} new connections in one second (at most {MAX_DIALS_PER_SECOND}), "
         f"at {peak_at - timeline.started:.1f}s, in "
@@ -390,7 +399,7 @@ def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
 
 def validate_process_sockets(
     held: int, port: int, when: str, clients: int = 1
-) -> Optional[int]:
+) -> int | None:
     """The process has no sockets to the database beyond the clients' pools.
 
     Compares what the operating system sees with held, the open sockets in the
@@ -430,9 +439,9 @@ def validate_final_state(monitor: ClientMonitor):
     Takes the monitor's last snapshot, so call it after the monitor has stopped.
     """
     final = monitor.snapshots[-1]
-    disconnected = sorted(p for p in final.primaries if not final.connections.get(p))
+    disconnected = sorted(p for p in final.primaries if not final.sockets.get(p))
     assert not disconnected, (
-        f"The client holds no connection to primaries {disconnected} at the end"
+        f"The client holds no connected socket to primaries {disconnected} at the end"
     )
 
 
@@ -492,7 +501,10 @@ def validate_auth_outage(
 
     The outage really happened, the rejected handshakes stay within what the app's
     commands need, and once AUTH works again the node gets only the connections the
-    app needs.
+    app needs. Each command the app routes to the node while it rejects AUTH dials
+    it once and fails, so the app's command rate sets the dials to it per second,
+    and validate_connections leaves them out (AuthOutage.expected_dial). A reconnect
+    loop shows instead as more rejected handshakes than failed commands.
     """
     assert outage.started is not None and outage.rejections > 0, (
         f"The returning node {outage.node} never got a handshake, so the AUTH "
@@ -521,10 +533,14 @@ def validate_auth_outage(
         f"{len(rejected)} failed connects, peak {peak} new connections per second, "
         f"{auth_errors} commands failed with AuthenticationError"
     )
-    assert peak <= MAX_DIALS_PER_SECOND, (
-        f"{peak} new connections in one second during the AUTH outage "
-        f"(at most {MAX_DIALS_PER_SECOND}), {peak_at - outage.started:.1f}s into "
-        f"it: " + second_activity(monitor, peak_at)
+    # A refresh may try the node too, and fail over to the next one.
+    refreshes = monitor.count("refresh", start=outage.started, end=outage.ended)
+    assert len(rejected) <= auth_errors + refreshes, (
+        f"{len(rejected)} failed connects to {outage.node} during the AUTH outage, "
+        f"but only {auth_errors} commands failed with AuthenticationError and "
+        f"{refreshes} topology refreshes ran: the client redials the node on its "
+        f"own. Peak {peak} new connections per second, "
+        f"{peak_at - outage.started:.1f}s into it: " + second_activity(monitor, peak_at)
     )
     validate_joining_node(monitor, outage.ended, end, outage.node)
 
@@ -543,7 +559,7 @@ class Expectation:
     validate: Callable[[ClientMonitor, Timeline], None]
 
 
-def node_removed_expectation(before: Set[str]) -> Expectation:
+def node_removed_expectation(before: set[str]) -> Expectation:
     """The operation takes exactly one node out of the client's topology."""
 
     def reached(client) -> bool:
@@ -581,7 +597,7 @@ class WorkloadRun:
     baseline: float = 0.0
 
 
-def collect_failure(failures: List[str], workload: str, check: Callable[[], None]):
+def collect_failure(failures: list[str], workload: str, check: Callable[[], None]):
     """Run check and add its assertion failure, labeled with workload, to failures.
 
     The scenario validates every workload, and reports all their failures at once.
@@ -606,40 +622,46 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
         self._fault_injector = fault_injector_client_oss_api
         self._bdb_name = None
         self._endpoint_config = None
-        self._runs: List[WorkloadRun] = []
+        self._runs: list[WorkloadRun] = []
         self._timeline = Timeline()
         self._db_port = 0
-        self._nodes_in_maintenance: Set[int] = set()
+        self._nodes_in_maintenance: set[int] = set()
 
         yield
 
         logging.info("Starting cleanup...")
-        for run in self._runs:
-            run.app.stop()
-        for run in self._runs:
-            run.monitor.stop()
-        for run in self._runs:
-            run.client.close()
-        self._runs = []
-        if self._bdb_name:
-            self.delete_prev_db(self._fault_injector, self._bdb_name)
-        for node_id in list(self._nodes_in_maintenance):
-            # A scenario that ends with a node in maintenance, or fails before its
-            # failback, leaves the node evacuated. The database is gone by now, so
-            # take the node out of maintenance without moving shards back; later
-            # tests get the whole cluster.
-            try:
-                self._node_maintenance("exit", node_id, restore_shards=False)
-            except (Exception, pytest.fail.Exception) as e:
-                logging.error(f"Failed to take node {node_id} out of maintenance: {e}")
-        logging.info("Cleanup finished")
+        try:
+            for run in self._runs:
+                run.app.stop()
+            for run in self._runs:
+                run.monitor.stop()
+            for run in self._runs:
+                run.client.close()
+            self._runs = []
+        finally:
+            # The cluster is shared with the later tests, so it is restored even
+            # when stopping the app or closing a client fails.
+            if self._bdb_name:
+                self.delete_prev_db(self._fault_injector, self._bdb_name)
+            for node_id in list(self._nodes_in_maintenance):
+                # A scenario that ends with a node in maintenance, or fails before
+                # its failback, leaves the node evacuated. The database is gone by
+                # now, so take the node out of maintenance without moving shards
+                # back; later tests get the whole cluster.
+                try:
+                    self._node_maintenance("exit", node_id, restore_shards=False)
+                except (Exception, pytest.fail.Exception) as e:
+                    logging.error(
+                        f"Failed to take node {node_id} out of maintenance: {e}"
+                    )
+            logging.info("Cleanup finished")
 
     def _start_app(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
-    ) -> List[WorkloadRun]:
+    ) -> list[WorkloadRun]:
         """Create a new database and a client per workload, start the apps and the
         monitors, and warm up.
 
@@ -703,7 +725,7 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
         )
         return WorkloadRun(workload, client, monitor, app)
 
-    def _common_primaries(self) -> Set[str]:
+    def _common_primaries(self) -> set[str]:
         """The primaries every client sees; they must all see the same."""
         primaries = {run.name: _primaries(run.client) for run in self._runs}
         common = next(iter(primaries.values()))
@@ -755,14 +777,16 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
 
     def _finish(
         self,
-        expected_errors: Optional[Callable[[CommandError], bool]] = None,
-        validate_run: Optional[Callable[[WorkloadRun], None]] = None,
+        expected_errors: Callable[[CommandError], bool] | None = None,
+        validate_run: Callable[[WorkloadRun], None] | None = None,
+        expected_dials: Callable[[_Event], bool] | None = None,
     ):
         """Run the steady window, stop the apps, validate and close the clients.
 
         expected_errors marks the app errors the scenario causes on purpose; see
-        validate_errors. validate_run(run) adds the scenario's own checks of each
-        workload. Every workload is validated, and all the failures are reported
+        validate_errors. expected_dials marks its new connections; see
+        validate_connections. validate_run(run) adds the scenario's own checks of
+        each workload. Every workload is validated, and all the failures are reported
         together.
         """
         timeline, runs = self._timeline, self._runs
@@ -774,7 +798,7 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
         for run in runs:
             run.monitor.stop()
 
-        failures: List[str] = []
+        failures: list[str] = []
         for run in runs:
             log_summary(run.name, run.monitor, run.app.stats, timeline)
 
@@ -782,7 +806,7 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
                 with bound_to(run.monitor):
                     validate_errors(run.app.stats, timeline, expected_errors)
                     run.app.validate()
-                    validate_connections(run.monitor, timeline)
+                    validate_connections(run.monitor, timeline, expected_dials)
                     validate_held_connections(run.monitor, timeline)
                     validate_slot_coverage(run.monitor, timeline)
                     validate_final_state(run.monitor)
@@ -822,10 +846,25 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
         if failures:
             pytest.fail("\n".join(failures))
 
+    def _track_failed_enter(self, action_id: str):
+        """Hand the node of a failed 'enter' to the cleanup.
+
+        An 'enter' that fails may have put its node in maintenance already. The
+        fault injector names that node in the output of the failed action.
+        """
+        try:
+            status = self._fault_injector.get_action_status(action_id)
+        except Exception as e:
+            logging.error(f"Failed to read the node of the failed maintenance: {e}")
+            return
+        node_id = (status.get("output") or {}).get("node_id")
+        if node_id is not None:
+            self._nodes_in_maintenance.add(node_id)
+
     def _node_maintenance(
         self,
         mode: Literal["enter", "exit"],
-        node_id: Optional[int] = None,
+        node_id: int | None = None,
         restore_shards: bool = True,
     ) -> dict:
         action_id = self._fault_injector.node_maintenance(
@@ -835,9 +874,14 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
             active_timeout=NODE_MAINTENANCE_ACTIVE_TIMEOUT,
             restore_shards=restore_shards,
         )
-        result = self._fault_injector.get_operation_result(
-            action_id, timeout=NODE_MAINTENANCE_OP_TIMEOUT
-        )
+        try:
+            result = self._fault_injector.get_operation_result(
+                action_id, timeout=NODE_MAINTENANCE_OP_TIMEOUT
+            )
+        except pytest.fail.Exception:
+            if mode == "enter":
+                self._track_failed_enter(action_id)
+            raise
         logging.info(f"node_maintenance {mode} result: {result}")
         output = result.get("output", {})
         if mode == "enter":

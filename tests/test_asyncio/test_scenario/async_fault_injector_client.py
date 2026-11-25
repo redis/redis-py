@@ -87,10 +87,10 @@ class AsyncFaultInjectorClient(ABC):
     @abstractmethod
     async def node_maintenance(
         self,
-        endpoint_config: Dict[str, Any],
+        endpoint_config: dict[str, Any],
         mode: Literal["enter", "exit"],
-        node_id: Optional[int] = None,
-        active_timeout: Optional[int] = None,
+        node_id: int | None = None,
+        active_timeout: int | None = None,
         restore_shards: bool = True,
     ) -> str:
         pass
@@ -307,10 +307,10 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
 
     async def node_maintenance(
         self,
-        endpoint_config: Dict[str, Any],
+        endpoint_config: dict[str, Any],
         mode: Literal["enter", "exit"],
-        node_id: Optional[int] = None,
-        active_timeout: Optional[int] = None,
+        node_id: int | None = None,
+        active_timeout: int | None = None,
         restore_shards: bool = True,
     ) -> str:
         """Take a node of the database through maintenance.
@@ -325,7 +325,7 @@ class AsyncREFaultInjector(AsyncFaultInjectorClient):
         and moves nothing back, and does not wait for the database: the cleanup
         after the database was deleted.
         """
-        parameters: Dict[str, Any] = {
+        parameters: dict[str, Any] = {
             "bdb_id": endpoint_config.get("bdb_id"),
             "cluster_index": 0,
             "mode": mode,
@@ -448,10 +448,10 @@ class AsyncProxyServerFaultInjector(MockProxyFaultInjector, AsyncFaultInjectorCl
 
     async def node_maintenance(
         self,
-        endpoint_config: Dict[str, Any],
+        endpoint_config: dict[str, Any],
         mode: Literal["enter", "exit"],
-        node_id: Optional[int] = None,
-        active_timeout: Optional[int] = None,
+        node_id: int | None = None,
+        active_timeout: int | None = None,
         restore_shards: bool = True,
     ) -> str:
         raise NotImplementedError("Not implemented for proxy server")

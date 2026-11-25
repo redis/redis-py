@@ -13,7 +13,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from threading import Thread
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable
 
 from redis import RedisCluster
 from redis.asyncio import RedisCluster as AsyncRedisCluster
@@ -38,14 +38,14 @@ BLOCKING_PRODUCER_PAUSE_SECONDS = 0.2
 
 def keys_on_every_primary(
     client: RedisCluster | AsyncRedisCluster, prefix: str
-) -> List[str]:
+) -> list[str]:
     """One key in the middle of the slots of each primary.
 
     The slots come from the client's own slot map, not from an even split of the
     slot space, so every primary gets load whatever slot boundaries the database
     uses.
     """
-    slots_by_owner: Dict[str, List[int]] = defaultdict(list)
+    slots_by_owner: dict[str, list[int]] = defaultdict(list)
     for slot, nodes in client.nodes_manager.slots_cache.items():
         if nodes:
             slots_by_owner[nodes[0].name].append(slot)
@@ -73,13 +73,13 @@ class WorkloadStats:
     """Results of the app's workers, shared between them."""
 
     lock: threading.Lock = field(default_factory=threading.Lock)
-    errors: List[CommandError] = field(default_factory=list)
-    ok_per_second: Dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    errors: list[CommandError] = field(default_factory=list)
+    ok_per_second: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     started_at: float = field(default_factory=_now)
     # counter key -> acknowledged increments, and increments that raised (and so
     # may or may not have been applied)
-    acked: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
-    ambiguous: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    acked: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    ambiguous: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     def ok(self, count: int = 1):
         with self.lock:
@@ -136,7 +136,7 @@ class Workload:
 
     name: str = ""
 
-    def round(self, app: "ScenarioApp", worker: int, keys: List[str], iteration: int):
+    def round(self, app: "ScenarioApp", worker: int, keys: list[str], iteration: int):
         """Run one round of commands over the worker's keys."""
         raise NotImplementedError
 
@@ -246,19 +246,17 @@ class QueueStats:
     lock: threading.Lock = field(default_factory=threading.Lock)
     # queue -> values whose RPUSH was acknowledged, and values whose RPUSH raised
     # (and so may or may not be in the queue)
-    pushed: Dict[str, Set[str]] = field(default_factory=lambda: defaultdict(set))
-    push_ambiguous: Dict[str, Set[str]] = field(
+    pushed: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
+    push_ambiguous: dict[str, set[str]] = field(
         default_factory=lambda: defaultdict(set)
     )
     # queue -> values BLPOP returned, and BLPOPs that raised (and so may have
     # taken a value whose reply was lost)
-    popped: Dict[str, List[str]] = field(default_factory=lambda: defaultdict(list))
-    pop_ambiguous: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    popped: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+    pop_ambiguous: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
 
-def validate_queue(
-    queue: str, remaining: List[str], queues: QueueStats
-) -> Optional[str]:
+def validate_queue(queue: str, remaining: list[str], queues: QueueStats) -> str | None:
     """Check one queue of the blocking workload. Returns the problem, if any."""
     pushed = queues.pushed[queue]
     maybe_pushed = pushed | queues.push_ambiguous[queue]
@@ -366,7 +364,7 @@ class ScenarioApp:
         self,
         client: RedisCluster,
         workload: Workload,
-        keys: List[List[str]],
+        keys: list[list[str]],
         monitor: ClientMonitor,
     ):
         self.client = client
@@ -376,7 +374,7 @@ class ScenarioApp:
         self.monitor = monitor
         self.stats = WorkloadStats()
         self._stop = threading.Event()
-        self._threads: List[Thread] = []
+        self._threads: list[Thread] = []
 
     def start(self):
         for index in range(len(self.keys)):

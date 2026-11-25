@@ -7,7 +7,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Set
+from typing import Any, Awaitable, Callable, Literal
 
 import pytest
 import pytest_asyncio
@@ -52,6 +52,7 @@ from tests.test_scenario.maint_operations_helpers import (
 )
 from tests.test_scenario.scenario_monitor import (
     Timeline,
+    _Event,
     _now,
     _primaries,
     bound_to,
@@ -73,7 +74,7 @@ class AsyncWorkloadRun:
 
 
 async def collect_async_failure(
-    failures: List[str], workload: str, check: Callable[[], Awaitable[None]]
+    failures: list[str], workload: str, check: Callable[[], Awaitable[None]]
 ):
     """The async counterpart of collect_failure in the sync suite."""
     try:
@@ -95,40 +96,46 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
         self._fault_injector = fault_injector_client_oss_api
         self._bdb_name = None
         self._endpoint_config = None
-        self._runs: List[AsyncWorkloadRun] = []
+        self._runs: list[AsyncWorkloadRun] = []
         self._timeline = Timeline()
         self._db_port = 0
-        self._nodes_in_maintenance: Set[int] = set()
+        self._nodes_in_maintenance: set[int] = set()
 
         yield
 
         logging.info("Starting cleanup...")
-        for run in self._runs:
-            await run.app.stop()
-        for run in self._runs:
-            await run.monitor.stop()
-        for run in self._runs:
-            await run.client.aclose()
-        self._runs = []
-        if self._bdb_name:
-            await self.delete_prev_db(self._fault_injector, self._bdb_name)
-        for node_id in list(self._nodes_in_maintenance):
-            # A scenario that ends with a node in maintenance, or fails before its
-            # failback, leaves the node evacuated. The database is gone by now, so
-            # take the node out of maintenance without moving shards back; later
-            # tests get the whole cluster.
-            try:
-                await self._node_maintenance("exit", node_id, restore_shards=False)
-            except (Exception, pytest.fail.Exception) as e:
-                logging.error(f"Failed to take node {node_id} out of maintenance: {e}")
-        logging.info("Cleanup finished")
+        try:
+            for run in self._runs:
+                await run.app.stop()
+            for run in self._runs:
+                await run.monitor.stop()
+            for run in self._runs:
+                await run.client.aclose()
+            self._runs = []
+        finally:
+            # The cluster is shared with the later tests, so it is restored even
+            # when stopping the app or closing a client fails.
+            if self._bdb_name:
+                await self.delete_prev_db(self._fault_injector, self._bdb_name)
+            for node_id in list(self._nodes_in_maintenance):
+                # A scenario that ends with a node in maintenance, or fails before
+                # its failback, leaves the node evacuated. The database is gone by
+                # now, so take the node out of maintenance without moving shards
+                # back; later tests get the whole cluster.
+                try:
+                    await self._node_maintenance("exit", node_id, restore_shards=False)
+                except (Exception, pytest.fail.Exception) as e:
+                    logging.error(
+                        f"Failed to take node {node_id} out of maintenance: {e}"
+                    )
+            logging.info("Cleanup finished")
 
     async def _start_app(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
-    ) -> List[AsyncWorkloadRun]:
+    ) -> list[AsyncWorkloadRun]:
         """Create a new database and a client per workload, start the apps and the
         monitors, and warm up.
 
@@ -196,7 +203,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
         )
         return AsyncWorkloadRun(workload, client, monitor, app)
 
-    def _common_primaries(self) -> Set[str]:
+    def _common_primaries(self) -> set[str]:
         """The primaries every client sees; they must all see the same."""
         primaries = {run.name: _primaries(run.client) for run in self._runs}
         common = next(iter(primaries.values()))
@@ -248,14 +255,16 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
 
     async def _finish(
         self,
-        expected_errors: Optional[Callable[[CommandError], bool]] = None,
-        validate_run: Optional[Callable[[AsyncWorkloadRun], None]] = None,
+        expected_errors: Callable[[CommandError], bool] | None = None,
+        validate_run: Callable[[AsyncWorkloadRun], None] | None = None,
+        expected_dials: Callable[[_Event], bool] | None = None,
     ):
         """Run the steady window, stop the apps, validate and close the clients.
 
         expected_errors marks the app errors the scenario causes on purpose; see
-        validate_errors. validate_run(run) adds the scenario's own checks of each
-        workload. Every workload is validated, and all the failures are reported
+        validate_errors. expected_dials marks its new connections; see
+        validate_connections. validate_run(run) adds the scenario's own checks of
+        each workload. Every workload is validated, and all the failures are reported
         together.
         """
         timeline, runs = self._timeline, self._runs
@@ -267,7 +276,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
         for run in runs:
             await run.monitor.stop()
 
-        failures: List[str] = []
+        failures: list[str] = []
         for run in runs:
             log_summary(run.name, run.monitor, run.app.stats, timeline)
 
@@ -275,7 +284,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
                 with bound_to(run.monitor):
                     validate_errors(run.app.stats, timeline, expected_errors)
                     await run.app.validate()
-                    validate_connections(run.monitor, timeline)
+                    validate_connections(run.monitor, timeline, expected_dials)
                     validate_held_connections(run.monitor, timeline)
                     validate_slot_coverage(run.monitor, timeline)
                     validate_final_state(run.monitor)
@@ -322,10 +331,25 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
         if failures:
             pytest.fail("\n".join(failures))
 
+    async def _track_failed_enter(self, action_id: str):
+        """Hand the node of a failed 'enter' to the cleanup.
+
+        An 'enter' that fails may have put its node in maintenance already. The
+        fault injector names that node in the output of the failed action.
+        """
+        try:
+            status = await self._fault_injector.get_action_status(action_id)
+        except Exception as e:
+            logging.error(f"Failed to read the node of the failed maintenance: {e}")
+            return
+        node_id = (status.get("output") or {}).get("node_id")
+        if node_id is not None:
+            self._nodes_in_maintenance.add(node_id)
+
     async def _node_maintenance(
         self,
         mode: Literal["enter", "exit"],
-        node_id: Optional[int] = None,
+        node_id: int | None = None,
         restore_shards: bool = True,
     ) -> dict:
         action_id = await self._fault_injector.node_maintenance(
@@ -335,9 +359,14 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
             active_timeout=NODE_MAINTENANCE_ACTIVE_TIMEOUT,
             restore_shards=restore_shards,
         )
-        result = await self._fault_injector.get_operation_result(
-            action_id, timeout=NODE_MAINTENANCE_OP_TIMEOUT
-        )
+        try:
+            result = await self._fault_injector.get_operation_result(
+                action_id, timeout=NODE_MAINTENANCE_OP_TIMEOUT
+            )
+        except pytest.fail.Exception:
+            if mode == "enter":
+                await self._track_failed_enter(action_id)
+            raise
         logging.info(f"node_maintenance {mode} result: {result}")
         output = result.get("output", {})
         if mode == "enter":

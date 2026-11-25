@@ -4,7 +4,7 @@ client instance. Each workload runs the same commands as its sync counterpart.
 """
 
 import asyncio
-from typing import Awaitable, Callable, List
+from typing import Awaitable, Callable
 
 from redis.asyncio import RedisCluster
 from tests.test_scenario.scenario_monitor import ClientMonitor, bound_to
@@ -28,7 +28,7 @@ class AsyncWorkload:
     name: str = ""
 
     async def round(
-        self, app: "AsyncScenarioApp", worker: int, keys: List[str], iteration: int
+        self, app: "AsyncScenarioApp", worker: int, keys: list[str], iteration: int
     ):
         """Run one round of commands over the worker's keys."""
         raise NotImplementedError
@@ -192,7 +192,7 @@ class AsyncScenarioApp:
         self,
         client: RedisCluster,
         workload: AsyncWorkload,
-        keys: List[List[str]],
+        keys: list[list[str]],
         monitor: ClientMonitor,
     ):
         self.client = client
@@ -202,7 +202,7 @@ class AsyncScenarioApp:
         self.monitor = monitor
         self.stats = WorkloadStats()
         self._stop = asyncio.Event()
-        self._tasks: List[asyncio.Task] = []
+        self._tasks: list[asyncio.Task] = []
 
     def start(self):
         for index in range(len(self.keys)):

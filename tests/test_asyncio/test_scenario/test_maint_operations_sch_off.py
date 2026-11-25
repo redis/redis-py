@@ -9,7 +9,7 @@ thresholds and the validations are shared with the sync suite.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 import pytest
 
@@ -44,9 +44,9 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
     async def _run_failback(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
-        outage: Optional[AuthOutage] = None,
+        outage: AuthOutage | None = None,
     ):
         """Run the maintenance and the failback, and validate both.
 
@@ -63,7 +63,7 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
             node_id = (await self._node_maintenance("enter"))["node_id"]
 
         await asyncio.sleep(HOLD_SECONDS)
-        removed: Set[str] = set()
+        removed: set[str] = set()
         for run in runs:
             during = _primaries(run.client)
             dropped = before - during
@@ -112,18 +112,21 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
                     run.monitor, run.app.stats, outage, timeline.steady_done
                 )
 
-        await self._finish(None if outage is None else outage.expected, validate_run)
+        if outage is None:
+            await self._finish(validate_run=validate_run)
+        else:
+            await self._finish(outage.expected, validate_run, outage.expected_dial)
 
     @pytest.mark.timeout(FAILBACK_TEST_TIMEOUT)
     @pytest.mark.parametrize("dynamic_startup_nodes", [False, True])
     @pytest.mark.parametrize("db_config", NODE_MAINTENANCE_DB_CONFIGS)
-    async def test_failover_and_failback(
+    async def test_failback_without_connection_storm(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
-        """A node maintenance and its failback under load cause no unneeded reconnects.
+        """A node maintenance and its failback under load cause no connection storm.
 
         dynamic_startup_nodes=False is the drill's setup: the seed endpoint is the
         only startup node, so a refresh has to fall back to the nodes of the current
@@ -137,7 +140,7 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
     async def test_failback_with_auth_errors_on_returning_node(
         self,
         monkeypatch,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
         """A returning node that rejects AUTH for a while causes no connection storm.
@@ -158,7 +161,7 @@ class TestAsyncClusterSingleOperationSchOff(AsyncClusterMaintScenarioBase):
     The async counterpart of TestClusterSingleOperationSchOff in the sync suite.
     """
 
-    async def _operate_maintenance_mode(self, before: Set[str]) -> Expectation:
+    async def _operate_maintenance_mode(self, before: set[str]) -> Expectation:
         # The node stays in maintenance; _nodes_in_maintenance hands it to the
         # cleanup.
         await self._node_maintenance("enter")
@@ -172,7 +175,7 @@ class TestAsyncClusterSingleOperationSchOff(AsyncClusterMaintScenarioBase):
         self,
         monkeypatch,
         operation: str,
-        db_config: Dict[str, Any],
+        db_config: dict[str, Any],
         dynamic_startup_nodes: bool,
     ):
         """One operation under load causes no connection storm, and the client
