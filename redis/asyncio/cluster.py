@@ -90,9 +90,9 @@ from redis.cluster import (
     AbstractRedisCluster,
     LoadBalancer,
     LoadBalancingStrategy,
+    _can_be_resent_after_failover,
     _error_to_raise,
     _fill_missing_redirect_host,
-    _is_resent_after_failover,
     _is_unblocked_by_failover,
     _keep_target_replies,
     _merge_multi_shard_replies,
@@ -2220,7 +2220,7 @@ class RedisCluster(
                 )
             except ResponseError as e:
                 if _shows_failover(e, target_node):
-                    if _is_resent_after_failover(args[0]):
+                    if _can_be_resent_after_failover(args[0]):
                         e.failover_seen = True
                     # Ask for a topology refresh, run by the next attempt, of
                     # any command, once due; the caller retries this one
@@ -4469,7 +4469,7 @@ class PipelineStrategy(AbstractStrategy):
                         # for another command, unless
                         # ``not_resent`` is set below
                         cmd.target_nodes = named
-                    if not _is_resent_after_failover(cmd.args[0]):
+                    if not _can_be_resent_after_failover(cmd.args[0]):
                         cmd.result.not_resent = True
                     elif named is None:
                         cmd.result.failover_seen = True

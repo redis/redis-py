@@ -2,6 +2,7 @@ import random
 import weakref
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Type, Union
 
+from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.commands import SentinelCommands
@@ -15,10 +16,6 @@ from redis.exceptions import (
 from redis.retry import Retry
 from redis.typing import EncodableT
 from redis.utils import SENTINEL
-
-DEMOTED_MASTER_UNBLOCKED_ERROR = (
-    "UNBLOCKED force unblock from blocking operation, instance state changed"
-)
 
 
 class MasterNotFoundError(ConnectionError):

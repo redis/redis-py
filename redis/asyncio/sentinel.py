@@ -12,6 +12,7 @@ from typing import (
     Type,
 )
 
+from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
     Connection,
@@ -28,7 +29,6 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.sentinel import DEMOTED_MASTER_UNBLOCKED_ERROR
 
 
 class MasterNotFoundError(ConnectionError):

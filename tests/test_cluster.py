@@ -38,7 +38,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
-    _is_resent_after_failover,
+    _can_be_resent_after_failover,
     _shows_failover,
     _resolve_localhost,
     get_node_name,
@@ -5995,7 +5995,7 @@ class TestTopologyRefreshPacing:
         A command name can be passed as bytes and in any case. WAIT and WAITAOF
         are not sent again after a failover in any of these forms.
         """
-        assert _is_resent_after_failover(command_name) is resent
+        assert _can_be_resent_after_failover(command_name) is resent
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")

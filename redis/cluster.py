@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
+from redis._parsers.base import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis._parsers.helpers import parse_scan
 from redis._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
@@ -106,7 +107,6 @@ from redis.observability.recorder import (
     record_operation_duration,
 )
 from redis.retry import AbstractRetry, Retry
-from redis.sentinel import DEMOTED_MASTER_UNBLOCKED_ERROR
 from redis.typing import (
     ChannelT,
     FieldT,
@@ -821,7 +821,7 @@ def _shows_failover(error: Any, node: "ClusterNode") -> bool:
     as a primary or as a replica.
 
     The caller asks for a topology refresh and, unless the command must not be
-    sent again (see ``_is_resent_after_failover``), sets ``failover_seen`` on
+    sent again (see ``_can_be_resent_after_failover``), sets ``failover_seen`` on
     the error, and the retry loops of the commands and pipelines retry such an
     error like one of ``ERRORS_ALLOW_RETRY``. A READONLY from a node cached as a
     replica does not count: the write was sent there, and no refresh changes
@@ -836,7 +836,7 @@ def _shows_failover(error: Any, node: "ClusterNode") -> bool:
 _NOT_RESENT_AFTER_FAILOVER = frozenset(("WAIT", "WAITAOF"))
 
 
-def _is_resent_after_failover(command_name: str | bytes) -> bool:
+def _can_be_resent_after_failover(command_name: str | bytes) -> bool:
     """
     Return whether a command that got an error ``_shows_failover`` accepts
     can be sent again. A command of the server that was unblocked while it
@@ -3005,7 +3005,7 @@ class RedisCluster(
                     # The server closes the connection after this reply
                     connection.disconnect()
                 if _shows_failover(e, target_node):
-                    if _is_resent_after_failover(args[0]):
+                    if _can_be_resent_after_failover(args[0]):
                         e.failover_seen = True
                     # Ask for a topology refresh, run by the next attempt, of
                     # any command, once due; the caller retries this one
@@ -6867,7 +6867,7 @@ class PipelineStrategy(AbstractStrategy):
                                 # if the attempt is retried for another command, unless
                                 # ``not_resent`` is set below
                                 cmd.target_nodes = named
-                            if not _is_resent_after_failover(cmd.args[0]):
+                            if not _can_be_resent_after_failover(cmd.args[0]):
                                 cmd.result.not_resent = True
                                 never_resent = True
                             elif named is None:
