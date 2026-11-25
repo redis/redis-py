@@ -1189,6 +1189,25 @@ class RedisCluster(
 
         self.nodes_manager.default_node = node
 
+    def replace_default_node(self, target_node: "ClusterNode | None" = None) -> None:
+        """Replace the default cluster node.
+        A random cluster node will be chosen if target_node isn't passed, and primaries
+        will be prioritized. The default node will not be changed if there are no other
+        nodes in the cluster.
+
+        A commands parser that asks the replaced node asks the new default node
+        from now on, as after a topology refresh: a node is replaced because it
+        failed, and the parser would otherwise ask it once more.
+
+        Args:
+            target_node (ClusterNode, optional): Target node to replace the default
+            node. Defaults to None.
+        """
+        curr_node = self.get_default_node()
+        super().replace_default_node(target_node)
+        if self.commands_parser.node == curr_node:
+            self.commands_parser.node = self.get_default_node()
+
     def get_node(
         self,
         host: Optional[str] = None,
@@ -1627,7 +1646,34 @@ class RedisCluster(
             if not keys:
                 return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
         else:
-            keys = await self.commands_parser.get_keys(command, *args)
+            parser_node = self.commands_parser.node
+            try:
+                keys = await self.commands_parser.get_keys(command, *args)
+            except (ConnectionError, TimeoutError) as e:
+                if not isinstance(e, self.NOT_NODE_FAILURE_ERRORS):
+                    # this is used to report the metrics based on host and port info
+                    e.connection = parser_node
+
+                    # The keys of some commands, such as XREAD, are found by asking
+                    # the parser's node (COMMAND GETKEYS), which is also asked for
+                    # the command table when a command is missing from it (COMMAND).
+                    # A failure to reach it is handled as for a command that fails
+                    # on a node: the node moves to the end of the cached nodes, and
+                    # a refresh that tries it last is asked for. The node is also
+                    # replaced now, as the default node and as the parser's node:
+                    # the refresh runs only once due, and until then a retry would
+                    # ask the same node again.
+                    self.nodes_manager.move_node_to_end_of_cached_nodes(
+                        parser_node.name
+                    )
+                    self._request_refresh(last_failed_node_name=parser_node.name)
+                    if parser_node == self.get_default_node():
+                        # The parser follows the default node
+                        self.replace_default_node()
+                    elif self.commands_parser.node is parser_node:
+                        # The parser asks the default node, as after a refresh
+                        self.commands_parser.node = self.get_default_node()
+                raise
             if not keys:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
@@ -1775,11 +1821,6 @@ class RedisCluster(
         last_error: Optional[Exception] = None
         last_refresh_at: Optional[float] = None
 
-        # Whether the attempt targets the default node alone: only an attempt
-        # that failed on it replaces it, not one made while a refresh another
-        # error asked for is pending
-        is_default_node = False
-
         # A MULTI_SHARD command whose keys span several slots is sent in one pipeline,
         # which retries the failed slots itself, so it is not retried here as well.
         splits = None
@@ -1804,6 +1845,10 @@ class RedisCluster(
         replies: Optional[Dict[str, Any]] = None
 
         for _ in range(execute_attempts):
+            # Whether the attempt targets the default node alone: only an
+            # attempt that failed on it replaces it, not one that failed before
+            # its nodes were determined
+            is_default_node = False
             if self._initialize_due():
                 # The node that failed is kept on the nodes manager, so the
                 # refresh tries it last even when it runs on a later command
@@ -1893,8 +1938,10 @@ class RedisCluster(
                     type(e) in self.__class__.ERRORS_ALLOW_RETRY
                     or getattr(e, "failover_seen", False)
                 ):
-                    if is_default_node:
-                        # Replace the default cluster node
+                    if is_default_node and target_nodes[0] == self.get_default_node():
+                        # Replace the default cluster node, unless the attempt
+                        # replaced it already: a lookup of the command's keys
+                        # that fails on it after a MOVED does
                         self.replace_default_node()
                     # The nodes and slots cache were should be reinitialized.
                     # Try again with the new cluster setup.
@@ -4894,9 +4941,7 @@ class TransactionStrategy(AbstractStrategy):
         # Given the limitation of ClusterPipeline sync API, we have to run it in thread.
         return _run_coroutine_in_thread(self._execute_command(*args, **kwargs))
 
-    async def _execute_command(
-        self, *args: Union[KeyT, EncodableT], **kwargs: Any
-    ) -> Any:
+    async def _execute_command(self, *args: KeyT | EncodableT, **kwargs: Any) -> Any:
         cluster_client = self._pipe.cluster_client
         # This runs on a private loop in a worker thread (execute_command), so
         # a topology refresh asked for by an error is left to the next command
@@ -4920,12 +4965,13 @@ class TransactionStrategy(AbstractStrategy):
         if parser_node is not None:
             # Parser I/O during slot resolution belongs to this private loop,
             # not to the caller's node or its connection pool.
-            cluster_client.commands_parser.node = ClusterNode(
+            temporary_node = ClusterNode(
                 parser_node.host,
                 parser_node.port,
                 **cluster_client.nodes_manager.connection_kwargs,
             )
-        slot_number: Optional[int] = None
+            cluster_client.commands_parser.node = temporary_node
+        slot_number: int | None = None
         try:
             if initialize_here:
                 await cluster_client.initialize()
@@ -4945,8 +4991,10 @@ class TransactionStrategy(AbstractStrategy):
                     return_exceptions=True,
                 )
             elif parser_node is not None:
-                temporary_node = cluster_client.commands_parser.node
-                cluster_client.commands_parser.node = parser_node
+                if cluster_client.commands_parser.node is temporary_node:
+                    # Not when a failure to reach the node pointed the parser at
+                    # another node: see RedisCluster._determine_slot
+                    cluster_client.commands_parser.node = parser_node
                 await asyncio.gather(
                     temporary_node.disconnect(), return_exceptions=True
                 )
