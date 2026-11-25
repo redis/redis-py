@@ -4456,6 +4456,8 @@ class PipelineStrategy(AbstractStrategy):
         # replies are merged and before a node error is raised below, so a retry
         # resends the command either way.
         failed_over = False
+        # The first command whose error was marked as never sent again
+        never_resent = None
         for (node, commands), failed in zip(nodes.values(), errors):
             if failed is not True:
                 # Only a node whose replies hold an error can hold a READONLY or
@@ -4474,6 +4476,8 @@ class PipelineStrategy(AbstractStrategy):
                         cmd.target_nodes = named
                     if not _can_be_resent_after_failover(cmd.args[0]):
                         cmd.result.not_resent = True
+                        if never_resent is None:
+                            never_resent = cmd
                     elif named is None:
                         cmd.result.failover_seen = True
             if node_failed_over:
@@ -4568,7 +4572,12 @@ class PipelineStrategy(AbstractStrategy):
             )
 
         if any(errors):
-            if allow_redirections:
+            # A WAIT or WAITAOF that got UNBLOCKED is never sent again, so with
+            # ``raise_on_error`` the pipeline fails with its error. No redirect is
+            # followed then: a resent blocking pop would take an element that the
+            # failure discards.
+            raised_anyway = never_resent is not None and raise_on_error
+            if allow_redirections and not raised_anyway:
                 # A split MULTI_SHARD command resends only the slots that failed, and a
                 # command sent to several nodes asks only the nodes that have not
                 # answered
@@ -4606,7 +4615,7 @@ class PipelineStrategy(AbstractStrategy):
                             cmd.result = e
 
             if raise_on_error:
-                for cmd in todo:
+                for cmd in (never_resent,) if raised_anyway else todo:
                     result = cmd.result
                     if isinstance(result, Exception):
                         command = command_text(cmd.args)

@@ -6843,9 +6843,10 @@ class PipelineStrategy(AbstractStrategy):
 
             failed_over = False
             # Whether an UNBLOCKED reply interrupted a command that is sent
-            # again, and whether an error was marked as never sent again
+            # again, and the first command whose error was marked as never
+            # sent again
             resend_unblocked = False
-            never_resent = False
+            never_resent = None
             for node_name, n in nodes.items():
                 n.read()
 
@@ -6871,7 +6872,8 @@ class PipelineStrategy(AbstractStrategy):
                                 cmd.target_nodes = named
                             if not _can_be_resent_after_failover(cmd.args[0]):
                                 cmd.result.not_resent = True
-                                never_resent = True
+                                if never_resent is None:
+                                    never_resent = cmd
                             elif named is None:
                                 cmd.result.failover_seen = True
                                 if _is_unblocked_by_failover(cmd.result):
@@ -6959,9 +6961,10 @@ class PipelineStrategy(AbstractStrategy):
         # runs before the commands of its node that got no reply, in the order of
         # the pipeline. It is left out when ``retry`` allows no retry.
         # A WAIT or WAITAOF that got UNBLOCKED is never sent again, so with
-        # ``raise_on_error`` the pipeline fails. No command is resent then: a
-        # resent blocking pop would take an element that the failure discards.
-        raised_anyway = never_resent and raise_on_error
+        # ``raise_on_error`` the pipeline fails with its error. No command is
+        # resent then, and no redirect is followed: a resent blocking pop would
+        # take an element that the failure discards.
+        raised_anyway = never_resent is not None and raise_on_error
         unblocked = None
         if (
             resend_unblocked
@@ -7063,7 +7066,11 @@ class PipelineStrategy(AbstractStrategy):
             response.append(c.result)
 
         if raise_on_error:
-            self._raise_first_error(stack, start_time)
+            # The error that fails the pipeline, not the one of an earlier
+            # command whose redirect was not followed
+            self._raise_first_error(
+                (never_resent,) if raised_anyway else stack, start_time
+            )
 
         return response
 

@@ -5959,6 +5959,39 @@ class TestTopologyRefreshPacing:
         assert _shows_failover(ResponseError("ERR other"), primary) is False
 
     @pytest.mark.fixed_client
+    def test_pipeline_raises_the_unblocked_wait_and_follows_no_redirect(self):
+        """
+        A pipeline that fails for a WAIT that got UNBLOCKED raises that error,
+        not the MOVED of an earlier command, and does not follow the redirect:
+        nothing is sent again in a pipeline that fails anyway.
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        checkout, _ = self._new_connection_each_checkout()
+        owner = rc.get_node_from_key("foo")
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            sent.append(command_name)
+            if command_name == "GET":
+                raise MovedError(f"{key_slot(b'foo')} {owner.host}:{owner.port}")
+            raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+        ):
+            pipe = rc.pipeline()
+            pipe.get("foo")
+            pipe.wait(1, 0)
+            with pytest.raises(ResponseError, match="UNBLOCKED") as raised:
+                pipe.execute()
+
+        assert not isinstance(raised.value, MovedError)
+        assert sorted(sent) == ["GET", "WAIT"]
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
     def test_unblocked_is_not_retried_when_retries_are_disabled(self, pipeline):
         """

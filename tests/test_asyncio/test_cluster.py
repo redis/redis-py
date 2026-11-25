@@ -1565,6 +1565,37 @@ class TestTopologyRefreshPacing:
         ]
 
     @pytest.mark.fixed_client
+    async def test_pipeline_raises_the_unblocked_wait_and_follows_no_redirect(
+        self,
+    ) -> None:
+        """
+        A pipeline that fails for a WAIT that got UNBLOCKED raises that error,
+        not the MOVED of an earlier command, and does not follow the redirect:
+        nothing is sent again in a pipeline that fails anyway.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        # WAIT has no key, so the pipeline sends it to the default node
+        wait_node = r.get_default_node()
+        key = next(k for k in ("foo", "bar") if r.get_node_from_key(k) != wait_node)
+        owner = r.get_node_from_key(key)
+        get_connection = self._mock_connection(
+            owner,
+            MovedError(f"{key_slot(key.encode())} {owner.host}:{owner.port}"),
+        )
+        wait_connection = self._mock_connection(
+            wait_node, ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        )
+        with pytest.raises(ResponseError, match="UNBLOCKED") as raised:
+            async with r.pipeline() as pipe:
+                pipe.get(key)
+                pipe.wait(1, 0)
+                await pipe.execute()
+
+        assert not isinstance(raised.value, MovedError)
+        assert get_connection.read_response.await_count == 1
+        assert wait_connection.read_response.await_count == 1
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
     async def test_unblocked_is_not_retried_when_retries_are_disabled(
         self, pipeline: bool
