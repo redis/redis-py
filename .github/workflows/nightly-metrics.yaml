@@ -51,7 +51,7 @@ jobs:
           # The metrics track redis-py, so the server stays on the released
           # version CI tests against. Keep in step with CURRENT_REDIS_VERSION
           # in integration.yaml, and with server-version below.
-          redis-version: '8.10.2'
+          redis-version: '8.12.0'
           # The fixed client tests, then one config that runs the standalone
           # and the cluster suite, so each test reports one duration per
           # suite per night. fixed_client tests are excluded from the other two.
@@ -71,4 +71,4 @@ jobs:
           otlp-endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/metrics'
           otlp-headers: 'Authorization=Basic ${{ secrets.OTEL_CI_VISIBILITY_TOKEN }}'
           # The reporter accepts only 'unstable' or a major.minor track.
-          server-version: '8.10'
+          server-version: '8.12'
