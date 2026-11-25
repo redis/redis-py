@@ -9,7 +9,6 @@ from typing import (
     Set,
     Tuple,
     TypeVar,
-    Union,
 )
 
 from redis.commands.metadata import (
@@ -407,9 +406,10 @@ class AsyncCommandsParser(AbstractCommandsParser):
     __slots__ = ("commands", "node", "_movablekeys_specs")
 
     def __init__(self) -> None:
-        self.commands: Dict[str, Union[int, Dict[str, Any]]] = {}
-        self._movablekeys_specs: Dict[str, Optional[Tuple]] = {}
-        self._encoder: Optional["Encoder"] = None
+        self.commands: Dict[str, int | Dict[str, Any]] = {}
+        self.node: "ClusterNode | None" = None
+        self._movablekeys_specs: Dict[str, Tuple | None] = {}
+        self._encoder: "Encoder | None" = None
 
     async def initialize(self, node: Optional["ClusterNode"] = None) -> None:
         if node:

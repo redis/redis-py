@@ -1100,7 +1100,7 @@ class AbstractRedisCluster:
             backoff.reset()
         return backoff.compute(failures)
 
-    def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
+    def replace_default_node(self, target_node: "ClusterNode | None" = None) -> None:
         """Replace the default cluster node.
         A random cluster node will be chosen if target_node isn't passed, and primaries
         will be prioritized. The default node will not be changed if there are no other
@@ -2238,6 +2238,11 @@ class RedisCluster(
             RedisClusterException: If the cluster has no default node to resolve
                 the keys against, which is the case before the slots cache is
                 first populated and after the client is closed.
+            ConnectionError: If the default node cannot be reached. A topology
+                refresh is asked for and the default node is replaced first, so
+                a retry asks another node.
+            TimeoutError: If the default node times out; handled as a
+                ConnectionError.
         """
         default_node = self.get_default_node()
         if default_node is None:
@@ -2253,7 +2258,28 @@ class RedisCluster(
                 f"yet.\nCommand: {truncate_text(command_text(args))}"
             )
 
-        return self.commands_parser.get_keys(default_node.redis_connection, *args)
+        try:
+            return self.commands_parser.get_keys(default_node.redis_connection, *args)
+        except (ConnectionError, TimeoutError) as e:
+            if not isinstance(e, self.NOT_NODE_FAILURE_ERRORS):
+                # this is used to report the metrics based on host and port info
+                e.connection = default_node
+
+                # The keys of some commands, such as XREAD, are found by asking the
+                # default node (COMMAND GETKEYS), which is also asked for the
+                # command table when a command is missing from it (COMMAND). A
+                # failure to reach it is handled as for a command that fails on a
+                # node: the node moves to the end of the cached nodes, and a
+                # refresh that tries it last is asked for. The default node is also
+                # replaced now: the refresh runs only once due, and until then a
+                # retry would ask the same node again.
+                self.nodes_manager.move_node_to_end_of_cached_nodes(default_node.name)
+                self.nodes_manager._request_refresh(
+                    last_failed_node_name=default_node.name
+                )
+                if default_node == self.get_default_node():
+                    self.replace_default_node()
+            raise
 
     def determine_slot(self, *args) -> Optional[int]:
         """
@@ -2393,7 +2419,6 @@ class RedisCluster(
             dict<Any, ClusterNode>
         """
         target_nodes_specified = False
-        is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
         nodes_flag = False
@@ -2460,6 +2485,10 @@ class RedisCluster(
         replies: Optional[Dict[Any, Any]] = None
 
         for _ in range(execute_attempts):
+            # Whether the attempt targets the default node alone: only an
+            # attempt that failed on it replaces it, not one that failed before
+            # its nodes were determined
+            is_default_node = False
             # Run a topology refresh an earlier error asked for, once due. The
             # flag is read inline: this runs before every attempt.
             if self.nodes_manager._refresh_requested:
@@ -2505,8 +2534,6 @@ class RedisCluster(
                             "No targets were found to execute "
                             f"{truncate_text(command_text(args))} command on"
                         )
-                    # Per attempt: only an attempt that failed on the default
-                    # node replaces it
                     is_default_node = (
                         len(target_nodes) == 1
                         and target_nodes[0] == self.get_default_node()
