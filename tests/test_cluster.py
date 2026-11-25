@@ -5865,13 +5865,18 @@ class TestTopologyRefreshPacing:
         rc = self._blpop_client()
         nm = rc.nodes_manager
         nm._last_refresh_at = nm._refresh_due_at = None
+        # WAIT has no key, so the pipeline sends it to the default node. The
+        # server closes a connection after one UNBLOCKED reply, so the two
+        # commands get theirs from different nodes.
+        wait_node = rc.get_default_node()
+        key = next(k for k in ("foo", "bar") if rc.get_node_from_key(k) != wait_node)
         checkout, _ = self._new_connection_each_checkout()
         sent = []
 
         def parse_response(redis, connection, command_name, **options):
             sent.append(command_name)
             if command_name == "BLPOP" and sent.count("BLPOP") == 2:
-                return [b"bar", b"x"]
+                return [key.encode(), b"x"]
             raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
 
         with (
@@ -5882,9 +5887,9 @@ class TestTopologyRefreshPacing:
             patch.object(NodesManager, "initialize", autospec=True),
         ):
             pipe = rc.pipeline()
-            pipe.execute_command("BLPOP", "bar", 0)
+            pipe.execute_command("BLPOP", key, 0)
             if named_target:
-                pipe.execute_command("WAIT", 1, 0, target_nodes=rc.get_default_node())
+                pipe.execute_command("WAIT", 1, 0, target_nodes=wait_node)
             else:
                 pipe.wait(1, 0)
             with pytest.raises(ResponseError, match="UNBLOCKED"):
@@ -5984,6 +5989,65 @@ class TestTopologyRefreshPacing:
         init.assert_called_once()
         assert [c for c in connections if c.disconnect.called] == unblocked
         unblocked[0].disconnect.assert_called_once_with()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("unblocked_command", ["BLPOP", "WAIT"])
+    def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
+        self, unblocked_command
+    ):
+        """
+        The server closes the connection after an UNBLOCKED reply and runs none
+        of the commands the pipeline sent after it. No reply is read for them:
+        they are sent again, the earlier commands of the node keep their
+        results, and a WAIT that got the error is still not sent again.
+        """
+        rc = self._blpop_client()
+        nm = rc.nodes_manager
+        nm._last_refresh_at = nm._refresh_due_at = None
+        # WAIT has no key, so the pipeline sends it to the default node
+        node = rc.get_default_node()
+        key = next(
+            k for k in ("foo", "bar", "baz", "qux") if rc.get_node_from_key(k) == node
+        )
+        checkout, connections = self._new_connection_each_checkout()
+        closed = []
+        sent = []
+
+        def parse_response(redis, connection, command_name, **options):
+            if connection in closed:
+                raise ConnectionError("Connection closed by server.")
+            sent.append(command_name)
+            if command_name == unblocked_command and not closed:
+                closed.append(connection)
+                raise ResponseError(self.UNBLOCKED_BY_FAILOVER)
+            return [key.encode(), b"x"] if command_name == "BLPOP" else b"value"
+
+        with (
+            checkout,
+            patch.object(
+                Redis, "parse_response", autospec=True, side_effect=parse_response
+            ),
+            patch.object(NodesManager, "initialize", autospec=True),
+        ):
+            pipe = rc.pipeline()
+            pipe.get(key)
+            if unblocked_command == "BLPOP":
+                pipe.execute_command("BLPOP", key, 0)
+                pipe.get(key)
+                assert pipe.execute() == [b"value", [key.encode(), b"x"], b"value"]
+            else:
+                pipe.wait(1, 0)
+                pipe.get(key)
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    pipe.execute()
+
+        # Each GET once: the earlier one is not sent again
+        assert sent.count("GET") == 2
+        assert sent.count(unblocked_command) == (
+            2 if unblocked_command == "BLPOP" else 1
+        )
+        closed[0].disconnect.assert_called_once_with()
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])

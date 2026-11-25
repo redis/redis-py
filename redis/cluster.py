@@ -38,6 +38,7 @@ from redis import _himport_exec
 from redis._defaults import DEFAULT_RETRY_BASE, DEFAULT_RETRY_CAP, DEFAULT_RETRY_COUNT
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
+from redis._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
@@ -6195,7 +6196,7 @@ class NodeCommands:
     def read(self):
         """ """
         connection = self.connection
-        unblocked = False
+        closed = None
         for c in self.commands:
             # if there is a result on this command,
             # it means we ran into an exception
@@ -6216,6 +6217,11 @@ class NodeCommands:
             # pool and on the next write, it will
             # explicitly open the connection and all will be well.
             if c.result is _UNANSWERED:
+                if closed is not None:
+                    # The server ran none of the commands after the unblocked
+                    # one, so only they fail and no reply is read for them
+                    c.result = closed
+                    continue
                 try:
                     c.result = self.parse_response(connection, c.args[0], **c.options)
                 except (ConnectionError, TimeoutError) as e:
@@ -6225,9 +6231,9 @@ class NodeCommands:
                 except RedisError:
                     c.result = sys.exc_info()[1]
                     if _is_unblocked_by_failover(c.result):
-                        unblocked = True
-        if unblocked:
-            # The server closes the connection after this reply
+                        closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        if closed is not None:
+            # The server closes the connection after the UNBLOCKED reply
             connection.disconnect()
 
 
