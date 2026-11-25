@@ -1376,13 +1376,16 @@ def test_mrange_unified_metadata_bytes_keys():
 
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
-def test_mrange_groupby_unified_metadata_matches_on_both_protocols(request, stack_url):
+@pytest.mark.parametrize("decode_responses", [True, False])
+def test_mrange_groupby_unified_metadata_matches_on_both_protocols(
+    request, stack_url, decode_responses
+):
     results = {}
     for protocol in (2, 3):
         with _get_client(
             redis.Redis,
             request,
-            decode_responses=True,
+            decode_responses=decode_responses,
             from_url=stack_url,
             protocol=protocol,
             legacy_responses=False,
@@ -1404,12 +1407,26 @@ def test_mrange_groupby_unified_metadata_matches_on_both_protocols(request, stac
                     groupby="team",
                     reduce="max",
                 ),
+                r.ts().mrange(
+                    "-",
+                    "+",
+                    ["team=ny"],
+                    with_labels=True,
+                    groupby="team",
+                    reduce="sum",
+                ),
             ]
 
     assert results[2] == results[3]
-    mrange, mrevrange = results[2]
-    assert mrange["team=ny"][1] == {"reducers": ["sum"]}
-    assert mrevrange["team=ny"][1] == {"reducers": ["max"]}
+    key = "team=ny" if decode_responses else b"team=ny"
+    labels = {"team": "ny"} if decode_responses else {b"team": b"ny"}
+    mrange, mrevrange, mrange_with_labels = results[2]
+    assert mrange[key][1] == {"reducers": ["sum"]}
+    assert mrevrange[key][1] == {"reducers": ["max"]}
+    # RESP2 reports the reducer and the sources as __reducer__ and
+    # __source__ labels; they must not leak into the unified labels.
+    assert mrange_with_labels[key][0] == labels
+    assert mrange_with_labels[key][1] == {"reducers": ["sum"]}
 
 
 @pytest.mark.redismod
