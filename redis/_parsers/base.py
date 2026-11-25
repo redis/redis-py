@@ -110,6 +110,14 @@ NO_SUCH_FIELDSET_ERROR = {
     "no such fieldset": NoSuchFieldsetError,
 }
 
+# What a node answers every client blocked on a blocking command (BLPOP, XREAD
+# BLOCK, WAIT...) when it is made a replica of another node; it closes the
+# connection after the reply. The prefix of the whole reply, code included: the
+# server ends it with "(master -> replica?)".
+DEMOTED_MASTER_UNBLOCKED_ERROR = (
+    "UNBLOCKED force unblock from blocking operation, instance state changed"
+)
+
 # The code a Redis error reply starts with (ERR, WRONGTYPE, NOGROUP, and module
 # codes such as SEARCH_SYNTAX). An unmapped error keeps its first word as the
 # status code only in this shape, so free-form messages such as "Syntax error at

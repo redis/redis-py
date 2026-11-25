@@ -1441,6 +1441,292 @@ class TestTopologyRefreshPacing:
         assert flushed == [target.name] * (2 if retried_with else 1)
         assert r._initialize is True
 
+    # What a primary that turns into a replica answers its blocked clients
+    UNBLOCKED_BY_FAILOVER = (
+        "UNBLOCKED force unblock from blocking operation, "
+        "instance state changed (master -> replica?)"
+    )
+
+    @staticmethod
+    def _assert_closed_for_unblocked(connection: mock.AsyncMock) -> None:
+        """
+        :connection: was disconnected once, with the UNBLOCKED error as the
+        reason, so the close is recorded as one an error caused.
+        """
+        connection.disconnect.assert_awaited_once()
+        kwargs = connection.disconnect.await_args.kwargs
+        assert kwargs["nowait"] is True
+        assert isinstance(kwargs["error"], ResponseError)
+        assert "UNBLOCKED" in str(kwargs["error"])
+
+    @staticmethod
+    async def _blpop_client(**kwargs: Any) -> RedisCluster:
+        """
+        A mocked client whose commands parser also knows the keys of BLPOP.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, **kwargs
+        )
+        r.commands_parser.commands["blpop"] = {
+            "name": "blpop",
+            "arity": -3,
+            "flags": ["write", "blocking"],
+            "first_key_pos": 1,
+            "last_key_pos": -2,
+            "step_count": 1,
+        }
+        return r
+
+    @staticmethod
+    def _mock_connection(node: ClusterNode, read_response: Any) -> mock.AsyncMock:
+        """
+        Make a mocked, healthy connection the only free one of :node:, with
+        :read_response: as the side effect of its ``read_response``.
+        """
+        connection = mock.AsyncMock(spec=Connection)
+        connection._resp2_fallback = False
+        connection.is_connected = True
+        connection.should_reconnect.return_value = False
+        connection.can_read.return_value = False
+        connection.read_response.side_effect = read_response
+        node._free.clear()
+        node._free.append(connection)
+        return connection
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_unblocked_from_a_primary_asks_for_a_refresh_and_is_retried(
+        self,
+    ) -> None:
+        """
+        A primary that turns into a replica answers UNBLOCKED to every client
+        blocked on it and closes their connections. Nothing was popped, so the
+        command asks for a topology refresh and is retried, and the connection
+        that got the error is disconnected instead of being reused.
+        """
+        r = await self._blpop_client()
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        connection = self._mock_connection(
+            r.get_node_from_key("foo"),
+            [ResponseError(self.UNBLOCKED_BY_FAILOVER), [b"foo", b"bar"]],
+        )
+        with mock.patch.object(
+            RedisCluster, "_refresh_topology", autospec=True
+        ) as refresh:
+            assert list(await r.execute_command("BLPOP", "foo", 0)) == [
+                b"foo",
+                b"bar",
+            ]
+
+        assert connection.read_response.await_count == 2
+        refresh.assert_awaited_once()
+        self._assert_closed_for_unblocked(connection)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "message, named_target",
+        [
+            (UNBLOCKED_BY_FAILOVER, True),
+            ("UNBLOCKED client unblocked via CLIENT UNBLOCK", False),
+            ("ERR some other error", False),
+        ],
+        ids=["unblocked-with-a-named-target", "client-unblock", "other-error"],
+    )
+    async def test_unblocked_with_a_named_target_or_another_error_is_raised_at_once(
+        self, pipeline, message, named_target
+    ) -> None:
+        """
+        A command sent to a node the caller named is never retried, so its
+        UNBLOCKED is raised, but the connection the server closed is
+        disconnected and a refresh is asked for. CLIENT UNBLOCK ... ERROR, which
+        keeps the connection open, and any other error are raised as before.
+        """
+        r = await self._blpop_client()
+        targets = {"target_nodes": r.get_replicas()[0]} if named_target else {}
+        connections = [
+            self._mock_connection(node, ResponseError(message))
+            for node in r.get_nodes()
+        ]
+        with pytest.raises(ResponseError, match=message.split(" ")[0]):
+            if pipeline:
+                async with r.pipeline() as pipe:
+                    pipe.execute_command("BLPOP", "foo", 0, **targets)
+                    await pipe.execute()
+            else:
+                await r.execute_command("BLPOP", "foo", 0, **targets)
+
+        read = [c for c in connections if c.read_response.await_count]
+        assert [c.read_response.await_count for c in read] == [1]
+        closed = message == self.UNBLOCKED_BY_FAILOVER
+        assert r._initialize is closed
+        assert [c.disconnect.await_count for c in connections] == [
+            int(closed and c in read) for c in connections
+        ]
+
+    @pytest.mark.fixed_client
+    async def test_unblocked_is_not_retried_when_retries_are_disabled(self) -> None:
+        """
+        The UNBLOCKED reply is retried within the limits of ``retry``. With no
+        retries allowed the command is sent once and its error is raised.
+        """
+        r = await self._blpop_client(retry=Retry(NoBackoff(), 0))
+        connection = self._mock_connection(
+            r.get_node_from_key("foo"), ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        )
+        with pytest.raises(ResponseError, match="UNBLOCKED"):
+            await r.execute_command("BLPOP", "foo", 0)
+
+        assert connection.read_response.await_count == 1
+        assert r._initialize is True
+        self._assert_closed_for_unblocked(connection)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True], ids=["command", "pipeline"])
+    @pytest.mark.parametrize(
+        "command", [("WAIT", 1, 0), ("WAITAOF", 1, 1, 0)], ids=["wait", "waitaof"]
+    )
+    async def test_wait_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, pipeline, command
+    ) -> None:
+        """
+        WAIT and WAITAOF ask about the earlier writes of their own connection.
+        A retry would run on another connection and report them as replicated,
+        so their UNBLOCKED is raised. The refresh is still asked for and the
+        connection the server closed is still disconnected.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        connections = [
+            self._mock_connection(node, ResponseError(self.UNBLOCKED_BY_FAILOVER))
+            for node in r.get_nodes()
+        ]
+        with pytest.raises(ResponseError, match="UNBLOCKED"):
+            if pipeline:
+                async with r.pipeline() as pipe:
+                    pipe.execute_command(*command)
+                    await pipe.execute()
+            else:
+                await r.execute_command(*command)
+
+        read = [c for c in connections if c.read_response.await_count]
+        assert read
+        assert [c.read_response.await_count for c in read] == [1] * len(read)
+        assert r._initialize is True
+        assert [c.disconnect.await_count for c in connections] == [
+            int(c in read) for c in connections
+        ]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    async def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
+        self, raise_on_error: bool
+    ) -> None:
+        """
+        The server closes the connection after an UNBLOCKED reply and runs none
+        of the commands the pipeline sent after it. No reply is read for them:
+        they get a ConnectionError as their result. The earlier commands of the
+        node keep their results, and the unblocked command keeps its error and
+        is not sent again.
+        """
+        r = await self._blpop_client()
+        node = r.get_default_node()
+        key = next(
+            k for k in ("foo", "bar", "baz", "qux") if r.get_node_from_key(k) == node
+        )
+        replies = [b"value", ResponseError(self.UNBLOCKED_BY_FAILOVER)]
+        connection = self._mock_connection(node, replies)
+        with mock.patch.object(
+            NodesManager, "move_node_to_end_of_cached_nodes", autospec=True
+        ) as tried_last:
+            async with r.pipeline() as pipe:
+                pipe.get(key)
+                pipe.execute_command("BLPOP", key, 0)
+                pipe.get(key)
+                if raise_on_error:
+                    with pytest.raises(ResponseError, match="UNBLOCKED"):
+                        await pipe.execute()
+                else:
+                    result = await pipe.execute(raise_on_error=False)
+                    assert result[0] == b"value"
+                    assert isinstance(result[1], ResponseError)
+                    assert "UNBLOCKED" in str(result[1])
+                    assert isinstance(result[2], ConnectionError)
+
+        # No reply is read for the command after the unblocked one
+        assert connection.read_response.await_count == len(replies)
+        assert r._initialize is True
+        self._assert_closed_for_unblocked(connection)
+        # The server closed the connection: the node did not fail
+        tried_last.assert_not_called()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_unblocked_from_a_replica_asks_for_a_refresh_and_is_retried(
+        self,
+    ) -> None:
+        """
+        A replica that is moved to a new primary answers UNBLOCKED to the
+        clients blocked on it as well. A read that was routed to it is retried
+        like a command a demoted primary unblocked.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+        )
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        connections = [
+            self._mock_connection(
+                node, [ResponseError(self.UNBLOCKED_BY_FAILOVER), b"value"]
+            )
+            for node in r.get_replicas()
+        ]
+        with mock.patch.object(
+            RedisCluster, "_refresh_topology", autospec=True
+        ) as refresh:
+            assert await r.get("foo") == b"value"
+
+        assert sum(c.read_response.await_count for c in connections) == 2
+        refresh.assert_awaited_once()
+        assert sum(c.disconnect.await_count for c in connections) == 1
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("raise_on_error", [True, False])
+    async def test_pipeline_unblocked_asks_for_a_refresh_and_is_not_retried(
+        self, raise_on_error: bool
+    ) -> None:
+        """
+        A pipeline does not retry an UNBLOCKED reply. The command keeps the
+        error as its result, which ``raise_on_error`` raises. The pipeline asks
+        for a topology refresh and disconnects only the connection the server
+        closed.
+        """
+        r = await self._blpop_client()
+        get_node = r.get_node_from_key("foo")
+        blpop_node = r.get_node_from_key("bar")
+        assert get_node is not blpop_node
+        get_connection = self._mock_connection(get_node, [b"value"])
+        blpop_connection = self._mock_connection(
+            blpop_node, ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        )
+        async with r.pipeline() as pipe:
+            pipe.get("foo")
+            pipe.execute_command("BLPOP", "bar", 0)
+            if raise_on_error:
+                with pytest.raises(ResponseError, match="UNBLOCKED"):
+                    await pipe.execute()
+            else:
+                result = await pipe.execute(raise_on_error=False)
+                assert result[0] == b"value"
+                assert isinstance(result[1], ResponseError)
+                assert "UNBLOCKED" in str(result[1])
+
+        assert get_connection.read_response.await_count == 1
+        assert blpop_connection.read_response.await_count == 1
+        assert r._initialize is True
+        get_connection.disconnect.assert_not_awaited()
+        self._assert_closed_for_unblocked(blpop_connection)
+
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
     async def test_cluster_down_refreshes_at_once_and_raises_a_failed_refresh(
