@@ -5991,16 +5991,18 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")
+    @pytest.mark.parametrize("raise_on_error", [True, False])
     @pytest.mark.parametrize("unblocked_command", ["BLPOP", "WAIT"])
     def test_pipeline_unblocked_fails_only_the_later_commands_of_its_node(
-        self, unblocked_command
+        self, unblocked_command, raise_on_error
     ):
         """
         The server closes the connection after an UNBLOCKED reply and runs none
         of the commands the pipeline sent after it. No reply is read for them:
         they are sent again after the unblocked command, in the order of the
-        pipeline, and the earlier commands of the node keep their results. A
-        WAIT that got the error is raised at once, so nothing is sent again.
+        pipeline, with and without ``raise_on_error``, and the earlier commands
+        of the node keep their results. A WAIT that got the error is not sent
+        again and keeps it.
         """
         rc = self._blpop_client()
         nm = rc.nodes_manager
@@ -6035,18 +6037,27 @@ class TestTopologyRefreshPacing:
             if unblocked_command == "BLPOP":
                 pipe.execute_command("BLPOP", key, 0)
                 pipe.get(key)
-                assert pipe.execute() == [b"value", [key.encode(), b"x"], b"value"]
+                assert pipe.execute(raise_on_error=raise_on_error) == [
+                    b"value",
+                    [key.encode(), b"x"],
+                    b"value",
+                ]
             else:
                 pipe.wait(1, 0)
                 pipe.get(key)
-                with pytest.raises(ResponseError, match="UNBLOCKED"):
-                    pipe.execute()
+                if raise_on_error:
+                    with pytest.raises(ResponseError, match="UNBLOCKED"):
+                        pipe.execute()
+                else:
+                    result = pipe.execute(raise_on_error=False)
+                    assert result[0] == result[2] == b"value"
+                    assert isinstance(result[1], ResponseError)
 
         # The earlier GET is not sent again
         if unblocked_command == "BLPOP":
             assert sent == ["GET", "BLPOP", "BLPOP", "GET"]
         else:
-            assert sent == ["GET", "WAIT"]
+            assert sent == ["GET", "WAIT", "GET"]
         closed[0].disconnect.assert_called_once_with()
 
     @pytest.mark.fixed_client

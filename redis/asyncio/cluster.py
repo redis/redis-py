@@ -4215,6 +4215,10 @@ class PipelineStrategy(AbstractStrategy):
         retries, the last error is raised, as RedisClusterUnreachableError when
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
+
+        With ``raise_on_error``, an error is raised without a retry when a WAIT
+        or a WAITAOF got the UNBLOCKED reply: that command is never sent again,
+        so no retry makes the pipeline succeed.
         """
         if not self._command_queue:
             return []
@@ -4538,6 +4542,10 @@ class PipelineStrategy(AbstractStrategy):
                 # A read failed. Commands before it may have been redirected,
                 # so look past the first error for a connection error
                 for cmd in commands:
+                    if _is_unblocked_by_failover(cmd.result):
+                        # The commands after it hold the error of a connection
+                        # the server closed, not of a node that failed
+                        break
                     if isinstance(
                         cmd.result, (ConnectionError, TimeoutError)
                     ) and not isinstance(

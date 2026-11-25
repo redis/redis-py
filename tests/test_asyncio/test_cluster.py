@@ -1649,7 +1649,12 @@ class TestTopologyRefreshPacing:
         else:
             replies = [b"value", unblocked]
         connection = self._mock_connection(node, replies)
-        with mock.patch.object(RedisCluster, "_refresh_topology", autospec=True):
+        with (
+            mock.patch.object(RedisCluster, "_refresh_topology", autospec=True),
+            mock.patch.object(
+                NodesManager, "move_node_to_end_of_cached_nodes", autospec=True
+            ) as tried_last,
+        ):
             async with r.pipeline() as pipe:
                 pipe.get(key)
                 if unblocked_command == "BLPOP":
@@ -1667,6 +1672,43 @@ class TestTopologyRefreshPacing:
         # No reply is read for the commands after the unblocked one
         assert connection.read_response.await_count == len(replies)
         connection.disconnect.assert_awaited_once_with(nowait=True)
+        # The server closed the connection: the node did not fail
+        tried_last.assert_not_called()
+
+    @pytest.mark.fixed_client
+    @pytest.mark.usefixtures("no_cluster_retry_delay")
+    async def test_pipeline_retry_without_raise_on_error_does_not_resend_wait(
+        self,
+    ) -> None:
+        """
+        Without ``raise_on_error`` a WAIT that got UNBLOCKED does not end the
+        pipeline. A retry that the connection error of another node leads to
+        resends the commands of that node and leaves the WAIT out, with its
+        error as its result.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        # WAIT has no key, so the pipeline sends it to the default node
+        wait_node = r.get_default_node()
+        key = next(k for k in ("foo", "bar") if r.get_node_from_key(k) != wait_node)
+        wait_connection = self._mock_connection(
+            wait_node, ResponseError(self.UNBLOCKED_BY_FAILOVER)
+        )
+        get_connection = self._mock_connection(r.get_node_from_key(key), [b"value"])
+        get_connection.send_packed_command.side_effect = [
+            ConnectionError("down"),
+            None,
+        ]
+        with mock.patch.object(RedisCluster, "_refresh_topology", autospec=True):
+            async with r.pipeline() as pipe:
+                pipe.get(key)
+                pipe.wait(1, 0)
+                result = await pipe.execute(raise_on_error=False)
+
+        assert result[0] == b"value"
+        assert isinstance(result[1], ResponseError)
+        assert get_connection.send_packed_command.await_count == 2
+        assert wait_connection.read_response.await_count == 1
 
     @pytest.mark.fixed_client
     @pytest.mark.usefixtures("no_cluster_retry_delay")

@@ -844,7 +844,8 @@ def _is_resent_after_failover(command_name: str) -> bool:
     can. WAIT and WAITAOF cannot: the retry runs on another connection, which
     made none of the writes they ask about, so they would report those writes
     as replicated without checking them. A pipeline sets ``not_resent`` on
-    their error, so a retry of its other commands leaves them out as well.
+    their error. With ``raise_on_error`` it then raises without a retry. Without
+    it, a retry that another error leads to leaves them out.
     """
     return command_name.upper() not in _NOT_RESENT_AFTER_FAILOVER
 
@@ -6232,9 +6233,6 @@ class NodeCommands:
                     c.result = sys.exc_info()[1]
                     if _is_unblocked_by_failover(c.result):
                         closed = ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                        # Sent again by the retry of the whole attempt, after
-                        # the unblocked command, to keep the order of the two
-                        closed.failover_seen = True
         if closed is not None:
             # The server closes the connection after the UNBLOCKED reply
             connection.disconnect()
@@ -6495,6 +6493,10 @@ class PipelineStrategy(AbstractStrategy):
         retries, the last error is raised, as RedisClusterUnreachableError when
         the last refresh reached no node; a refresh that reached no node since
         an attempt failed ends the retries the same way.
+
+        With ``raise_on_error``, an error is raised without a retry when a WAIT
+        or a WAITAOF got the UNBLOCKED reply: that command is never sent again,
+        so no retry makes the pipeline succeed.
         """
         if not stack:
             return []
@@ -6838,6 +6840,10 @@ class PipelineStrategy(AbstractStrategy):
                 n.write()
 
             failed_over = False
+            # Whether an UNBLOCKED reply interrupted a command that is sent
+            # again, and whether an error was marked as never sent again
+            resend_unblocked = False
+            never_resent = False
             for node_name, n in nodes.items():
                 n.read()
 
@@ -6863,8 +6869,11 @@ class PipelineStrategy(AbstractStrategy):
                                 cmd.target_nodes = named
                             if not _is_resent_after_failover(cmd.args[0]):
                                 cmd.result.not_resent = True
+                                never_resent = True
                             elif named is None:
                                 cmd.result.failover_seen = True
+                                if _is_unblocked_by_failover(cmd.result):
+                                    resend_unblocked = True
                     if node_failed_over:
                         failed_over = True
                         if node_objs[node_name] == self._pipe.get_default_node():
@@ -6944,15 +6953,27 @@ class PipelineStrategy(AbstractStrategy):
         # if we have more commands to attempt, we've run into problems.
         # collect all the commands we are allowed to retry.
         # (MOVED, ASK, or connection errors or timeout errors)
+        # A command an UNBLOCKED reply interrupted is sent again with them, so it
+        # runs before the commands of its node that got no reply, in the order of
+        # the pipeline. It is left out when an error that is raised anyway makes
+        # the pipeline fail: a blocking pop would lose the element it takes.
+        if never_resent and raise_on_error:
+            resend_unblocked = False
         attempt = sorted(
             (
                 c
                 for c in attempt
-                if isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
-                and not isinstance(c.result, ClusterPipeline.NOT_NODE_FAILURE_ERRORS)
-                # The commands an UNBLOCKED reply left unanswered wait for the
-                # retry of the attempt (see ``NodeCommands.read``)
-                and not getattr(c.result, "failover_seen", False)
+                if (
+                    isinstance(c.result, ClusterPipeline.ERRORS_ALLOW_RETRY)
+                    and not isinstance(
+                        c.result, ClusterPipeline.NOT_NODE_FAILURE_ERRORS
+                    )
+                )
+                or (
+                    resend_unblocked
+                    and getattr(c.result, "failover_seen", False)
+                    and _is_unblocked_by_failover(c.result)
+                )
             ),
             key=lambda x: x.position,
         )
