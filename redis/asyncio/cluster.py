@@ -82,6 +82,7 @@ from redis.cluster import (
     _REPLICAS_ONLY_STRATEGIES,
     _RESPONSE_POLICY_CALLBACKS,
     _SPECIAL_RESPONSE_CALLBACKS,
+    _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS,
     _UNANSWERED,
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
@@ -498,8 +499,10 @@ class RedisCluster(
           threshold, pipeline failures, pubsub repair). Requests made in between
           are collapsed into one refresh, run by the next command attempt once
           the interval has passed. After refreshes that failed in a row, the
-          ``retry`` backoff can make the wait longer, never shorter. 0 lets every
-          requested refresh run at once. Must be finite and not negative.
+          ``retry`` backoff can make the wait longer, never shorter. It is also
+          the longest a command or pipeline retried after a connection error
+          waits for a refresh another task is running. 0 lets every requested
+          refresh run at once. Must be finite and not negative.
           Server-pushed refreshes (SMIGRATED), the first initialization and the
           refresh a ``CLUSTERDOWN`` or an uncovered slot runs are not limited.
           Defaults to one second when not set.
@@ -900,6 +903,26 @@ class RedisCluster(
                 or (self._lock is not None and self._lock.locked())
             )
         )
+
+    async def _wait_for_running_refresh(self) -> None:
+        """
+        Wait for a topology refresh another task is running to end, at most
+        NodesManager._refresh_wait_limit, so a command retried after a
+        connection error routes by the slot map it brings. Returns at once
+        when none runs.
+        """
+        lock = self._lock
+        if lock is None or not lock.locked():
+            return
+        limit = self.nodes_manager._refresh_wait_limit()
+        if limit <= 0:
+            return
+        try:
+            async with asyncio.timeout(limit):
+                await lock.acquire()
+        except asyncio.TimeoutError:
+            return
+        lock.release()
 
     async def initialize(
         self,
@@ -1653,6 +1676,9 @@ class RedisCluster(
                 if not isinstance(e, self.NOT_NODE_FAILURE_ERRORS):
                     # this is used to report the metrics based on host and port info
                     e.connection = parser_node
+                    # The retry looks the keys up on another node, so it does
+                    # not wait for the refresh asked for below
+                    e.retry_goes_elsewhere = True
 
                     # The keys of some commands, such as XREAD, are found by asking
                     # the parser's node (COMMAND GETKEYS), which is also asked for
@@ -1844,16 +1870,26 @@ class RedisCluster(
         # whole.
         replies: Optional[Dict[str, Any]] = None
 
+        # Whether the retry waits for the topology refresh the connection error
+        # of the previous attempt asked for, as it goes to the same node
+        waits_for_refresh = False
+
         for _ in range(execute_attempts):
             # Whether the attempt targets the default node alone: only an
             # attempt that failed on it replaces it, not one that failed before
             # its nodes were determined
             is_default_node = False
+            # Whether the attempt got as far as its target nodes
+            routed = False
             if self._initialize_due():
                 # The node that failed is kept on the nodes manager, so the
                 # refresh tries it last even when it runs on a later command
                 await self.initialize()
             if last_error is not None:
+                if waits_for_refresh:
+                    # The refresh the error asked for may be running on
+                    # another task; the slot map it brings routes this retry
+                    await self._wait_for_running_refresh()
                 outage_error = self.nodes_manager._error_instead_of_retry(
                     last_error, last_refresh_at
                 )
@@ -1888,6 +1924,7 @@ class RedisCluster(
                         len(target_nodes) == 1
                         and target_nodes[0] == self.get_default_node()
                     )
+                routed = True
 
                 if len(target_nodes) == 1:
                     # Return the processed result
@@ -1970,6 +2007,26 @@ class RedisCluster(
                     # Space the attempts out as the retry backoff says; the
                     # refresh the error asked for runs after this delay
                     delay = self._retry_backoff_delay(self.retry, failure_count)
+                    # A node that refused or dropped the connection gets the
+                    # retry again until a refresh moves its slots, so the retry
+                    # waits for a refresh another task is running, unless the
+                    # error came before the attempt was routed or from a key
+                    # lookup, or the command is routed so that the retry goes
+                    # to another node
+                    waits_for_refresh = (
+                        routed
+                        and type(e) is ConnectionError
+                        and not getattr(e, "retry_goes_elsewhere", False)
+                        and self._retry_goes_to_same_node(
+                            command_policies.request_policy,
+                            passed_targets if node_flag else None,
+                            (
+                                self.read_from_replicas
+                                or self.load_balancing_strategy is not None
+                            )
+                            and await self._is_replica_safe(command),
+                        )
+                    )
                     if delay > 0:
                         await asyncio.sleep(delay)
                     continue
@@ -3340,6 +3397,18 @@ class NodesManager:
             self._refresh_due_at = due_at
         return time.monotonic() >= due_at
 
+    def _refresh_wait_limit(self) -> float:
+        """
+        The longest a command retried after a connection error waits for a
+        topology refresh another task is running: the minimum interval between
+        error-triggered refreshes. An interval of 0 turns the wait off, as it
+        turns off the pacing.
+        """
+        min_interval = self._topology_refresh_min_interval
+        if min_interval is None:
+            return _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS
+        return min_interval
+
     def _error_instead_of_retry(
         self, error: Exception, last_refresh_at: Optional[float]
     ) -> Optional[Exception]:
@@ -4288,11 +4357,19 @@ class PipelineStrategy(AbstractStrategy):
             # ends the retries (see NodesManager._error_instead_of_retry)
             last_error: Optional[Exception] = None
             last_refresh_at: Optional[float] = None
+            # Whether the retry waits for the topology refresh the connection
+            # error of the previous attempt asked for: the commands go to the
+            # same nodes
+            waits_for_refresh = False
             while True:
                 try:
                     if self._pipe.cluster_client._initialize_due():
                         await self._pipe.cluster_client.initialize()
                     if last_error is not None:
+                        if waits_for_refresh:
+                            # The refresh may be running on another task; the
+                            # slot map it brings routes this retry
+                            await self._pipe.cluster_client._wait_for_running_refresh()
                         outage_error = nodes_manager._error_instead_of_retry(
                             last_error, last_refresh_at
                         )
@@ -4329,6 +4406,17 @@ class PipelineStrategy(AbstractStrategy):
                         # Space the attempts out as the retry backoff says
                         delay = self._pipe.cluster_client._retry_backoff_delay(
                             self._pipe.cluster_client.retry, failure_count
+                        )
+                        # A node that refused or dropped the connection gets
+                        # the commands of its slots again until a refresh moves
+                        # them, so the retry waits for a refresh another task
+                        # is running, unless the error came from a key lookup,
+                        # which the retry sends to another node. Reads that
+                        # rotate through the nodes of a shard still wait: the
+                        # pipeline resends them one after another, so some go
+                        # to the failed node again
+                        waits_for_refresh = type(e) is ConnectionError and not getattr(
+                            e, "retry_goes_elsewhere", False
                         )
                         if delay > 0:
                             await asyncio.sleep(delay)
