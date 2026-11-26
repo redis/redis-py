@@ -24,6 +24,24 @@ def _parse_topk_info_resp2_unified(response):
     return info
 
 
+def _parse_to_bool_list(response):
+    """Parse a list of 1/0 replies, which RESP3 sends as booleans.
+
+    Elements that are not 0/1 integers are left untouched: CF.INSERT
+    answers -1 for an item that did not fit, and BF.INSERT and BF.MADD
+    can carry string or error elements, all of which RESP3 sends as-is.
+    """
+    return [
+        bool(item) if type(item) is int and item in (0, 1) else item
+        for item in response
+    ]
+
+
+def _parse_to_int_list(response):
+    """Parse a list of boolean replies back to the RESP2 1/0 integers."""
+    return [int(item) if type(item) is bool else item for item in response]
+
+
 class AbstractBloom:
     """
     The client allows to interact with RedisBloom and use all of
@@ -172,8 +190,12 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_LIST: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        # RESP2 replies to TOPK.QUERY with 1/0 integers, RESP3 with
+        # booleans. Unified responses are booleans on both protocols, and
+        # the default client keeps the RESP2 integers.
         _RESP2_UNIFIED_MODULE_CALLBACKS = {
             TOPK_INFO: _parse_topk_info_resp2_unified,
+            TOPK_QUERY: _parse_to_bool_list,
         }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             TOPK_INFO: TopKInfo,
@@ -183,6 +205,7 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_INCRBY: parse_to_list,
             TOPK_INFO: TopKInfo,
             TOPK_LIST: parse_to_list,
+            TOPK_QUERY: _parse_to_int_list,
         }
 
         self.client = client
@@ -225,12 +248,31 @@ class _CFBloomBase(CFCommands, AbstractBloom):
             CF_INFO: CFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        # RESP2 replies to CF.ADD, CF.ADDNX, CF.EXISTS and CF.DEL with 1
+        # or 0, RESP3 with a boolean; CF.INSERT and CF.MEXISTS answer with
+        # lists of the same. Unified responses are booleans on both
+        # protocols, and the default client keeps the RESP2 integers.
+        # (CF.INSERTNX answers with integers on both protocols.)
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            **_RESP2_MODULE_CALLBACKS,
+            CF_ADD: bool,
+            CF_ADDNX: bool,
+            CF_EXISTS: bool,
+            CF_DEL: bool,
+            CF_INSERT: _parse_to_bool_list,
+            CF_MEXISTS: _parse_to_bool_list,
+        }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
+            CF_ADD: int,
+            CF_ADDNX: int,
+            CF_EXISTS: int,
+            CF_DEL: int,
+            CF_INSERT: _parse_to_int_list,
+            CF_MEXISTS: _parse_to_int_list,
         }
 
         self.client = client
@@ -339,12 +381,28 @@ class _BFBloomBase(BFCommands, AbstractBloom):
             BF_INFO: BFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        # RESP2 replies to BF.ADD and BF.EXISTS with 1 or 0, RESP3 with a
+        # boolean; BF.MADD, BF.INSERT and BF.MEXISTS answer with lists of
+        # the same. Unified responses are booleans on both protocols, and
+        # the default client keeps the RESP2 integers.
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            **_RESP2_MODULE_CALLBACKS,
+            BF_ADD: bool,
+            BF_EXISTS: bool,
+            BF_MADD: _parse_to_bool_list,
+            BF_INSERT: _parse_to_bool_list,
+            BF_MEXISTS: _parse_to_bool_list,
+        }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
+            BF_ADD: int,
+            BF_EXISTS: int,
+            BF_MADD: _parse_to_int_list,
+            BF_INSERT: _parse_to_int_list,
+            BF_MEXISTS: _parse_to_int_list,
         }
 
         self.client = client
