@@ -1374,25 +1374,13 @@ class PubSub:
                     )
             ttl -= 1
 
-    def _check_owns_connection(self, conn, error: Optional[Exception] = None) -> None:
-        """
-        Fail an attempt on a connection this PubSub no longer owns.
-
-        reset() detaches the connection and releases it to the pool while a
-        reader may still be blocked on it. Reading or reconnecting it after
-        that would consume replies that now belong to another caller, so the
-        attempt fails with the error that woke the reader instead.
-        """
-        if conn is not self.connection:
-            raise error or ConnectionError("PubSub connection was released")
-
     def _reconnect(
         self,
         conn,
-        error: Optional[Exception] = None,
-        failure_count: Optional[int] = None,
-        start_time: Optional[float] = None,
-        command_name: Optional[str] = None,
+        error: BaseException | None = None,
+        failure_count: int | None = None,
+        start_time: float | None = None,
+        command_name: str | None = None,
     ) -> None:
         """
         The supported exceptions are already checked in the
@@ -1400,7 +1388,12 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
-        self._check_owns_connection(conn, error)
+        if conn is not self.connection:
+            # reset() detached conn and released it to the pool while this
+            # reader was blocked on it. Reconnecting it would consume replies
+            # that now belong to another caller, so fail the attempt with the
+            # error that woke the reader.
+            raise error or ConnectionError("PubSub connection was released")
         if error and failure_count <= conn.retry.get_retries():
             if command_name:
                 record_operation_duration(
@@ -1440,7 +1433,8 @@ class PubSub:
         def attempt():
             # reset() can detach and release conn between two attempts, even
             # from inside the reconnect itself, so check it on every one
-            self._check_owns_connection(conn)
+            if conn is not self.connection:
+                raise ConnectionError("PubSub connection was released")
             return command(*args, **kwargs)
 
         def failure_callback(error, failure_count):
