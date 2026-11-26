@@ -338,7 +338,8 @@ class TestParseSpellcheckResp3:
         # The term key mirrors the RESP2 form (bytes when decode is off).
         assert list(out.keys()) == [b"impornant"]
         suggestions = list(out.values())[0]
-        assert suggestions[0]["score"] == "0.5"
+        # The score takes the suggestion's type, as RESP2 sends it.
+        assert suggestions[0]["score"] == b"0.5"
         # And the suggestion stays in its wire form (bytes when
         # ``decode_responses=False``) so the legacy path matches RESP2.
         assert suggestions[0]["suggestion"] == b"important"

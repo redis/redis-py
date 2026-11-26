@@ -782,7 +782,10 @@ class SearchCommands:
                         score_str = score_str[:-2]
                     # Preserve ``suggestion`` as-is so it keeps the
                     # ``decode_responses`` shape RESP2 would produce
-                    # (``str`` when decoded, ``bytes`` otherwise).
+                    # (``str`` when decoded, ``bytes`` otherwise), and give
+                    # the score the same type.
+                    if isinstance(suggestion, bytes):
+                        score_str = score_str.encode()
                     term_corrections.append(
                         {"score": score_str, "suggestion": suggestion}
                     )

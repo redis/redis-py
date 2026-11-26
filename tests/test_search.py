@@ -7024,6 +7024,7 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         suggestions = res[b"impornant"]
         assert suggestions
         assert suggestions[0]["suggestion"] == b"important"
+        assert suggestions[0]["score"] == b"0.5"
 
 
 def _queue_parsed_commands(ft):
