@@ -1910,7 +1910,7 @@ class TestTopologyRefreshPacing:
                 side_effect=execute_command,
             ),
             mock.patch.object(
-                RedisCluster, "_wait_for_running_refresh", autospec=True
+                NodesManager, "_wait_for_running_refresh", autospec=True
             ) as wait,
             patch_monotonic("redis.asyncio.cluster", 100.0),
             mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
@@ -1964,7 +1964,7 @@ class TestTopologyRefreshPacing:
                 side_effect=execute_command,
             ),
             mock.patch.object(
-                RedisCluster, "_wait_for_running_refresh", autospec=True
+                NodesManager, "_wait_for_running_refresh", autospec=True
             ) as wait,
             patch_monotonic("redis.asyncio.cluster", 100.0),
             mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
@@ -2016,7 +2016,7 @@ class TestTopologyRefreshPacing:
                 side_effect=execute_command,
             ),
             mock.patch.object(
-                RedisCluster, "_wait_for_running_refresh", autospec=True
+                NodesManager, "_wait_for_running_refresh", autospec=True
             ) as wait,
             patch_monotonic("redis.asyncio.cluster", 100.0),
             mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
@@ -2080,7 +2080,7 @@ class TestTopologyRefreshPacing:
                 side_effect=execute_pipeline,
             ),
             mock.patch.object(
-                RedisCluster, "_wait_for_running_refresh", autospec=True
+                NodesManager, "_wait_for_running_refresh", autospec=True
             ) as wait,
             patch_monotonic("redis.asyncio.cluster", 100.0),
             mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
@@ -2118,45 +2118,55 @@ class TestTopologyRefreshPacing:
         assert r.commands_parser.node is not failed_node
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("smigrated", [False, True])
     @pytest.mark.parametrize(
         "error_class, waits", [(ConnectionError, True), (RedisTimeoutError, False)]
     )
     async def test_retry_waits_for_a_refresh_running_on_another_task(
-        self, error_class, waits
+        self, smigrated, error_class, waits
     ) -> None:
         """
         The retry after a connection error waits for the topology refresh
-        another task is running, and routes by the slot map it brings. A
-        timeout keeps the backoff.
+        another task is running, a requested one or one SMIGRATED runs through
+        the nodes manager, and routes by the slot map it brings. A timeout
+        keeps the backoff.
         """
         r = await get_mocked_redis_client(
             host=default_host, port=default_port, retry=Retry(NoBackoff(), 3)
         )
-        if r._lock is None:
-            r._lock = asyncio.Lock()
-        # Another task runs a refresh until end_refresh ends it
-        await r._lock.acquire()
+        refreshing = asyncio.Event()
+        refreshed = asyncio.Event()
         events = []
-        end_refresh_task = None
-
-        async def end_refresh():
-            await asyncio.sleep(0.1)
-            events.append("refreshed")
-            r._lock.release()
 
         async def execute_command(node, *args, **kwargs):
-            nonlocal end_refresh_task
+            if args[0] == "CLUSTER SLOTS":
+                refreshing.set()
+                await refreshed.wait()
+                events.append("refreshed")
+                return default_cluster_slots
             events.append("attempt")
             if len(events) == 1:
-                end_refresh_task = asyncio.create_task(end_refresh())
+                asyncio.get_running_loop().call_later(0.1, refreshed.set)
                 raise error_class("down")
             return b"value"
 
+        if smigrated:
+            refresh = r.nodes_manager.initialize()
+        else:
+            # The refresh is due at once
+            r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+            r._request_refresh()
+            refresh = r.initialize()
         with mock.patch.object(
             ClusterNode, "execute_command", autospec=True, side_effect=execute_command
         ):
-            assert await r.get("foo") == b"value"
-        await end_refresh_task
+            refresher = asyncio.create_task(refresh)
+            try:
+                await asyncio.wait_for(refreshing.wait(), 5)
+                assert await r.get("foo") == b"value"
+            finally:
+                refreshed.set()
+                await refresher
 
         if waits:
             assert events == ["attempt", "refreshed", "attempt"]
@@ -2225,26 +2235,47 @@ class TestTopologyRefreshPacing:
         self, running, min_interval, waits
     ) -> None:
         r = await get_mocked_redis_client(host=default_host, port=default_port)
-        r.nodes_manager._topology_refresh_min_interval = min_interval
-        if r._lock is None:
-            r._lock = asyncio.Lock()
-        if running:
-            await r._lock.acquire()
-        try:
+        nm = r.nodes_manager
+        nm._topology_refresh_min_interval = min_interval
+        async with (
+            nm._counting_running_refresh() if running else contextlib.nullcontext()
+        ):
             with mock.patch(
                 "redis.asyncio.cluster.asyncio.timeout", wraps=asyncio.timeout
             ) as timeout:
-                await r._wait_for_running_refresh()
+                await nm._wait_for_running_refresh()
 
             if waits:
                 timeout.assert_called_once_with(min_interval)
             else:
                 timeout.assert_not_called()
-            # The wait never keeps the lock: it stays with the refresh
-            assert r._lock.locked() is running
-        finally:
-            if running:
-                r._lock.release()
+
+    @pytest.mark.fixed_client
+    async def test_running_refreshes_end_when_the_last_one_ends(self) -> None:
+        """
+        Refreshes that overlap count as running until the last of them ends,
+        which wakes every retry waiting for them at once.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        async with nm._counting_running_refresh():
+            refreshes_done = nm._refreshes_done
+            async with nm._counting_running_refresh():
+                assert nm._refreshes_done is refreshes_done
+                assert nm._running_refreshes == 2
+                waiters = [
+                    asyncio.create_task(nm._wait_for_running_refresh())
+                    for _ in range(3)
+                ]
+                await asyncio.sleep(0)
+            assert not refreshes_done.is_set()
+            assert not any(waiter.done() for waiter in waiters)
+        assert refreshes_done.is_set()
+        assert nm._refreshes_done is None
+        assert nm._running_refreshes == 0
+        # One pass of the event loop wakes them all
+        await asyncio.sleep(0)
+        assert all(waiter.done() for waiter in waiters)
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
@@ -2459,7 +2490,7 @@ class TestTopologyRefreshPacing:
                 side_effect=execute_pipeline,
             ),
             mock.patch.object(
-                RedisCluster, "_wait_for_running_refresh", autospec=True
+                NodesManager, "_wait_for_running_refresh", autospec=True
             ) as wait,
             patch_monotonic("redis.asyncio.cluster", 100.0),
             mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,

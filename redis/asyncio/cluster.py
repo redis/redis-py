@@ -904,26 +904,6 @@ class RedisCluster(
             )
         )
 
-    async def _wait_for_running_refresh(self) -> None:
-        """
-        Wait for a topology refresh another task is running to end, at most
-        NodesManager._refresh_wait_limit, so a command retried after a
-        connection error routes by the slot map it brings. Returns at once
-        when none runs.
-        """
-        lock = self._lock
-        if lock is None or not lock.locked():
-            return
-        limit = self.nodes_manager._refresh_wait_limit()
-        if limit <= 0:
-            return
-        try:
-            async with asyncio.timeout(limit):
-                await lock.acquire()
-        except asyncio.TimeoutError:
-            return
-        lock.release()
-
     async def initialize(
         self,
         additional_startup_nodes_info: List[Tuple[str, int]] | None = None,
@@ -1889,7 +1869,7 @@ class RedisCluster(
                 if waits_for_refresh:
                     # The refresh the error asked for may be running on
                     # another task; the slot map it brings routes this retry
-                    await self._wait_for_running_refresh()
+                    await self.nodes_manager._wait_for_running_refresh()
                 outage_error = self.nodes_manager._error_instead_of_retry(
                     last_error, last_refresh_at
                 )
@@ -3100,6 +3080,8 @@ class NodesManager:
         "_epoch",
         "read_load_balancer",
         "_initialize_lock",
+        "_running_refreshes",
+        "_refreshes_done",
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
@@ -3138,6 +3120,11 @@ class NodesManager:
         self._epoch: int = 0
         self.read_load_balancer = LoadBalancer()
         self._initialize_lock: asyncio.Lock = asyncio.Lock()
+        # The number of topology refreshes running, each counted from the
+        # moment initialize starts, and the event set when the last of them
+        # ends: a command retried after a connection error waits for it
+        self._running_refreshes = 0
+        self._refreshes_done: Optional[asyncio.Event] = None
         # When the last refresh ended, how many failed in a row, and when the
         # next error-triggered refresh is due. Every refresh that ends clears
         # the due time and the next check computes it, once, from the backoff
@@ -3409,6 +3396,46 @@ class NodesManager:
             return _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS
         return min_interval
 
+    async def _wait_for_running_refresh(self) -> None:
+        """
+        Wait for the topology refreshes other tasks are running to end, at
+        most _refresh_wait_limit, so a command retried after a connection error
+        routes by the slot map they bring. Returns at once when none runs.
+
+        Every refresh counts, the ones SMIGRATED runs included. A refresh
+        counts as running from the moment initialize starts, which a task
+        reaches with no suspension point after it finds the refresh due, so
+        tasks whose commands failed together do not miss it.
+        """
+        refreshes_done = self._refreshes_done
+        if refreshes_done is None:
+            return
+        limit = self._refresh_wait_limit()
+        if limit <= 0:
+            return
+        try:
+            async with asyncio.timeout(limit):
+                await refreshes_done.wait()
+        except asyncio.TimeoutError:
+            pass
+
+    @asynccontextmanager
+    async def _counting_running_refresh(self) -> AsyncGenerator[None, None]:
+        """
+        Count the topology refresh of the block as running while it runs, and
+        wake the commands waiting for the running refreshes once none is left.
+        """
+        if not self._running_refreshes:
+            self._refreshes_done = asyncio.Event()
+        self._running_refreshes += 1
+        try:
+            yield
+        finally:
+            self._running_refreshes -= 1
+            if not self._running_refreshes:
+                self._refreshes_done.set()
+                self._refreshes_done = None
+
     def _error_instead_of_retry(
         self, error: Exception, last_refresh_at: Optional[float]
     ) -> Optional[Exception]:
@@ -3486,9 +3513,12 @@ class NodesManager:
         if additional_startup_nodes_info is None:
             additional_startup_nodes_info = []
 
-        # The temporary nodes are closed after the lock is released
+        # The temporary nodes are closed after the lock is released. The
+        # refresh counts as running before the lock is taken: a refresh waiting
+        # for another to end is running as well
         async with (
             self._closing_temporary_nodes() as temporary_nodes,
+            self._counting_running_refresh(),
             self._initialize_lock,
             self._counting_failed_refresh(),
         ):
@@ -4369,7 +4399,7 @@ class PipelineStrategy(AbstractStrategy):
                         if waits_for_refresh:
                             # The refresh may be running on another task; the
                             # slot map it brings routes this retry
-                            await self._pipe.cluster_client._wait_for_running_refresh()
+                            await nodes_manager._wait_for_running_refresh()
                         outage_error = nodes_manager._error_instead_of_retry(
                             last_error, last_refresh_at
                         )

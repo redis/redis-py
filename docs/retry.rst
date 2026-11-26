@@ -149,7 +149,8 @@ Let's consider the following example:
    is due runs it, whether that is the retry of this command or another command.
    Refreshes run at most once per ``topology_refresh_min_interval`` seconds (one second
    by default), so a retry inside that interval still uses the current topology. When
-   another command is running the refresh, the retry of a command that failed with a
+   a refresh is running, run by another command or by an SMIGRATED notification, the
+   retry of a command that failed with a
    connection error waits for it to end, at most ``topology_refresh_min_interval``
    seconds, and routes by the topology it brings. A retry that goes to another node does
    not wait for it, such as the retry of a command without keys, which goes to a random

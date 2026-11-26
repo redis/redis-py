@@ -3492,11 +3492,12 @@ class NodesManager:
         self._requested_additional_startup_nodes: List[Tuple[str, int]] = []
         self._requested_last_failed_node_name: Optional[str] = None
         self._requested_disconnect_startup_nodes_pools = True
-        # Set from the moment _run_requested_refresh takes a requested refresh
-        # until that refresh ends, when the event is set: a command retried
-        # after a connection error waits for it even before initialize starts.
-        # Written under _lock.
-        self._requested_refresh_done: Optional[threading.Event] = None
+        # The number of topology refreshes running, each counted from the
+        # moment _run_requested_refresh takes it or initialize starts, and the
+        # event set when the last of them ends: a command retried after a
+        # connection error waits for it. Both written under _lock.
+        self._running_refreshes = 0
+        self._refreshes_done: Optional[threading.Event] = None
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3978,25 +3979,55 @@ class NodesManager:
 
     def _wait_for_running_refresh(self) -> None:
         """
-        Wait for a topology refresh another thread is running to end, at most
-        _refresh_wait_limit, so a command retried after a connection error
-        routes by the slot map it brings. Returns at once when none runs.
+        Wait for the topology refreshes other threads are running to end, at
+        most _refresh_wait_limit, so a command retried after a connection error
+        routes by the slot map they bring. Returns at once when none runs.
 
-        A requested refresh counts as running from the moment
-        _run_requested_refresh takes it. Threads whose commands failed together
-        race to take it, and the ones that lose must still wait for it, before
-        initialize marks the refresh as running.
+        Every refresh counts, the ones SMIGRATED runs included. A requested
+        refresh counts as running from the moment _run_requested_refresh takes
+        it. Threads whose commands failed together race to take it, and the
+        ones that lose must still wait for it, before initialize starts.
         """
-        refresh_done = self._requested_refresh_done
-        if refresh_done is None and self._initializing_thread_id is None:
+        refreshes_done = self._refreshes_done
+        if refreshes_done is None:
             return
         limit = self._refresh_wait_limit()
-        if limit <= 0:
-            return
-        if refresh_done is not None:
-            refresh_done.wait(limit)
-        elif self._initialization_lock.acquire(timeout=limit):
-            self._initialization_lock.release()
+        if limit > 0:
+            refreshes_done.wait(limit)
+
+    def _refresh_started(self) -> None:
+        """
+        Count a topology refresh as running until _refresh_ended. Called under
+        _lock.
+        """
+        if not self._running_refreshes:
+            self._refreshes_done = threading.Event()
+        self._running_refreshes += 1
+
+    def _refresh_ended(self) -> None:
+        """
+        Count a topology refresh started by _refresh_started as ended, and wake
+        the commands waiting for the running refreshes once none is left.
+        """
+        with self._lock:
+            self._running_refreshes -= 1
+            if self._running_refreshes:
+                return
+            refreshes_done = self._refreshes_done
+            self._refreshes_done = None
+        refreshes_done.set()
+
+    @contextmanager
+    def _counting_running_refresh(self):
+        """
+        Count the topology refresh of the block as running while it runs.
+        """
+        with self._lock:
+            self._refresh_started()
+        try:
+            yield
+        finally:
+            self._refresh_ended()
 
     def _error_instead_of_retry(
         self, error: Exception, last_refresh_at: Optional[float]
@@ -4075,7 +4106,7 @@ class NodesManager:
             disconnect_startup_nodes_pools = (
                 self._requested_disconnect_startup_nodes_pools
             )
-            refresh_done = self._requested_refresh_done = threading.Event()
+            self._refresh_started()
         try:
             self.initialize(
                 additional_startup_nodes_info=additional_startup_nodes_info,
@@ -4106,10 +4137,7 @@ class NodesManager:
             )
             raise
         finally:
-            with self._lock:
-                if self._requested_refresh_done is refresh_done:
-                    self._requested_refresh_done = None
-            refresh_done.set()
+            self._refresh_ended()
 
     def _current_topology_nodes(
         self,
@@ -4231,7 +4259,10 @@ class NodesManager:
         if additional_startup_nodes_info is None:
             additional_startup_nodes_info = []
 
+        # Counted as running before the lock is taken: a refresh waiting for
+        # another to end is running as well
         with (
+            self._counting_running_refresh(),
             self._initialization_lock,
             self._initializing_on_this_thread(),
             self._counting_failed_refresh(),

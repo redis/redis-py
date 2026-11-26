@@ -5994,8 +5994,9 @@ class TestTopologyRefreshPacing:
     ):
         """
         The retry after a connection error waits for the topology refresh
-        another thread is running, and routes by the slot map it brings. A
-        timeout keeps the backoff.
+        another thread is running, such as the one SMIGRATED runs through the
+        nodes manager, and routes by the slot map it brings. A timeout keeps
+        the backoff.
         """
         rc = get_mocked_redis_client(
             host=default_host, port=default_port, retry=Retry(NoBackoff(), 3)
@@ -6005,11 +6006,12 @@ class TestTopologyRefreshPacing:
         refreshed = threading.Event()
         events = []
 
-        def refresh():
-            with nm._initialization_lock, nm._initializing_on_this_thread():
-                refreshing.set()
-                refreshed.wait(5)
-                events.append("refreshed")
+        def cluster_slots(*args, **kwargs):
+            assert args[0] == "CLUSTER SLOTS"
+            refreshing.set()
+            refreshed.wait(5)
+            events.append("refreshed")
+            return default_cluster_slots
 
         def execute_command(target_node, *args, **kwargs):
             events.append("attempt")
@@ -6018,17 +6020,18 @@ class TestTopologyRefreshPacing:
                 raise error_class("down")
             return b"value"
 
-        refresher = threading.Thread(target=refresh)
-        refresher.start()
-        try:
-            assert refreshing.wait(5)
-            with patch.object(
-                RedisCluster, "_execute_command", side_effect=execute_command
-            ):
-                assert rc.get("foo") == b"value"
-        finally:
-            refreshed.set()
-            refresher.join(5)
+        with patch.object(Redis, "execute_command", side_effect=cluster_slots):
+            refresher = threading.Thread(target=nm.initialize)
+            refresher.start()
+            try:
+                assert refreshing.wait(5)
+                with patch.object(
+                    RedisCluster, "_execute_command", side_effect=execute_command
+                ):
+                    assert rc.get("foo") == b"value"
+            finally:
+                refreshed.set()
+                refresher.join(5)
 
         if waits:
             assert events == ["attempt", "refreshed", "attempt"]
@@ -6037,37 +6040,53 @@ class TestTopologyRefreshPacing:
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize(
-        "running, min_interval, acquired, waits",
+        "running, min_interval, waits",
         [
-            (False, None, True, False),
+            (False, None, False),
             # An interval of 0 turns the wait off
-            (True, 0, True, False),
-            (True, None, True, True),
-            # The refresh outlasts the wait
-            (True, 0.25, False, True),
+            (True, 0, False),
+            (True, None, True),
+            (True, 0.25, True),
         ],
     )
     def test_wait_for_running_refresh_is_bounded_by_the_interval(
-        self, running, min_interval, acquired, waits
+        self, running, min_interval, waits
     ):
         patcher, nm = self._nodes_manager(topology_refresh_min_interval=min_interval)
         try:
-            lock = Mock()
-            lock.acquire.return_value = acquired
-            nm._initialization_lock = lock
-            nm._initializing_thread_id = 1 if running else None
+            refreshes_done = Mock()
+            nm._refreshes_done = refreshes_done if running else None
 
             nm._wait_for_running_refresh()
 
             if waits:
-                lock.acquire.assert_called_once_with(
-                    timeout=1.0 if min_interval is None else min_interval
+                refreshes_done.wait.assert_called_once_with(
+                    1.0 if min_interval is None else min_interval
                 )
             else:
-                lock.acquire.assert_not_called()
-            assert lock.release.call_count == (1 if waits and acquired else 0)
+                refreshes_done.wait.assert_not_called()
         finally:
-            nm._initializing_thread_id = None
+            nm._refreshes_done = None
+            patcher.stop()
+
+    @pytest.mark.fixed_client
+    def test_running_refreshes_end_when_the_last_one_ends(self):
+        """
+        Refreshes that overlap count as running until the last of them ends,
+        which wakes every retry waiting for them at once.
+        """
+        patcher, nm = self._nodes_manager()
+        try:
+            with nm._counting_running_refresh():
+                refreshes_done = nm._refreshes_done
+                with nm._counting_running_refresh():
+                    assert nm._refreshes_done is refreshes_done
+                    assert nm._running_refreshes == 2
+                assert not refreshes_done.is_set()
+            assert refreshes_done.is_set()
+            assert nm._refreshes_done is None
+            assert nm._running_refreshes == 0
+        finally:
             patcher.stop()
 
     @pytest.mark.fixed_client
@@ -6096,8 +6115,8 @@ class TestTopologyRefreshPacing:
                 refresher.start()
                 try:
                     assert claimed.wait(5)
-                    # initialize has not marked the refresh as running
-                    assert nm._initializing_thread_id is None
+                    # initialize has not counted the refresh as running
+                    assert nm._running_refreshes == 1
                     threading.Timer(0.1, release.set).start()
                     nm._wait_for_running_refresh()
                     events.append("retried")
@@ -6106,7 +6125,8 @@ class TestTopologyRefreshPacing:
                     refresher.join(5)
 
             assert events == ["refreshed", "retried"]
-            assert nm._requested_refresh_done is None
+            assert nm._refreshes_done is None
+            assert nm._running_refreshes == 0
         finally:
             patcher.stop()
 

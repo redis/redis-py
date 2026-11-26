@@ -126,9 +126,9 @@ MOVED errors, run at most once per ``topology_refresh_min_interval`` seconds
 per client (one second by default); requests in between are collapsed into one
 refresh, run by the next command once the interval has passed.
 A command or pipeline that failed with a connection error waits as the
-``retry`` backoff says before its retry, as after any other error. When another
-command is running a topology refresh then, the retry also waits for that
-refresh to end, at most ``topology_refresh_min_interval`` seconds: it routes by
+``retry`` backoff says before its retry, as after any other error. When a
+topology refresh is running then, run by another command or by an SMIGRATED
+notification, the retry also waits for that refresh to end, at most ``topology_refresh_min_interval`` seconds: it routes by
 the slot map the refresh brings, not by the one it failed on, which would send
 it to the node that just failed. The retry of a command that goes to another
 node does not wait for the refresh, such as that of a command without keys,
@@ -136,8 +136,8 @@ which goes to a random primary, or of a read that ``load_balancing_strategy``
 sends to the primary and the replicas in turn, which can go to another node of
 the shard. A read sent only to replicas waits, as a shard with one replica gets
 it again. A pipeline always waits: it resends its commands by the same slot
-map, and some go to the node that failed. No retry waits for the refresh after
-a timeout.
+map, and some go to the node that failed. A transaction does not wait. No retry
+waits for the refresh after a timeout.
 A refresh asks the startup nodes first. While no slot map it got covers all
 slots, it then asks the other nodes of the current topology, so it reaches no
 node only when all of them fail. This holds with ``dynamic_startup_nodes=False``
