@@ -2074,6 +2074,7 @@ async def test_pipeline(decoded_r: redis.Redis):
     )
     assert (await decoded_r.ts().get("with_pipeline"))[1] == 99 * 1.1
 
+
 @pytest.mark.fixed_client
 def test_ts_callbacks_keep_null_key_and_labels():
     """Server-free: the async client's registered TimeSeries callbacks
