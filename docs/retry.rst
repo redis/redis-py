@@ -148,5 +148,13 @@ Let's consider the following example:
    shared by the whole client: the first command attempt that starts once the refresh
    is due runs it, whether that is the retry of this command or another command.
    Refreshes run at most once per ``topology_refresh_min_interval`` seconds (one second
-   by default), so a retry inside that interval still uses the current topology.
+   by default), so a retry inside that interval still uses the current topology. When
+   a refresh is running, run by another command or by an ``SMIGRATED`` notification, the
+   retry of a command that failed with a
+   connection error waits for it to end, at most ``topology_refresh_min_interval``
+   seconds, and routes by the topology it brings. A retry that goes to another node does
+   not wait for it, such as the retry of a command without keys, which goes to a random
+   primary, or of a read that ``load_balancing_strategy`` sends to the primary and the
+   replicas in turn, which can go to another node of the shard. A retry after a timeout
+   does not wait for it either.
 #. the cluster client waits as long as the backoff says and retries the command, until it either succeeds or the max number of retries is reached.

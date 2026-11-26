@@ -102,6 +102,7 @@ from redis.exceptions import (
     SlotNotCoveredError,
     TryAgainError,
 )
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.himport import HIMPORT_SET
 from redis.maint_notifications import MaintNotificationsConfig
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
@@ -1819,6 +1820,464 @@ class TestTopologyRefreshPacing:
         assert backoff.resets == 1
 
     @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True])
+    @pytest.mark.parametrize("until_due", [0.4, 5.0])
+    async def test_connection_error_retry_does_not_wait_for_a_refresh_not_due(
+        self, until_due, pipeline
+    ) -> None:
+        """
+        With no refresh running, a command or pipeline retried after a
+        connection error waits only as the retry backoff says, however long
+        the refresh the error asked for takes to be due.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 3),
+        )
+        execute_command, refreshes = (
+            TestTopologyRefreshKeepsConnections._command_side_effect(
+                [ConnectionError("down")]
+            )
+        )
+        attempts = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            attempts.append(node.name)
+            failed = len(attempts) == 1
+            for command in commands:
+                command.result = ConnectionError("down") if failed else b"value"
+            return failed
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 100.0 + until_due
+            if pipeline:
+                async with r.pipeline() as pipe:
+                    assert await pipe.get("foo").execute() == [b"value"]
+            else:
+                assert await r.get("foo") == b"value"
+
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
+        # The clock stands still, so the refresh is not due yet
+        assert refreshes == []
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "error, target_nodes, waits",
+        [
+            # A command for a key goes to the node of its slot again
+            (ConnectionError("down"), None, True),
+            # A timeout does not show a topology change
+            (RedisTimeoutError("slow"), None, False),
+            # A keyless command goes to a random primary
+            (ConnectionError("down"), RedisCluster.RANDOM, False),
+            # The default node is replaced after the failure
+            (ConnectionError("down"), RedisCluster.DEFAULT_NODE, False),
+        ],
+    )
+    async def test_retry_waits_for_a_running_refresh_only_when_it_goes_to_the_same_node(
+        self, error, target_nodes, waits
+    ) -> None:
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 3),
+        )
+        kwargs = {} if target_nodes is None else {"target_nodes": target_nodes}
+        execute_command, _ = TestTopologyRefreshKeepsConnections._command_side_effect(
+            [error]
+        )
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                NodesManager, "_wait_for_running_refresh", autospec=True
+            ) as wait,
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 105.0
+            assert await r.execute_command("GET", "foo", **kwargs) == b"value"
+
+        assert wait.await_count == (1 if waits else 0)
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "strategy, same_node",
+        [
+            # The primary and its replica in turn
+            (LoadBalancingStrategy.ROUND_ROBIN, False),
+            # The only replica of the shard, again
+            (LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, True),
+            (LoadBalancingStrategy.RANDOM_REPLICA, True),
+        ],
+    )
+    async def test_replica_read_retry_waits_when_it_goes_to_the_same_node(
+        self, strategy, same_node
+    ) -> None:
+        """
+        A read from replicas waits for a running refresh only when its
+        strategy sends the retry to the node that failed: one sent only to replicas
+        gets the only replica of the shard again.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 3),
+            load_balancing_strategy=strategy,
+        )
+        attempts = []
+
+        async def execute_command(node, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                return default_cluster_slots
+            attempts.append(node.name)
+            if len(attempts) == 1:
+                raise ConnectionError("down")
+            return b"value"
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                NodesManager, "_wait_for_running_refresh", autospec=True
+            ) as wait,
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 105.0
+            assert await r.get("foo") == b"value"
+
+        assert len(attempts) == 2
+        assert (attempts[0] == attempts[1]) is same_node
+        assert wait.await_count == (1 if same_node else 0)
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
+
+    @pytest.mark.fixed_client
+    async def test_retry_after_an_error_before_routing_does_not_wait(
+        self,
+    ) -> None:
+        """
+        An attempt that fails before it reaches its node tells nothing about
+        the node, so its retry does not wait for a running refresh.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 3),
+        )
+        determine_nodes = RedisCluster._determine_nodes
+        lookups = []
+
+        async def failing_determine_nodes(self, *args, **kwargs):
+            lookups.append(args[0])
+            if len(lookups) == 1:
+                raise ConnectionError("down")
+            return await determine_nodes(self, *args, **kwargs)
+
+        execute_command, _ = TestTopologyRefreshKeepsConnections._command_side_effect(
+            []
+        )
+        with (
+            mock.patch.object(
+                RedisCluster,
+                "_determine_nodes",
+                autospec=True,
+                side_effect=failing_determine_nodes,
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                NodesManager, "_wait_for_running_refresh", autospec=True
+            ) as wait,
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 105.0
+            assert await r.get("foo") == b"value"
+
+        assert lookups == ["GET", "GET"]
+        wait.assert_not_awaited()
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("pipeline", [False, True])
+    async def test_retry_of_an_error_sent_elsewhere_does_not_wait(
+        self, pipeline
+    ) -> None:
+        """
+        A connection error that says its retry goes to another node, as a
+        failed key lookup does, does not wait for a running refresh, from a
+        command or a pipeline.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 2),
+        )
+        attempts = []
+
+        def sent_elsewhere():
+            error = ConnectionError("down")
+            error.retry_goes_elsewhere = True
+            return error
+
+        async def execute_command(node, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                return default_cluster_slots
+            attempts.append(node.name)
+            if len(attempts) == 1:
+                raise sent_elsewhere()
+            return b"value"
+
+        async def execute_pipeline(node, commands) -> bool:
+            attempts.append(node.name)
+            if len(attempts) == 1:
+                raise sent_elsewhere()
+            for command in commands:
+                command.result = b"value"
+            return False
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_command",
+                autospec=True,
+                side_effect=execute_command,
+            ),
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                NodesManager, "_wait_for_running_refresh", autospec=True
+            ) as wait,
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 105.0
+            if pipeline:
+                async with r.pipeline() as pipe:
+                    assert await pipe.get("foo").execute() == [b"value"]
+            else:
+                assert await r.get("foo") == b"value"
+
+        assert len(attempts) == 2
+        wait.assert_not_awaited()
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
+
+    @pytest.mark.fixed_client
+    async def test_key_lookup_failure_marks_the_retry_as_going_elsewhere(
+        self,
+    ) -> None:
+        """
+        A failed lookup of a command's keys replaces the node asked, so the
+        retry of the command does not wait for the refresh.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        failed_node = r.commands_parser.node
+        with (
+            mock.patch.object(
+                r.commands_parser, "get_keys", side_effect=ConnectionError("down")
+            ),
+            pytest.raises(ConnectionError) as e,
+        ):
+            await r._determine_slot("XREAD", "STREAMS", "s", "0")
+
+        assert e.value.retry_goes_elsewhere is True
+        assert r.commands_parser.node is not failed_node
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("smigrated", [False, True])
+    @pytest.mark.parametrize(
+        "error_class, waits", [(ConnectionError, True), (RedisTimeoutError, False)]
+    )
+    async def test_retry_waits_for_a_refresh_running_on_another_task(
+        self, smigrated, error_class, waits
+    ) -> None:
+        """
+        The retry after a connection error waits for the topology refresh
+        another task is running, a requested one or one SMIGRATED runs through
+        the nodes manager, and routes by the slot map it brings. A timeout
+        keeps the backoff.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 3)
+        )
+        refreshing = asyncio.Event()
+        refreshed = asyncio.Event()
+        events = []
+
+        async def execute_command(node, *args, **kwargs):
+            if args[0] == "CLUSTER SLOTS":
+                refreshing.set()
+                await refreshed.wait()
+                events.append("refreshed")
+                return default_cluster_slots
+            events.append("attempt")
+            if len(events) == 1:
+                asyncio.get_running_loop().call_later(0.1, refreshed.set)
+                raise error_class("down")
+            return b"value"
+
+        if smigrated:
+            refresh = r.nodes_manager.initialize()
+        else:
+            # The refresh is due at once
+            r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+            r._request_refresh()
+            refresh = r.initialize()
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            refresher = asyncio.create_task(refresh)
+            try:
+                await asyncio.wait_for(refreshing.wait(), 5)
+                assert await r.get("foo") == b"value"
+            finally:
+                refreshed.set()
+                await refresher
+
+        if waits:
+            assert events == ["attempt", "refreshed", "attempt"]
+        else:
+            assert events == ["attempt", "attempt", "refreshed"]
+
+    @pytest.mark.fixed_client
+    async def test_concurrent_retries_dial_a_refusing_node_once_each(self) -> None:
+        """
+        Commands that fail together on a node that refuses connections dial it
+        once each: their retries wait for the refresh one of them runs, and go
+        to the node the refresh moved the slot to.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host, port=default_port, retry=Retry(NoBackoff(), 3)
+        )
+        refusing = r.get_node_from_key("foo").name
+        moved_slots = [
+            default_cluster_slots[0],
+            [8192, 16383, ["127.0.0.1", 7002, "node_2"]],
+        ]
+        refresh_started = asyncio.Event()
+        end_refresh = asyncio.Event()
+        dials = []
+
+        async def execute_command(node, *args, **kwargs):
+            if node.name == refusing:
+                if args[0] != "CLUSTER SLOTS":
+                    dials.append(args[0])
+                raise ConnectionError("Connection refused")
+            if args[0] == "CLUSTER SLOTS":
+                refresh_started.set()
+                await end_refresh.wait()
+                return moved_slots
+            return b"value"
+
+        # The refresh is due at once
+        r.nodes_manager._last_refresh_at = r.nodes_manager._refresh_due_at = None
+        with mock.patch.object(
+            ClusterNode, "execute_command", autospec=True, side_effect=execute_command
+        ):
+            commands = [asyncio.create_task(r.get("foo")) for _ in range(10)]
+            await asyncio.wait_for(refresh_started.wait(), 5)
+            # Every command fails its first attempt while the refresh runs
+            for _ in range(100):
+                if len(dials) == len(commands):
+                    break
+                await asyncio.sleep(0)
+            end_refresh.set()
+            assert await asyncio.gather(*commands) == [b"value"] * len(commands)
+
+        assert dials == ["GET"] * len(commands)
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize(
+        "running, min_interval, waits",
+        [
+            (False, None, False),
+            # An interval of 0 turns the wait off
+            (True, 0, False),
+            # The refresh outlasts the wait
+            (True, 0.05, True),
+        ],
+    )
+    async def test_wait_for_running_refresh_is_bounded_by_the_interval(
+        self, running, min_interval, waits
+    ) -> None:
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        nm._topology_refresh_min_interval = min_interval
+        async with (
+            nm._counting_running_refresh() if running else contextlib.nullcontext()
+        ):
+            with mock.patch(
+                "redis.asyncio.cluster.asyncio.timeout", wraps=asyncio.timeout
+            ) as timeout:
+                await nm._wait_for_running_refresh()
+
+            if waits:
+                timeout.assert_called_once_with(min_interval)
+            else:
+                timeout.assert_not_called()
+
+    @pytest.mark.fixed_client
+    async def test_running_refreshes_end_when_the_last_one_ends(self) -> None:
+        """
+        Refreshes that overlap count as running until the last of them ends,
+        which wakes every retry waiting for them at once.
+        """
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        nm = r.nodes_manager
+        async with nm._counting_running_refresh():
+            refreshes_done = nm._refreshes_done
+            async with nm._counting_running_refresh():
+                assert nm._refreshes_done is refreshes_done
+                assert nm._running_refreshes == 2
+                waiters = [
+                    asyncio.create_task(nm._wait_for_running_refresh())
+                    for _ in range(3)
+                ]
+                await asyncio.sleep(0)
+            assert not refreshes_done.is_set()
+            assert not any(waiter.done() for waiter in waiters)
+        assert refreshes_done.is_set()
+        assert nm._refreshes_done is None
+        assert nm._running_refreshes == 0
+        # One pass of the event loop wakes them all
+        await asyncio.sleep(0)
+        assert all(waiter.done() for waiter in waiters)
+
+    @pytest.mark.fixed_client
     @pytest.mark.parametrize("due", [True, False])
     async def test_moved_threshold_asks_for_refresh_run_once_due(self, due) -> None:
         """
@@ -1980,6 +2439,69 @@ class TestTopologyRefreshPacing:
 
         assert len(attempts) == 3
         assert [c.args[0] for c in sleep.await_args_list] == [0.001, 0.002]
+
+    @pytest.mark.fixed_client
+    @pytest.mark.parametrize("node_raises", [True, False])
+    @pytest.mark.parametrize(
+        "strategy",
+        [
+            None,
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    async def test_pipeline_retry_waits_whatever_the_read_strategy(
+        self, strategy, node_raises
+    ) -> None:
+        """
+        A pipeline whose node failed with a connection error waits for a
+        running refresh whatever its read strategy, whether the node could not be
+        reached or dropped the connection: it resends its commands by the same
+        slot map, and reads that rotate through the nodes of a shard are sent
+        one after another, so some go to the node that failed again.
+        """
+        r = await get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            retry=Retry(RecordingBackoff(step=0.001), 2),
+            load_balancing_strategy=strategy,
+        )
+        attempts = []
+
+        async def execute_pipeline(node, commands) -> bool:
+            attempts.append(node.name)
+            if len(attempts) == 1:
+                if node_raises:
+                    # The connection could not be made
+                    raise ConnectionError("Connection refused")
+                for command in commands:
+                    command.result = ConnectionError("Connection closed by server.")
+                return True
+            for command in commands:
+                command.result = b"value"
+            return False
+
+        with (
+            mock.patch.object(
+                ClusterNode,
+                "execute_pipeline",
+                autospec=True,
+                side_effect=execute_pipeline,
+            ),
+            mock.patch.object(
+                NodesManager, "_wait_for_running_refresh", autospec=True
+            ) as wait,
+            patch_monotonic("redis.asyncio.cluster", 100.0),
+            mock.patch("redis.asyncio.cluster.asyncio.sleep") as sleep,
+        ):
+            r.nodes_manager._refresh_due_at = 105.0
+            async with r.pipeline() as pipe:
+                assert await pipe.get("foo").execute() == [b"value"]
+
+        assert len(attempts) == 2
+        wait.assert_awaited_once()
+        assert [c.args[0] for c in sleep.await_args_list] == [0.001]
 
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("error", [ClusterDownError("down"), SlotNotCoveredError()])
