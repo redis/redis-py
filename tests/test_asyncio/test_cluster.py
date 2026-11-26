@@ -4296,6 +4296,40 @@ class TestRedisClusterObjMocked:
 
         await rc.aclose()
 
+    async def test_ask_redirect_drains_the_command_reply_if_asking_fails(self) -> None:
+        """
+        ASKING and the redirected command go out in one write, so a failed
+        ASKING (NOPERM here) leaves the command's reply queued on the socket. It
+        has to be read before the error surfaces, or the connection returns to
+        the free queue with an unread reply and desyncs the next borrower.
+        """
+        rc = await get_mocked_redis_client(host=default_host, port=default_port)
+        slot = rc.keyslot("foo")
+        origin = rc.get_node_from_key("foo")
+        target = next(node for node in rc.get_primaries() if node is not origin)
+        mock_node_resp_exc(origin, AskError(f"{slot} {target.host}:{target.port}"))
+        connection = mock.AsyncMock(spec=Connection)
+        connection._resp2_fallback = False
+        connection.is_connected = True
+        connection.should_reconnect.return_value = False
+        # the ASKING reply, then the GET reply queued behind it
+        connection.read_response.side_effect = [
+            NoPermissionError(
+                "NOPERM this user has no permissions to run the 'asking'"
+            ),
+            b"value",
+        ]
+        target._free.clear()
+        target._free.append(connection)
+
+        with pytest.raises(NoPermissionError):
+            await rc.get("foo")
+
+        assert connection.read_response.await_count == 2
+        assert list(target._free) == [connection]
+
+        await rc.aclose()
+
     @pytest.mark.parametrize("error", [AskError, MovedError])
     async def test_transaction_redirect_without_host(self, error) -> None:
         """

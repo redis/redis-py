@@ -2733,6 +2733,37 @@ class ClusterNode:
 
         return response
 
+    async def send_asking_with_command(
+        self,
+        connection: Connection,
+        command: Tuple[Any, ...],
+        reply_command: str,
+        **kwargs: Any,
+    ) -> None:
+        """Send ``[ASKING, command]`` on ``connection`` and read the ASKING reply.
+
+        ASKING is a one-shot allowance on the connection that sends it, so the
+        slot-scoped command has to follow it in the same write on that same
+        connection. The caller reads the command's own reply.
+
+        If ASKING fails, the command reply is still queued behind it: it is
+        drained before the ASKING error is raised, otherwise the connection
+        returns to the free queue with an unread reply and desyncs the next
+        borrower. ``reply_command`` names the command for that drained reply,
+        and ``kwargs`` are the parse_response kwargs for it.
+        """
+        await connection.send_packed_command(
+            connection.pack_commands([("ASKING",), command])
+        )
+        try:
+            await self.parse_response(connection, "ASKING")
+        except ResponseError:
+            try:
+                await self.parse_response(connection, reply_command, **kwargs)
+            except ResponseError:
+                pass
+            raise
+
     async def execute_command(
         self, *args: Any, asking: bool = False, **kwargs: Any
     ) -> Any:
@@ -2772,20 +2803,7 @@ class ClusterNode:
             if asking:
                 # Pack ASKING into the command's own write so the allowance is
                 # granted on this connection immediately before the command
-                await connection.send_packed_command(
-                    connection.pack_commands([("ASKING",), args])
-                )
-                try:
-                    await self.parse_response(connection, "ASKING")
-                except ResponseError:
-                    # The command reply is still queued behind the failed
-                    # ASKING. Drain it before raising, otherwise the connection
-                    # returns to the free queue with an unread reply.
-                    try:
-                        await self.parse_response(connection, args[0], **kwargs)
-                    except ResponseError:
-                        pass
-                    raise
+                await self.send_asking_with_command(connection, args, args[0], **kwargs)
             else:
                 # Execute command
                 await connection.send_packed_command(connection.pack_command(*args))
