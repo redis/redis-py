@@ -349,6 +349,10 @@ Probabilistic
      - The decay is a float, as on RESP3.
      - ``info.decay == "0.9"``
      - ``info.decay == 0.9``
+   * - ``BF.ADD``, ``BF.EXISTS``, ``BF.INSERT``, ``BF.MADD``, ``BF.MEXISTS``, ``CF.ADD``, ``CF.ADDNX``, ``CF.DEL``, ``CF.EXISTS``, ``CF.INSERT``, ``CF.MEXISTS``, ``TOPK.QUERY``
+     - Each integer reply becomes a boolean, as on RESP3.
+     - ``[1, 0]``
+     - ``[True, False]``
 
 Vector Sets
 ^^^^^^^^^^^

@@ -670,6 +670,54 @@ async def test_tdigest_unified_responses_are_floats(create_redis, stack_url, pro
 
 @pytest.mark.fixed_client
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client_kwargs, expected_type",
+    [
+        ({}, int),
+        ({"protocol": 2}, int),
+        ({"protocol": 3}, bool),
+        ({"protocol": 2, "legacy_responses": False}, bool),
+        ({"protocol": 3, "legacy_responses": False}, bool),
+    ],
+    ids=["default", "resp2", "resp3", "resp2-unified", "resp3-unified"],
+)
+async def test_bf_cf_topk_reply_types(
+    create_redis, stack_url, client_kwargs, expected_type
+):
+    client = await create_redis(url=stack_url, **client_kwargs)
+    await client.flushdb()
+    bf, cf, topk = client.bf(), client.cf(), client.topk()
+    assert await bf.create("bloom", 0.01, 1000)
+    assert await cf.create("cuckoo", 1000)
+    assert await topk.reserve("topk", 3, 50, 4, 0.9)
+    await topk.add("topk", "a")
+    scalars = [
+        await bf.add("bloom", "a"),
+        await bf.add("bloom", "a"),
+        await bf.exists("bloom", "a"),
+        await cf.add("cuckoo", "a"),
+        await cf.addnx("cuckoo", "a"),
+        await cf.exists("cuckoo", "a"),
+        await cf.delete("cuckoo", "a"),
+        await cf.delete("cuckoo", "a"),
+    ]
+    lists = [
+        await bf.madd("bloom", "a", "b"),
+        await bf.insert("bloom", ["c", "a"]),
+        await bf.mexists("bloom", "a", "z"),
+        await cf.insert("cuckoo", ["q"]),
+        await cf.mexists("cuckoo", "q", "z"),
+        await topk.query("topk", "a", "z"),
+    ]
+
+    assert [type(value) for value in scalars] == [expected_type] * 8
+    assert scalars == [1, 0, 1, 1, 0, 1, 1, 0]
+    assert [type(value) for result in lists for value in result] == [expected_type] * 11
+    assert lists == [[0, 1], [1, 0], [1, 0], [1], [1, 0], [1, 0]]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
 @pytest.mark.parametrize("protocol", [2, 3])
 async def test_topk_info_unified_responses(create_redis, stack_url, protocol):
     client = await create_redis(

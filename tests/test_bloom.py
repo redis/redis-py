@@ -717,6 +717,54 @@ def test_tdigest_unified_responses_are_floats(request, stack_url, protocol):
 
 @pytest.mark.fixed_client
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client_kwargs, expected_type",
+    [
+        ({}, int),
+        ({"protocol": 2}, int),
+        ({"protocol": 3}, bool),
+        ({"protocol": 2, "legacy_responses": False}, bool),
+        ({"protocol": 3, "legacy_responses": False}, bool),
+    ],
+    ids=["default", "resp2", "resp3", "resp2-unified", "resp3-unified"],
+)
+def test_bf_cf_topk_reply_types(request, stack_url, client_kwargs, expected_type):
+    with _get_client(
+        redis.Redis, request, from_url=stack_url, **client_kwargs
+    ) as client:
+        client.flushdb()
+        bf, cf, topk = client.bf(), client.cf(), client.topk()
+        assert bf.create("bloom", 0.01, 1000)
+        assert cf.create("cuckoo", 1000)
+        assert topk.reserve("topk", 3, 50, 4, 0.9)
+        topk.add("topk", "a")
+        scalars = [
+            bf.add("bloom", "a"),
+            bf.add("bloom", "a"),
+            bf.exists("bloom", "a"),
+            cf.add("cuckoo", "a"),
+            cf.addnx("cuckoo", "a"),
+            cf.exists("cuckoo", "a"),
+            cf.delete("cuckoo", "a"),
+            cf.delete("cuckoo", "a"),
+        ]
+        lists = [
+            bf.madd("bloom", "a", "b"),
+            bf.insert("bloom", ["c", "a"]),
+            bf.mexists("bloom", "a", "z"),
+            cf.insert("cuckoo", ["q"]),
+            cf.mexists("cuckoo", "q", "z"),
+            topk.query("topk", "a", "z"),
+        ]
+
+    assert [type(value) for value in scalars] == [expected_type] * 8
+    assert scalars == [1, 0, 1, 1, 0, 1, 1, 0]
+    assert [type(value) for result in lists for value in result] == [expected_type] * 11
+    assert lists == [[0, 1], [1, 0], [1, 0], [1], [1, 0], [1, 0]]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
 @pytest.mark.parametrize("protocol", [2, 3])
 def test_topk_info_unified_responses(request, stack_url, protocol):
     with _get_client(

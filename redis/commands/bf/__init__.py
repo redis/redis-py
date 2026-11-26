@@ -24,6 +24,22 @@ def _parse_topk_info_resp2_unified(response):
     return info
 
 
+def _bools_to_ints(response):
+    """Turn the RESP3 booleans of a list reply into the RESP2 1 and 0.
+
+    Anything else, such as an error reply for one item, is left as it is.
+    """
+    return [int(item) if isinstance(item, bool) else item for item in response]
+
+
+def _ints_to_bools(response):
+    """Turn the RESP2 1 and 0 of a list reply into booleans, as RESP3 sends."""
+    return [
+        bool(item) if isinstance(item, int) and not isinstance(item, bool) else item
+        for item in response
+    ]
+
+
 class AbstractBloom:
     """
     The client allows to interact with RedisBloom and use all of
@@ -172,8 +188,11 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_LIST: parse_to_list,
         }
         _RESP3_MODULE_CALLBACKS = {}
+        # TOPK.QUERY answers 1 or 0 on RESP2 and booleans on RESP3, mapped as
+        # for the Bloom and Cuckoo filters.
         _RESP2_UNIFIED_MODULE_CALLBACKS = {
             TOPK_INFO: _parse_topk_info_resp2_unified,
+            TOPK_QUERY: _ints_to_bools,
         }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             TOPK_INFO: TopKInfo,
@@ -183,6 +202,7 @@ class _TOPKBloomBase(TOPKCommands, AbstractBloom):
             TOPK_INCRBY: parse_to_list,
             TOPK_INFO: TopKInfo,
             TOPK_LIST: parse_to_list,
+            TOPK_QUERY: _bools_to_ints,
         }
 
         self.client = client
@@ -225,12 +245,29 @@ class _CFBloomBase(CFCommands, AbstractBloom):
             CF_INFO: CFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        # RESP2 replies to these with 1 or 0, RESP3 with a boolean. Unified
+        # responses are booleans on both protocols, and the default client
+        # keeps the RESP2 integers.
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            **_RESP2_MODULE_CALLBACKS,
+            CF_ADD: bool,
+            CF_ADDNX: bool,
+            CF_DEL: bool,
+            CF_EXISTS: bool,
+            CF_INSERT: _ints_to_bools,
+            CF_MEXISTS: _ints_to_bools,
+        }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             CF_INFO: CFInfo,
+            CF_ADD: int,
+            CF_ADDNX: int,
+            CF_DEL: int,
+            CF_EXISTS: int,
+            CF_INSERT: _bools_to_ints,
+            CF_MEXISTS: _bools_to_ints,
         }
 
         self.client = client
@@ -339,12 +376,27 @@ class _BFBloomBase(BFCommands, AbstractBloom):
             BF_INFO: BFInfo,
         }
         _RESP3_MODULE_CALLBACKS = {}
-        _RESP2_UNIFIED_MODULE_CALLBACKS = dict(_RESP2_MODULE_CALLBACKS)
+        # RESP2 replies to these with 1 or 0, RESP3 with a boolean. Unified
+        # responses are booleans on both protocols, and the default client
+        # keeps the RESP2 integers.
+        _RESP2_UNIFIED_MODULE_CALLBACKS = {
+            **_RESP2_MODULE_CALLBACKS,
+            BF_ADD: bool,
+            BF_EXISTS: bool,
+            BF_INSERT: _ints_to_bools,
+            BF_MADD: _ints_to_bools,
+            BF_MEXISTS: _ints_to_bools,
+        }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
         }
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             BF_INFO: BFInfo,
+            BF_ADD: int,
+            BF_EXISTS: int,
+            BF_INSERT: _bools_to_ints,
+            BF_MADD: _bools_to_ints,
+            BF_MEXISTS: _bools_to_ints,
         }
 
         self.client = client
