@@ -30,6 +30,7 @@ from tests.test_scenario.maint_operations_helpers import (
     SINGLE_OPERATIONS,
     Expectation,
     node_removed_expectation,
+    reconnects_settled,
     recovery_status,
     validate_auth_outage,
     validate_failback_topology,
@@ -51,7 +52,7 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
         """Run the maintenance and the failback, and validate both.
 
         With outage, the returning node rejects AUTH for a while after it first
-        accepts a connection.
+        accepts a connection, for each client from its own first connection.
         """
         if outage is not None:
             inject_auth_outage(monkeypatch, outage)
@@ -85,11 +86,17 @@ class TestAsyncClusterNodeMaintenanceFailbackSchOff(AsyncClusterMaintScenarioBas
             outage.arm(returning)
         with timeline.operation("failback") as failback:
             await self._node_maintenance("exit", node_id)
+        # The AUTH outage of each client starts with its own first connection to
+        # the node, so each client recovers after its own outage. It has
+        # recovered once its workers stopped reconnecting to the node, so the
+        # steady window does not see the reconnects.
+        monitors = {id(run.client): run.monitor for run in runs}
         failback.settled = await self._wait_for_recovery(
             lambda c: (
-                (outage is None or outage.over())
+                (outage is None or outage.over(monitors[id(c)]))
                 and returning in _slot_owners(c)
                 and _connections_to(c, returning) > 0
+                and reconnects_settled(monitors[id(c)], returning)
             ),
             lambda run: recovery_status(
                 run.client, run.app.stats, run.baseline, returning

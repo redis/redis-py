@@ -39,13 +39,16 @@ from tests.test_scenario.maint_operations_helpers import (
     RECOVERY_TIMEOUT,
     SCENARIO_WORKLOADS,
     STEADY_SECONDS,
+    WARMUP_EXTRA_SECONDS,
     WARMUP_SECONDS,
     WORKERS,
     log_summary,
+    missing_connections,
     validate_connections,
     validate_errors,
     validate_final_state,
     validate_held_connections,
+    validate_notifications_disabled,
     validate_process_sockets,
     validate_slot_coverage,
     validate_slots,
@@ -170,6 +173,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
             run.monitor.start()
             run.app.start()
         await asyncio.sleep(WARMUP_SECONDS)
+        await self._wait_for_warm_pools()
         self._timeline.warmed_up = _now()
         for run in self._runs:
             run.baseline = run.app.stats.recent_throughput()
@@ -180,10 +184,30 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
         self._validate_process_sockets("after the warm-up")
         return self._runs
 
+    async def _wait_for_warm_pools(self):
+        """Wait, at most WARMUP_EXTRA_SECONDS, until every worker has its
+        connection to every primary, so the warm-up baseline is what the app needs.
+        """
+        deadline = _now() + WARMUP_EXTRA_SECONDS
+        started = _now()
+        while True:
+            missing = {}
+            for run in self._runs:
+                snapshot = _snapshot(run.client)
+                missing[run.name] = missing_connections(snapshot, snapshot.primaries)
+            if not any(missing.values()) or _now() >= deadline:
+                break
+            await asyncio.sleep(1)
+        if _now() > started + 1 or any(missing.values()):
+            logging.info(
+                f"Warm-up extended by {_now() - started:.0f}s; connections the "
+                f"workers still lack: {missing}"
+            )
+
     async def _new_run(
         self, workload: str, dynamic_startup_nodes: bool
     ) -> AsyncWorkloadRun:
-        monitor = AsyncClientMonitor(lambda: _snapshot(client))
+        monitor = AsyncClientMonitor(lambda: _snapshot(client), workload)
         with bound_to(monitor):
             client = get_async_cluster_client_maint_notifications(
                 endpoints_config=self._endpoint_config,
@@ -192,6 +216,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
             )
             # The async cluster discovers its topology lazily.
             await client.initialize()
+        validate_notifications_disabled(client)
         app = AsyncScenarioApp(
             client,
             ASYNC_WORKLOAD_CLASSES[workload](),

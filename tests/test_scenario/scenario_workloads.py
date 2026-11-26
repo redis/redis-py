@@ -7,7 +7,7 @@ command mix (mixed), and blocking commands (blocking). The async counterparts ar
 in tests/test_asyncio/test_scenario/async_scenario_workloads.py.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 import logging
 import threading
 import time
@@ -254,15 +254,84 @@ class QueueStats:
     # taken a value whose reply was lost)
     popped: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
     pop_ambiguous: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    # queue -> value -> when its RPUSH started and ended, and the (value, start,
+    # end) of every BLPOP that returned one, for the report of a duplicate
+    push_spans: dict[str, dict[str, tuple[float, float]]] = field(
+        default_factory=lambda: defaultdict(dict)
+    )
+    pop_spans: dict[str, list[tuple[str, float, float]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
 
 
-def validate_queue(queue: str, remaining: list[str], queues: QueueStats) -> str | None:
-    """Check one queue of the blocking workload. Returns the problem, if any."""
+def _activity(monitor: ClientMonitor, start: float, end: float) -> str:
+    """What the client did to its connections between start and end."""
+    return (
+        f"drops {monitor.by_address('drop', start, end)}, failed connects "
+        f"{monitor.by_address('connect_failure', start, end)}, refreshes "
+        f"{monitor.count('refresh', start=start, end=end)}"
+    )
+
+
+def describe_duplicates(
+    queue: str,
+    remaining: list[str],
+    queues: QueueStats,
+    monitor: ClientMonitor | None = None,
+    since: float = 0.0,
+) -> str:
+    """For each value found twice in queue: where it was found, and its RPUSH and
+    BLPOPs, with what the client did to its connections meanwhile. Times are in
+    seconds after since.
+
+    A value popped twice, or popped and still queued, after a push that saw a
+    connection drop points at a push the client sent again; one whose push saw
+    nothing, popped across a failover, points at a pop the server lost.
+    """
+    popped = Counter(queues.popped[queue])
+    queued = Counter(remaining)
+    reports = []
+    for value in sorted(v for v in popped | queued if popped[v] + queued[v] > 1):
+        push = queues.push_spans[queue].get(value)
+        acked = value in queues.pushed[queue]
+        report = (
+            f"{value}: popped {popped[value]}x, still queued {queued[value]}x; "
+            f"RPUSH {'acknowledged' if acked else 'raised'}"
+        )
+        if push is not None:
+            report += f" at {push[0] - since:.2f}-{push[1] - since:.2f}s"
+            if monitor is not None:
+                report += f" ({_activity(monitor, *push)})"
+        for popped_value, start, end in queues.pop_spans[queue]:
+            if popped_value == value:
+                report += f"; BLPOP at {start - since:.2f}-{end - since:.2f}s"
+                if monitor is not None:
+                    report += f" ({_activity(monitor, start, end)})"
+        reports.append(report)
+    return "; ".join(reports[:3])
+
+
+def validate_queue(
+    queue: str,
+    remaining: list[str],
+    queues: QueueStats,
+    monitor: ClientMonitor | None = None,
+    since: float = 0.0,
+) -> str | None:
+    """Check one queue of the blocking workload. Returns the problem, if any.
+
+    monitor and since only add detail to the report of a duplicate; see
+    describe_duplicates.
+    """
     pushed = queues.pushed[queue]
     maybe_pushed = pushed | queues.push_ambiguous[queue]
     popped = queues.popped[queue]
     if len(popped) + len(remaining) != len(set(popped) | set(remaining)):
-        return f"{queue}: a value was popped or queued twice: a push ran twice"
+        return (
+            f"{queue}: a value was popped or queued twice, so a push ran twice or "
+            f"the server lost a pop: "
+            + describe_duplicates(queue, remaining, queues, monitor, since)
+        )
     seen = set(popped) | set(remaining)
     unknown = seen - maybe_pushed
     if unknown:
@@ -307,6 +376,7 @@ class BlockingWorkload(Workload):
         for key in keys:
             queue = self.queue(key)
             value = f"{worker}-{iteration}"
+            started = _now()
             try:
                 app.run("RPUSH", lambda c: c.rpush(queue, value))
                 with queues.lock:
@@ -314,12 +384,15 @@ class BlockingWorkload(Workload):
             except Exception:
                 with queues.lock:
                     queues.push_ambiguous[queue].add(value)
+            with queues.lock:
+                queues.push_spans[queue][value] = (started, _now())
         time.sleep(BLOCKING_PRODUCER_PAUSE_SECONDS)
 
     def _consume(self, app, keys):
         queues = self.queues
         for key in keys:
             queue = self.queue(key)
+            started = _now()
             try:
                 reply = app.run(
                     "BLPOP", lambda c: c.blpop([queue], timeout=BLOCKING_TIMEOUT)
@@ -332,6 +405,7 @@ class BlockingWorkload(Workload):
                 value = reply[1].decode() if isinstance(reply[1], bytes) else reply[1]
                 with queues.lock:
                     queues.popped[queue].append(value)
+                    queues.pop_spans[queue].append((value, started, _now()))
 
     def validate(self, app):
         queues = self.queues
@@ -341,7 +415,9 @@ class BlockingWorkload(Workload):
                 v.decode() if isinstance(v, bytes) else v
                 for v in app.client.lrange(queue, 0, -1)
             ]
-            problem = validate_queue(queue, remaining, queues)
+            problem = validate_queue(
+                queue, remaining, queues, app.monitor, app.stats.started_at
+            )
             if problem:
                 problems.append(problem)
         assert not problems, "; ".join(problems[:5])

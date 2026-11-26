@@ -20,6 +20,7 @@ import pytest
 from redis import RedisCluster
 from redis.asyncio import RedisCluster as AsyncRedisCluster
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS
+from redis.exceptions import AuthenticationError
 from tests.test_scenario.conftest import (
     _FAULT_INJECTOR_CLIENT_OSS_API,
     get_cluster_client_maint_notifications,
@@ -34,6 +35,7 @@ from tests.test_scenario.scenario_monitor import (
     TRANSITION_MARGIN,
     AuthOutage,
     ClientMonitor,
+    ClientSnapshot,
     Operation,
     Timeline,
     _Event,
@@ -67,10 +69,17 @@ logging.basicConfig(
 
 # Load before the first operation, so every node's pool is warm.
 WARMUP_SECONDS = 15
+# How much longer the warm-up waits for every worker to have its connection to
+# every primary. A consumer of the blocking workload spends most of its time
+# blocked on one node, so its pools can take longer to fill.
+WARMUP_EXTRA_SECONDS = 20
 # Load after the last operation has settled, during which nothing may still change.
 STEADY_SECONDS = 30
 # How long after an operation the client may take to route to the new topology.
 RECOVERY_TIMEOUT = 60
+# How long the client must open no connection to a returning node for its
+# workers' reconnects to count as done; see reconnects_settled.
+RECONNECT_QUIET_SECONDS = 10
 WORKERS = 10
 # Starting thresholds, to be tightened from the numbers every run logs.
 MAX_TRANSITION_ERROR_RATIO = 0.005
@@ -120,6 +129,7 @@ NODE_MAINTENANCE_OP_TIMEOUT = 600
 NODE_MAINTENANCE_ACTIVE_TIMEOUT = 300
 FAILBACK_TEST_TIMEOUT = (
     WARMUP_SECONDS
+    + WARMUP_EXTRA_SECONDS
     + 2 * NODE_MAINTENANCE_OP_TIMEOUT
     + HOLD_SECONDS
     + AUTH_OUTAGE_SECONDS
@@ -136,6 +146,7 @@ SINGLE_OPERATIONS = ["maintenance_mode"]
 OPERATE_SECONDS = 60
 SINGLE_OPERATION_TEST_TIMEOUT = (
     WARMUP_SECONDS
+    + WARMUP_EXTRA_SECONDS
     + NODE_MAINTENANCE_OP_TIMEOUT
     + RECOVERY_TIMEOUT
     + OPERATE_SECONDS
@@ -323,6 +334,29 @@ def validate_connections(
         )
 
 
+def reconnects_settled(monitor: ClientMonitor, node: str) -> bool:
+    """Whether the client stopped opening connections to node: none for the last
+    RECONNECT_QUIET_SECONDS.
+
+    A worker reconnects to a node that returned only when it next sends the node
+    a command, so the reconnects trickle in after the node is back. The failback
+    has settled once they have stopped: they then come before the steady window,
+    not in it. A client holds only as many connections to a node as its workers
+    use at the same time, so no count of them tells that they are done.
+    """
+    return not monitor.count(
+        "dial", start=_now() - RECONNECT_QUIET_SECONDS, addresses={node}
+    )
+
+
+def missing_connections(snapshot: ClientSnapshot, primaries: frozenset[str]) -> int:
+    """The connections the workers still lack to primaries in snapshot.
+
+    Each worker needs one connection to every primary, as it has a key on each.
+    """
+    return sum(max(0, WORKERS - snapshot.sockets.get(p, 0)) for p in primaries)
+
+
 def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
     """The client never holds more connections than the app needs.
 
@@ -333,6 +367,12 @@ def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
     topology, and stays there. And every new connection after the warm-up
     replaces one that was lost: a client that opens connections without losing
     any keeps more than it needs, whatever the timing.
+
+    The warm-up can end before every worker has its connection to every primary:
+    a worker connects to a node only when it sends the node a command, and a
+    consumer of the blocking workload spends most of its time blocked on one node.
+    The connections the workers still lacked then (missing_connections) come
+    later without replacing any, so each limit above allows them too.
     """
     baseline_snapshots = [s for s in monitor.snapshots if s.at <= timeline.warmed_up]
     assert baseline_snapshots, "No snapshot of the client before the warm-up ended"
@@ -348,6 +388,8 @@ def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
     # takes the connections the client held to it along.
     removed = warm.primaries - steady[-1].primaries
     steady_baseline = baseline - sum(warm.sockets.get(n, 0) for n in removed)
+    missing = missing_connections(warm, warm.primaries)
+    steady_missing = missing_connections(warm, warm.primaries - removed)
     new = monitor.count(
         "dial", start=timeline.warmed_up, end=timeline.steady_done
     ) - monitor.count(
@@ -357,19 +399,21 @@ def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
     peak = max(run, key=lambda s: s.open_sockets)
     logging.info(
         f"Held connections: {baseline} after the warm-up ({steady_baseline} without "
-        f"the removed nodes {sorted(removed)}), peak {peak.open_sockets}, steady "
+        f"the removed nodes {sorted(removed)}), {missing} short of what the "
+        f"workers need, peak {peak.open_sockets}, steady "
         f"{min(s.open_sockets for s in steady)}-"
         f"{max(s.open_sockets for s in steady)}; after the warm-up {new} new and "
         f"{lost} lost"
     )
 
-    total_limit = baseline + TOTAL_CONNECTION_SLACK
+    total_limit = baseline + missing + TOTAL_CONNECTION_SLACK
     node_limit = WORKERS + NODE_CONNECTION_SLACK
     for snapshot in run:
         assert snapshot.open_sockets <= total_limit, (
             f"The client held {snapshot.open_sockets} connections at "
             f"{snapshot.at - timeline.started:.1f}s, more than the "
-            f"{baseline} it held after the warm-up plus {TOTAL_CONNECTION_SLACK}"
+            f"{baseline} it held after the warm-up, plus the {missing} the workers "
+            f"still lacked, plus {TOTAL_CONNECTION_SLACK}"
         )
         crowded = {n: c for n, c in snapshot.sockets.items() if c > node_limit}
         assert not crowded, (
@@ -379,21 +423,23 @@ def validate_held_connections(monitor: ClientMonitor, timeline: Timeline):
 
     low = min(s.open_sockets for s in steady)
     high = max(s.open_sockets for s in steady)
-    assert abs(low - steady_baseline) <= TOTAL_CONNECTION_SLACK and (
-        abs(high - steady_baseline) <= TOTAL_CONNECTION_SLACK
+    assert steady_baseline - TOTAL_CONNECTION_SLACK <= low and (
+        high <= steady_baseline + steady_missing + TOTAL_CONNECTION_SLACK
     ), (
         f"The client held {low}-{high} connections in the steady window, not the "
         f"{steady_baseline} it held after the warm-up to the nodes still in its "
-        f"topology"
+        f"topology, plus up to the {steady_missing} the workers still lacked to "
+        f"them"
     )
     assert high - low <= STEADY_CONNECTION_DRIFT, (
         f"The held connections still moved between {low} and {high} in the "
         f"steady window"
     )
 
-    assert new <= lost + CHURN_SLACK, (
-        f"{new} new connections after the warm-up, but only {lost} were lost: the "
-        f"client opened {new - lost} more than it needed"
+    assert new <= lost + missing + CHURN_SLACK, (
+        f"{new} new connections after the warm-up, but only {lost} were lost and "
+        f"the workers lacked {missing}: the client opened {new - lost - missing} "
+        f"more than it needed"
     )
 
 
@@ -458,6 +504,17 @@ def validate_slots(client: RedisCluster | AsyncRedisCluster):
     )
 
 
+def validate_notifications_disabled(client: RedisCluster | AsyncRedisCluster):
+    """The client runs without maintenance notifications, as the scenarios need."""
+    config = client.maint_notifications_config
+    assert not (config and config.enabled), (
+        "The client has maintenance notifications enabled"
+    )
+    assert client._oss_cluster_maint_notifications_handler is None, (
+        "The client has a maintenance notifications handler"
+    )
+
+
 def validate_joining_node(monitor: ClientMonitor, since: float, end: float, node: str):
     """A node that joins the topology gets only the connections the app needs."""
     dials = monitor.count("dial", start=since, end=end, addresses={node})
@@ -499,50 +556,55 @@ def validate_auth_outage(
 ):
     """The client rides out the AUTH outage without a reconnect loop.
 
-    The outage really happened, the rejected handshakes stay within what the app's
-    commands need, and once AUTH works again the node gets only the connections the
-    app needs. Each command the app routes to the node while it rejects AUTH dials
-    it once and fails, so the app's command rate sets the dials to it per second,
-    and validate_connections leaves them out (AuthOutage.expected_dial). A reconnect
-    loop shows instead as more rejected handshakes than failed commands.
+    The outage really happened for the client, the rejected handshakes stay within
+    what the app's commands need, and once AUTH works again the node gets only the
+    connections the app needs. Each command the app routes to the node while it
+    rejects AUTH dials it once and fails, so the app's command rate sets the dials
+    to it per second, and validate_connections leaves them out
+    (AuthOutage.expected_dial). A reconnect loop shows instead as more rejected
+    handshakes than failed commands. A topology refresh may try the node too and
+    fail over to the next one, so the handshakes a refresh makes are not counted.
     """
-    assert outage.started is not None and outage.rejections > 0, (
-        f"The returning node {outage.node} never got a handshake, so the AUTH "
-        f"outage never started"
+    started, ended = outage.started(monitor), outage.ended(monitor)
+    assert started is not None and ended is not None, (
+        f"The returning node {outage.node} never got a handshake from the client, "
+        f"so the AUTH outage never started for it"
     )
     # In the drill a refresh failed on the rejected AUTH first ("Topology refresh
     # failed, keeping the current one"), and the client then reported the healthy
     # cluster as unreachable. One node rejecting AUTH must not fail a refresh.
     failed_refreshes = monitor.events(
-        "refresh_failure", start=outage.started, end=outage.ended + TRANSITION_MARGIN
+        "refresh_failure", start=started, end=ended + TRANSITION_MARGIN
     )
     assert not failed_refreshes, (
         f"{len(failed_refreshes)} topology refresh(es) failed during the AUTH outage: "
         + ", ".join(sorted({e.error or "" for e in failed_refreshes}))
     )
-    rejected = monitor.events(
-        "connect_failure",
-        start=outage.started,
-        end=outage.ended,
-        addresses={outage.node},
+    failed_connects = monitor.events(
+        "connect_failure", start=started, end=ended, addresses={outage.node}
     )
-    auth_errors = sum(1 for e in stats.errors if outage.expected(e))
-    peak, peak_at = monitor.peak_second("dial", outage.started, outage.ended)
+    # A failed dial fails the connect too, but only a rejected AUTH is the outage's
+    rejections = [e for e in failed_connects if e.error == AuthenticationError.__name__]
+    rejected = [e for e in rejections if not e.in_refresh]
+    auth_errors = sum(1 for e in stats.errors if outage.expected_for(monitor, e))
+    peak, peak_at = monitor.peak_second("dial", started, ended)
     logging.info(
-        f"AUTH outage on {outage.node}: {outage.rejections} rejected handshakes, "
-        f"{len(rejected)} failed connects, peak {peak} new connections per second, "
-        f"{auth_errors} commands failed with AuthenticationError"
+        f"AUTH outage on {outage.node} for {monitor.name}: "
+        f"{outage.rejections(monitor)} rejected handshakes, {len(rejected)} of "
+        f"commands and {len(rejections) - len(rejected)} of refreshes, "
+        f"{len(failed_connects) - len(rejections)} other failed connects, peak "
+        f"{peak} new connections per second, {auth_errors} commands failed with "
+        f"AuthenticationError; rejected by caller: {outage.callers(monitor)}"
     )
-    # A refresh may try the node too, and fail over to the next one.
-    refreshes = monitor.count("refresh", start=outage.started, end=outage.ended)
-    assert len(rejected) <= auth_errors + refreshes, (
-        f"{len(rejected)} failed connects to {outage.node} during the AUTH outage, "
-        f"but only {auth_errors} commands failed with AuthenticationError and "
-        f"{refreshes} topology refreshes ran: the client redials the node on its "
-        f"own. Peak {peak} new connections per second, "
-        f"{peak_at - outage.started:.1f}s into it: " + second_activity(monitor, peak_at)
+    assert len(rejected) <= auth_errors, (
+        f"{len(rejected)} rejected handshakes to {outage.node} during the AUTH "
+        f"outage, outside topology refreshes, but only {auth_errors} commands failed "
+        f"with AuthenticationError: the client redials the node on its own. Rejected "
+        f"handshakes by caller: {outage.callers(monitor)}. Peak {peak} new "
+        f"connections per second, {peak_at - started:.1f}s into it: "
+        + second_activity(monitor, peak_at)
     )
-    validate_joining_node(monitor, outage.ended, end, outage.node)
+    validate_joining_node(monitor, ended, end, outage.node)
 
 
 @dataclass
@@ -696,6 +758,7 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
             run.monitor.start()
             run.app.start()
         time.sleep(WARMUP_SECONDS)
+        self._wait_for_warm_pools()
         self._timeline.warmed_up = _now()
         for run in self._runs:
             run.baseline = run.app.stats.recent_throughput()
@@ -706,14 +769,35 @@ class ClusterMaintScenarioBase(TestPushNotificationsBase):
         self._validate_process_sockets("after the warm-up")
         return self._runs
 
+    def _wait_for_warm_pools(self):
+        """Wait, at most WARMUP_EXTRA_SECONDS, until every worker has its
+        connection to every primary, so the warm-up baseline is what the app needs.
+        """
+        deadline = _now() + WARMUP_EXTRA_SECONDS
+        started = _now()
+        while True:
+            missing = {}
+            for run in self._runs:
+                snapshot = _snapshot(run.client)
+                missing[run.name] = missing_connections(snapshot, snapshot.primaries)
+            if not any(missing.values()) or _now() >= deadline:
+                break
+            time.sleep(1)
+        if _now() > started + 1 or any(missing.values()):
+            logging.info(
+                f"Warm-up extended by {_now() - started:.0f}s; connections the "
+                f"workers still lack: {missing}"
+            )
+
     def _new_run(self, workload: str, dynamic_startup_nodes: bool) -> WorkloadRun:
-        monitor = ClientMonitor(lambda: _snapshot(client))
+        monitor = ClientMonitor(lambda: _snapshot(client), workload)
         with bound_to(monitor):
             client = get_cluster_client_maint_notifications(
                 endpoints_config=self._endpoint_config,
                 enable_maintenance_notifications=False,
                 dynamic_startup_nodes=dynamic_startup_nodes,
             )
+        validate_notifications_disabled(client)
         app = ScenarioApp(
             client,
             WORKLOAD_CLASSES[workload](),

@@ -47,9 +47,10 @@ Each scenario adds its own checks on top. The scenarios:
   stays there until the cleanup takes it out, after the database is deleted.
 - Node maintenance and failback with AUTH rejected by the returning node. The same
   operations, but for AUTH_OUTAGE_SECONDS after the returning node first accepts a
-  connection, every handshake to it fails with AuthenticationError, as the drill's
-  returning node rejected the database's credentials. The rejection comes from a
-  test hook on the handshake, not from the server.
+  connection from a client, every handshake of that client to it fails with
+  AuthenticationError, as the drill's returning node rejected the database's
+  credentials. Each client gets the whole outage, from its own first connection.
+  The rejection comes from a test hook on the handshake, not from the server.
 """
 
 import logging
@@ -69,6 +70,7 @@ from tests.test_scenario.maint_operations_helpers import (
     WorkloadRun,
     Expectation,
     node_removed_expectation,
+    reconnects_settled,
     recovery_status,
     validate_auth_outage,
     validate_failback_topology,
@@ -96,7 +98,7 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
         """Run the maintenance and the failback, and validate both.
 
         With outage, the returning node rejects AUTH for a while after it first
-        accepts a connection.
+        accepts a connection, for each client from its own first connection.
         """
         if outage is not None:
             inject_auth_outage(monkeypatch, outage)
@@ -130,11 +132,17 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
             outage.arm(returning)
         with timeline.operation("failback") as failback:
             self._node_maintenance("exit", node_id)
+        # The AUTH outage of each client starts with its own first connection to
+        # the node, so each client recovers after its own outage. It has
+        # recovered once its workers stopped reconnecting to the node, so the
+        # steady window does not see the reconnects.
+        monitors = {id(run.client): run.monitor for run in runs}
         failback.settled = self._wait_for_recovery(
             lambda c: (
-                (outage is None or outage.over())
+                (outage is None or outage.over(monitors[id(c)]))
                 and returning in _slot_owners(c)
                 and _connections_to(c, returning) > 0
+                and reconnects_settled(monitors[id(c)], returning)
             ),
             lambda run: recovery_status(
                 run.client, run.app.stats, run.baseline, returning

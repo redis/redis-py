@@ -7,7 +7,7 @@ import asyncio
 from typing import Awaitable, Callable
 
 from redis.asyncio import RedisCluster
-from tests.test_scenario.scenario_monitor import ClientMonitor, bound_to
+from tests.test_scenario.scenario_monitor import ClientMonitor, _now, bound_to
 from tests.test_scenario.scenario_workloads import (
     BLOCKING_PRODUCER_PAUSE_SECONDS,
     BLOCKING_TIMEOUT,
@@ -141,17 +141,20 @@ class AsyncBlockingWorkload(AsyncWorkload):
         for key in keys:
             queue = BlockingWorkload.queue(key)
             value = f"{worker}-{iteration}"
+            started = _now()
             try:
                 await app.run("RPUSH", lambda c: c.rpush(queue, value))
                 queues.pushed[queue].add(value)
             except Exception:
                 queues.push_ambiguous[queue].add(value)
+            queues.push_spans[queue][value] = (started, _now())
         await asyncio.sleep(BLOCKING_PRODUCER_PAUSE_SECONDS)
 
     async def _consume(self, app, keys):
         queues = self.queues
         for key in keys:
             queue = BlockingWorkload.queue(key)
+            started = _now()
             try:
                 reply = await app.run(
                     "BLPOP", lambda c: c.blpop([queue], timeout=BLOCKING_TIMEOUT)
@@ -162,6 +165,7 @@ class AsyncBlockingWorkload(AsyncWorkload):
             if reply is not None:
                 value = reply[1].decode() if isinstance(reply[1], bytes) else reply[1]
                 queues.popped[queue].append(value)
+                queues.pop_spans[queue].append((value, started, _now()))
 
     async def validate(self, app):
         queues = self.queues
@@ -171,7 +175,9 @@ class AsyncBlockingWorkload(AsyncWorkload):
                 v.decode() if isinstance(v, bytes) else v
                 for v in await app.client.lrange(queue, 0, -1)
             ]
-            problem = validate_queue(queue, remaining, queues)
+            problem = validate_queue(
+                queue, remaining, queues, app.monitor, app.stats.started_at
+            )
             if problem:
                 problems.append(problem)
         assert not problems, "; ".join(problems[:5])

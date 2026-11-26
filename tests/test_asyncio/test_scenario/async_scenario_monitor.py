@@ -20,6 +20,7 @@ from tests.test_scenario.scenario_monitor import (
     _now,
     _primaries,
     record,
+    refreshing,
     unattributed_events,
 )
 
@@ -27,8 +28,8 @@ from tests.test_scenario.scenario_monitor import (
 class AsyncClientMonitor(ClientMonitor):
     """The async counterpart of ClientMonitor: the sampler is a task."""
 
-    def __init__(self, snapshot: Callable[[], ClientSnapshot]):
-        super().__init__(snapshot)
+    def __init__(self, snapshot: Callable[[], ClientSnapshot], name: str = ""):
+        super().__init__(snapshot, name)
         self._task: asyncio.Task | None = None
 
     def start(self):
@@ -79,7 +80,8 @@ def instrument(monkeypatch):
     async def initialize(self, *args, **kwargs):
         record("refresh")
         try:
-            return await original_initialize(self, *args, **kwargs)
+            with refreshing():
+                return await original_initialize(self, *args, **kwargs)
         except BaseException as e:
             record("refresh_failure", error=e)
             raise
@@ -123,8 +125,12 @@ def _open_sockets(client: RedisCluster) -> int:
 
 
 def _connections_to(client: RedisCluster, address: str) -> int:
+    """The connected sockets the client holds to address. A connection whose
+    connect failed stays with the node, disconnected, so it is not counted."""
     node = client.get_node(node_name=address)
-    return 0 if node is None else len(node._connections)
+    if node is None:
+        return 0
+    return sum(1 for conn in node._connections if conn.is_connected)
 
 
 def _snapshot(client: RedisCluster) -> ClientSnapshot:

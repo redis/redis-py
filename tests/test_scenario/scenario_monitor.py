@@ -8,12 +8,14 @@ scenario tests reuse all of it, with their own sampler and instrumentation in
 tests/test_asyncio/test_scenario/async_scenario_monitor.py.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from contextvars import ContextVar
 import logging
+import os
 import threading
 import time
+import traceback
 from dataclasses import dataclass, field
 from threading import Thread
 from typing import (
@@ -136,6 +138,8 @@ class _Event:
     kind: str
     address: str | None = None
     error: str | None = None
+    # Whether a topology refresh (NodesManager.initialize) recorded the event
+    in_refresh: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,10 +176,12 @@ class ClientMonitor:
 
     The hooks are installed on the classes, so they see every client of the
     process. They record into the monitor that current_monitor names, which the
-    threads or tasks working for this monitor's client set with bound_to().
+    threads or tasks working for this monitor's client set with bound_to(). name
+    labels the client in the log.
     """
 
-    def __init__(self, snapshot: Callable[[], ClientSnapshot]):
+    def __init__(self, snapshot: Callable[[], ClientSnapshot], name: str = ""):
+        self.name = name
         self._snapshot = snapshot
         self._lock = threading.Lock()
         self._events: list[_Event] = []
@@ -184,9 +190,19 @@ class ClientMonitor:
         self._stop = threading.Event()
         self._sampler: Thread | None = None
 
-    def record(self, kind: str, address: str | None = None, error=None):
+    def record(
+        self,
+        kind: str,
+        address: str | None = None,
+        error=None,
+        in_refresh: bool = False,
+    ):
         event = _Event(
-            _now(), kind, address, None if error is None else type(error).__name__
+            _now(),
+            kind,
+            address,
+            None if error is None else type(error).__name__,
+            in_refresh,
         )
         with self._lock:
             self._events.append(event)
@@ -294,6 +310,11 @@ current_monitor: ContextVar[ClientMonitor | None] = ContextVar(
 )
 # Hook events no monitor was bound for, by kind. instrument() resets it.
 unattributed_events: dict[str, int] = defaultdict(int)
+# Whether the current thread or task runs a topology refresh. The initialize hooks
+# set it, and every event recorded meanwhile is marked with it, so the connects a
+# refresh makes are told apart from the ones commands make. A task the refresh
+# creates inherits it.
+in_refresh: ContextVar[bool] = ContextVar("in_refresh", default=False)
 
 
 @contextmanager
@@ -312,7 +333,17 @@ def record(kind: str, address: str | None = None, error=None):
     if monitor is None:
         unattributed_events[kind] += 1
         return
-    monitor.record(kind, address, error)
+    monitor.record(kind, address, error, in_refresh.get())
+
+
+@contextmanager
+def refreshing() -> Iterator[None]:
+    """Mark the hook events of the current thread or task as a refresh's."""
+    token = in_refresh.set(True)
+    try:
+        yield
+    finally:
+        in_refresh.reset(token)
 
 
 def instrument(monkeypatch):
@@ -358,7 +389,8 @@ def instrument(monkeypatch):
     def initialize(self, *args, **kwargs):
         record("refresh")
         try:
-            return original_initialize(self, *args, **kwargs)
+            with refreshing():
+                return original_initialize(self, *args, **kwargs)
         except BaseException as e:
             record("refresh_failure", error=e)
             raise
@@ -396,69 +428,132 @@ def process_sockets_to(port: int) -> int | None:
 # Client-side faults the scenarios inject.
 
 
+def _handshake_caller() -> str:
+    """Where the handshake that runs now came from: the workload call that made
+    it, and the redis-py functions in between, outermost first."""
+    frames = traceback.extract_stack()[:-2]
+    library = [
+        f
+        for f in frames
+        if f"{os.sep}redis{os.sep}" in f.filename and f.name != "wrapper"
+    ]
+    if not library:
+        return "outside redis-py"
+    first = frames.index(library[0])
+    workload = next(
+        (f for f in reversed(frames[:first]) if "workloads" in f.filename), None
+    )
+    chain: list[str] = []
+    for f in library:
+        module = os.path.splitext(os.path.basename(f.filename))[0]
+        name = f"{module}.{f.name}"
+        if not chain or chain[-1] != name:
+            chain.append(name)
+        if module == "connection":
+            # From here on every handshake runs the same connect path
+            break
+    origin = f"{workload.name}:{workload.lineno}" if workload else "no workload"
+    return f"{origin} > " + " > ".join(chain)
+
+
 class AuthOutage:
     """Rejects AUTH on one node for a while, to simulate a faulty server and
     validate that the library behaves reasonably against it.
 
-    Nothing is rejected until arm() names the node. The outage then starts with the
-    first handshake to that node and lasts AUTH_OUTAGE_SECONDS: the node accepts
-    connections again, but not the database's credentials yet. The TCP connect
-    succeeds and the handshake raises AuthenticationError, so the client cleans up
-    the connection as it would after a real rejection.
+    Nothing is rejected until arm() names the node. The outage then starts for
+    each client with its first handshake to that node, and lasts
+    AUTH_OUTAGE_SECONDS: the node accepts connections again, but not the
+    database's credentials yet. The TCP connect succeeds and the handshake raises
+    AuthenticationError, so the client cleans up the connection as it would after a
+    real rejection. A client is the monitor current_monitor names. Each client gets
+    the whole outage, as the clients start to route to the returning node at
+    different times.
     """
 
     def __init__(self, duration: float = AUTH_OUTAGE_SECONDS):
         self.duration = duration
         self.node: str | None = None
-        self.started: float | None = None
-        self.rejections = 0
+        # monitor -> when the outage started for its client, how many handshakes
+        # it rejected, and where they came from (see _handshake_caller)
+        self._started: dict[ClientMonitor | None, float] = {}
+        self._rejections: dict[ClientMonitor | None, int] = defaultdict(int)
+        self._callers: dict[ClientMonitor | None, Counter] = defaultdict(Counter)
         self._lock = threading.Lock()
 
     def arm(self, node: str):
         self.node = node
 
-    @property
-    def ended(self) -> float | None:
-        return None if self.started is None else self.started + self.duration
+    def started(self, monitor: ClientMonitor | None) -> float | None:
+        return self._started.get(monitor)
 
-    def over(self) -> bool:
-        ended = self.ended
+    def ended(self, monitor: ClientMonitor | None) -> float | None:
+        started = self._started.get(monitor)
+        return None if started is None else started + self.duration
+
+    def over(self, monitor: ClientMonitor | None) -> bool:
+        ended = self.ended(monitor)
         return ended is not None and _now() >= ended
+
+    def rejections(self, monitor: ClientMonitor | None) -> int:
+        return self._rejections[monitor]
+
+    def callers(self, monitor: ClientMonitor | None) -> dict[str, int]:
+        """Where the client's rejected handshakes came from, most common first."""
+        return dict(self._callers[monitor].most_common())
 
     def rejects(self, address: str) -> bool:
         if address != self.node:
             return False
+        monitor = current_monitor.get()
+        now = _now()
         with self._lock:
-            if self.started is None:
-                self.started = _now()
-                logging.info(f"AUTH outage on {address} for {self.duration}s")
-            if _now() - self.started >= self.duration:
-                return False
-            self.rejections += 1
-            return True
+            started = self._started.get(monitor)
+            if started is None:
+                started = self._started[monitor] = now
+                first = True
+            else:
+                first = False
+        if first:
+            name = monitor.name if monitor is not None else "an unbound client"
+            logging.info(f"AUTH outage on {address} for {self.duration}s for {name}")
+        if now - started >= self.duration:
+            return False
+        caller = _handshake_caller()
+        with self._lock:
+            self._rejections[monitor] += 1
+            self._callers[monitor][caller] += 1
+        return True
 
     def expected_dial(self, event: _Event) -> bool:
-        """Whether the monitor's event is a dial to the node while it rejects AUTH.
+        """Whether the monitor's event is a dial to the node while it rejects AUTH
+        for the client that current_monitor names.
 
         Every command the app routes to the node then dials it and fails, so the
         app's command rate sets how many of these there are. validate_auth_outage
         bounds them by the failed commands instead of by a rate.
         """
-        ended = self.ended
+        started = self.started(current_monitor.get())
         return (
-            ended is not None
+            started is not None
             and event.kind == "dial"
             and event.address == self.node
-            and self.started <= event.at <= ended
+            and started <= event.at <= started + self.duration
         )
 
     def expected(self, error: "CommandError") -> bool:
-        """Whether the app's error is one the outage causes."""
-        ended = self.ended
+        """Whether the app's error is one the outage causes, for the client that
+        current_monitor names."""
+        return self.expected_for(current_monitor.get(), error)
+
+    def expected_for(
+        self, monitor: ClientMonitor | None, error: "CommandError"
+    ) -> bool:
+        """Whether the app's error is one the outage causes, for monitor's client."""
+        started = self.started(monitor)
         return (
-            ended is not None
+            started is not None
             and error.error_type == AuthenticationError.__name__
-            and self.started <= error.at <= ended + TRANSITION_MARGIN
+            and started <= error.at <= started + self.duration + TRANSITION_MARGIN
         )
 
 
@@ -518,8 +613,12 @@ def _open_sockets(client: RedisCluster) -> int:
 
 
 def _connections_to(client: RedisCluster, address: str) -> int:
+    """The connected sockets the client holds to address. A connection whose
+    connect failed stays in the pool, disconnected, so it is not counted."""
     node = client.get_node(node_name=address)
-    return 0 if node is None else len(_pool_connections(node))
+    if node is None:
+        return 0
+    return sum(1 for conn in _pool_connections(node) if conn._sock is not None)
 
 
 def _snapshot(client: RedisCluster) -> ClientSnapshot:

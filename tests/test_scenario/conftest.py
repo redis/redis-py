@@ -670,7 +670,10 @@ def get_cluster_client_maint_notifications(
         dynamic_startup_nodes=dynamic_startup_nodes,
         **tls_kwargs,
     )
-    logging.info("Redis cluster client created with maintenance notifications enabled")
+    logging.info(
+        "Redis cluster client created with maintenance notifications "
+        f"{'enabled' if enable_maintenance_notifications else 'disabled'}"
+    )
     logging.info(
         f"Cluster working with the following nodes: {[(node.name, node.server_type) for node in client.get_nodes()]}"
     )
