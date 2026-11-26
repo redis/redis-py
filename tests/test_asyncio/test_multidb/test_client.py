@@ -307,6 +307,8 @@ class TestMultiDbClient:
                 results = await asyncio.gather(client.ping(), client.ping())
                 assert results == [True, True]
                 assert client.initialized
+                # The second ping waited for the in-flight initialize().
+                assert mock_hc.check_health.call_count == 1
             finally:
                 await client.aclose()
 
@@ -321,12 +323,12 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
-    async def test_concurrent_pings_after_initialize_both_succeed(
+    async def test_second_initialize_skips_health_check(
         self, mock_multi_db_config, mock_db, mock_hc
     ):
         """
-        Explicit initialize() before sharing the client still lets concurrent
-        commands succeed, and the recurring health check stays scheduled.
+        A second initialize() returns without repeating the health check
+        and keeps the same recurring health-check task.
         """
         databases = create_weighted_list(mock_db)
         mock_multi_db_config.health_checks = [mock_hc]
@@ -335,16 +337,18 @@ class TestMultiDbClient:
         mock_hc.check_health.return_value = True
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
-            mock_db.client.execute_command = AsyncMock(return_value=True)
-
             client = MultiDBClient(mock_multi_db_config)
             try:
                 await client.initialize()
                 assert client.initialized
-                assert client._recurring_hc_task is not None
+                assert mock_hc.check_health.call_count == 1
+                recurring = client._recurring_hc_task
+                assert recurring is not None
 
-                results = await asyncio.gather(client.ping(), client.ping())
-                assert results == [True, True]
+                await client.initialize()
+                assert client.initialized
+                assert mock_hc.check_health.call_count == 1
+                assert client._recurring_hc_task is recurring
             finally:
                 await client.aclose()
 

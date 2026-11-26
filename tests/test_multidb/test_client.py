@@ -285,6 +285,41 @@ class TestMultiDbClient:
         ],
         indirect=True,
     )
+    def test_second_initialize_skips_health_check(
+        self, mock_multi_db_config, mock_db, mock_hc
+    ):
+        """
+        A second initialize() returns without repeating the health check.
+        """
+        databases = create_weighted_list(mock_db)
+        mock_multi_db_config.health_checks = [mock_hc]
+        mock_hc.health_check_probes = 1
+        mock_hc.health_check_delay = 0
+        mock_hc.check_health.return_value = True
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                client.initialize()
+                assert client.initialized
+                assert mock_hc.check_health.call_count == 1
+
+                client.initialize()
+                assert client.initialized
+                assert mock_hc.check_health.call_count == 1
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db",
+        [
+            (
+                {"hc_interval": 100},
+                {"weight": 1.0, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
     def test_overlapping_health_checks_do_not_raise_keyerror(
         self, mock_multi_db_config, mock_db, mock_hc
     ):
