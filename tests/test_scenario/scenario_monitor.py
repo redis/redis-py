@@ -119,13 +119,19 @@ class Timeline:
         return [(op.name, op.started, end) for op, end in zip(self.operations, starts)]
 
     def phases(self) -> list[tuple]:
-        """(name, start, end) of every phase, for the summary."""
+        """(name, start, end) of every phase, for the summary.
+
+        Before the steady window starts, the phases end now, so a scenario that
+        fails early can log its summary.
+        """
         phases = [("warm-up", self.started, self.warmed_up)]
-        starts = [op.started for op in self.operations[1:]] + [self.steady_started]
+        last_end = self.steady_started or _now()
+        starts = [op.started for op in self.operations[1:]] + [last_end]
         for op, next_start in zip(self.operations, starts):
             phases.append((op.name, op.started, op.end))
             phases.append((f"after {op.name}", op.end, next_start))
-        phases.append(("steady", self.steady_started, self.steady_done))
+        if self.steady_started:
+            phases.append(("steady", self.steady_started, self.steady_done))
         return phases
 
 

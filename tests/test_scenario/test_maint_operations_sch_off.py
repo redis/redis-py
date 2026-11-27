@@ -119,6 +119,10 @@ class TestClusterNodeMaintenanceFailbackSchOff(ClusterMaintScenarioBase):
                 f"[{run.name}] During maintenance: primaries {sorted(during)}, "
                 f"removed {dropped}"
             )
+            if len(dropped) != 1:
+                # The scenario stops here, before _finish logs what the
+                # clients did.
+                self._log_summaries()
             assert len(dropped) == 1, (
                 f"[{run.name}] Expected the client to drop exactly the evacuated "
                 f"node's endpoint, before={sorted(before)}, during={sorted(during)}"

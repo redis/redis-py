@@ -245,6 +245,12 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
             clients=len(self._runs),
         )
 
+    def _log_summaries(self):
+        """Log what every client did so far, for a scenario that fails before
+        _finish logs it."""
+        for run in self._runs:
+            log_summary(run.name, run.monitor, run.app.stats, self._timeline)
+
     async def _wait_for_recovery(
         self,
         condition: Callable[[RedisCluster], bool],
@@ -272,6 +278,7 @@ class AsyncClusterMaintScenarioBase(TestAsyncPushNotificationsBase):
             if _now() >= deadline:
                 break
             await asyncio.sleep(1)
+        self._log_summaries()
         pytest.fail(
             f"No recovery within {RECOVERY_TIMEOUT}s after "
             f"{self._timeline.operations[-1].name}: "
