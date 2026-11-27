@@ -32,6 +32,7 @@ from tests.test_scenario.maint_operations_helpers import (
     node_removed_expectation,
     reconnects_settled,
     recovery_status,
+    throughput_status,
     validate_auth_outage,
     validate_failback_topology,
     validate_joining_node,
@@ -194,7 +195,11 @@ class TestAsyncClusterSingleOperationSchOff(AsyncClusterMaintScenarioBase):
         with timeline.operation(operation) as op:
             expectation = await getattr(self, f"_operate_{operation}")(before)
         op.settled = await self._wait_for_recovery(
-            expectation.reached, lambda run: expectation.status(run.client)
+            expectation.reached,
+            lambda run: (
+                f"{expectation.status(run.client)}, "
+                + throughput_status(run.app.stats, run.baseline)
+            ),
         )
         for run in runs:
             logging.info(

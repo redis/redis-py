@@ -524,11 +524,17 @@ def validate_joining_node(monitor: ClientMonitor, since: float, end: float, node
     )
 
 
+def throughput_status(stats: WorkloadStats, baseline: float) -> str:
+    return (
+        f"throughput {stats.recent_throughput():.0f}/s against a baseline of "
+        f"{baseline:.0f}/s"
+    )
+
+
 def recovery_status(client, stats: WorkloadStats, baseline: float, node: str) -> str:
     return (
-        f"node {node} owns slots: {node in _slot_owners(client)}, throughput "
-        f"{stats.recent_throughput():.0f}/s against a baseline of "
-        f"{baseline:.0f}/s"
+        f"node {node} owns slots: {node in _slot_owners(client)}, "
+        + throughput_status(stats, baseline)
     )
 
 

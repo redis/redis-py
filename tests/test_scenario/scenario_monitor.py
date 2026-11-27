@@ -221,7 +221,7 @@ class ClientMonitor:
         )
         self.topology_changes.append(change)
         logging.info(
-            f"Client topology changed: added {sorted(change.added)}, "
+            f"[{self.name}] Client topology changed: added {sorted(change.added)}, "
             f"removed {sorted(change.removed)}"
         )
 
