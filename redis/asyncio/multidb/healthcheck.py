@@ -282,6 +282,10 @@ class HealthCheckPolicy(ABC):
         """
         pass
 
+    async def close_client(self, database) -> None:
+        """Close the health check client of the given database, if there is one."""
+        pass
+
     @abstractmethod
     async def close(self) -> None:
         """Close all health check clients."""
@@ -515,6 +519,13 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
 
         return client
 
+    async def close_client(self, database) -> None:
+        db_id = id(database)
+        self._maintenance_trackers.pop(db_id, None)
+        client = self._clients.pop(db_id, None)
+        if client is not None:
+            await client.aclose()
+
     async def close(self) -> None:
         """Close all health check clients."""
         close_tasks = [
@@ -736,6 +747,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
 
     def __init__(
         self,
+        rest_api_url: str,
         rest_api_port: int = 9443,
         lag_aware_tolerance: int = DEFAULT_LAG_AWARE_TOLERANCE,
         http_timeout: float = DEFAULT_TIMEOUT,
@@ -758,6 +770,9 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         Initialize LagAwareHealthCheck with the specified parameters.
 
         Args:
+            rest_api_url: URL of the Redis Enterprise REST API of the cluster that
+                hosts the database, without the port. Cluster FQDN is typically
+                used on public Redis Enterprise endpoints.
             rest_api_port: Port number for Redis Enterprise REST API (default: 9443)
             lag_aware_tolerance: Tolerance in lag between databases in MS (default: 100)
             http_timeout: Request timeout in seconds (default: DEFAULT_TIMEOUT)
@@ -784,6 +799,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
                 client_key_password=client_key_password,
             )
         )
+        self._rest_api_url = rest_api_url
         self._rest_api_port = rest_api_port
         self._lag_aware_tolerance = lag_aware_tolerance
         super().__init__(
@@ -846,19 +862,8 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         relies on the REST API instead of Redis protocol. The client is
         accepted for interface compatibility.
         """
-        if database.health_check_url is None:
-            raise ValueError(
-                "Database health check url is not set. Please check DatabaseConfig for the current database."
-            )
-
         db_hosts = self._database_hosts(database)
-
-        # Absolute URLs, rather than a base_url set on the HTTP client: one
-        # LagAwareHealthCheck instance serves every database and MultiDBClient
-        # checks them concurrently, so a base_url assignment made here would be
-        # overwritten by another database's check while this one is awaiting its
-        # response - sending the second request to the wrong cluster.
-        base_url = f"{database.health_check_url}:{self._rest_api_port}"
+        base_url = f"{self._rest_api_url}:{self._rest_api_port}"
 
         # Find bdb matching to the current database host. The per-request
         # deadline stays the client's configured http_timeout; the whole check

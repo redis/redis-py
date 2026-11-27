@@ -11,7 +11,7 @@ from redis.asyncio.multidb.config import (
 )
 from redis.asyncio.multidb.database import AsyncDatabase, Database, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
-from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis.asyncio.multidb.healthcheck import HealthCheckPolicy
 from redis.asyncio.retry import Retry, _to_async_retry
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
@@ -43,11 +43,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._databases = config.databases()
         # Removed databases, kept so that close() still closes their clients
         self._removed_databases: List[AsyncDatabase] = []
-        self._health_checks = (
-            config.default_health_checks()
-            if not config.health_checks
-            else config.health_checks
-        )
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = (
             config.health_check_policy.value()
@@ -81,7 +76,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             auto_fallback_interval=self._auto_fallback_interval,
         )
         self.initialized = False
-        self._hc_lock = asyncio.Lock()
         self._bg_scheduler = BackgroundScheduler()
         self._config = config
         self._recurring_hc_task = None
@@ -111,9 +105,18 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         # Close health check connection pools
         await self._health_check_policy.close()
 
-        # Release resources held by the health checks themselves
+        databases = [database for database, _ in self._databases]
+        databases.extend(self._removed_databases)
+
+        # Release resources held by the health checks themselves. Removed
+        # databases are included: their checks are no longer run, but still
+        # hold their resources.
         await asyncio.gather(
-            *(health_check.close() for health_check in self._health_checks),
+            *(
+                health_check.close()
+                for database in databases
+                for health_check in database.health_checks
+            ),
             return_exceptions=True,
         )
 
@@ -121,8 +124,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         # database's client open, so its in-flight commands can complete. A
         # failing client must not leave the later ones open, so the first error
         # is raised only after every client was closed.
-        databases = [database for database, _ in self._databases]
-        databases.extend(self._removed_databases)
         # A removed database is only kept to be closed here
         self._removed_databases.clear()
         results = await asyncio.gather(
@@ -236,6 +237,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Args:
             config: DatabaseConfig object that contains the database configuration.
             skip_initial_health_check: If True, adds the database even if it is unhealthy.
+                If False, an unhealthy database is rejected and released. Health
+                checks given through ``DatabaseConfig.health_checks`` and a pool
+                given through ``DatabaseConfig.from_pool`` are left open, so the
+                same configuration can be added again.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
@@ -274,18 +279,47 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             client=client,
             circuit=circuit,
             weight=config.weight,
-            health_check_url=config.health_check_url,
+            health_checks=self._config.database_health_checks(config),
         )
 
         try:
             await self._check_db_health(database)
-        except UnhealthyDatabaseException:
-            if not skip_initial_health_check:
+        except BaseException as e:
+            if not skip_initial_health_check or not isinstance(
+                e, UnhealthyDatabaseException
+            ):
+                await self._release_rejected_database(database, config)
                 raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.add(database, database.weight)
+        if self.initialized:
+            # initialize() sets the callback of the databases it starts with
+            database.circuit.on_state_changed(self._on_circuit_state_change_callback)
         await self._change_active_database(database, highest_weighted_db)
+
+    async def _release_rejected_database(
+        self, database: AsyncDatabase, config: DatabaseConfig
+    ):
+        """
+        Releases a database that was not added. It is never used, so nothing
+        is in flight: its client, its health check client and the health checks
+        built for it are closed. Health checks given through
+        ``DatabaseConfig.health_checks`` and a pool given through
+        ``DatabaseConfig.from_pool`` belong to the caller's configuration,
+        which can be added again, and stay open.
+        """
+        health_checks = (
+            () if config.health_checks is not None else database.health_checks
+        )
+        if config.from_pool:
+            database.client.auto_close_connection_pool = False
+        await asyncio.gather(
+            self._health_check_policy.close_client(database),
+            *(health_check.close() for health_check in health_checks),
+            database.client.aclose(),
+            return_exceptions=True,
+        )
 
     async def _change_active_database(
         self, new_database: AsyncDatabase, highest_weight_database: AsyncDatabase
@@ -340,13 +374,6 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Adds a new failure detector to the database.
         """
         self._failure_detectors.append(failure_detector)
-
-    async def add_health_check(self, healthcheck: HealthCheck):
-        """
-        Adds a new health check to the database.
-        """
-        async with self._hc_lock:
-            self._health_checks.append(healthcheck)
 
     async def execute_command(self, *args, **options):
         """
@@ -481,9 +508,17 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         """
         Runs health checks on the given database until first failure.
         """
+        if not database.health_checks:
+            # Nothing proves a database without health checks healthy, so a
+            # recurring run must not close a circuit the failure detector
+            # opened: only the end of the grace period (HALF_OPEN) does
+            if database.circuit.state == CBState.HALF_OPEN:
+                database.circuit.state = CBState.CLOSED
+            return database.circuit.state == CBState.CLOSED
+
         # Health check will setup circuit state
         is_healthy = await self._health_check_policy.execute(
-            self._health_checks, database
+            database.health_checks, database
         )
 
         if not is_healthy:

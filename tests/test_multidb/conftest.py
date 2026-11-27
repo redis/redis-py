@@ -19,8 +19,8 @@ from redis.asyncio.multidb.healthcheck import (
     HealthCheck,
     AbstractHealthCheckPolicy,
     DEFAULT_HEALTH_CHECK_PROBES,
-    DEFAULT_HEALTH_CHECK_POLICY,
     DEFAULT_HEALTH_CHECK_TIMEOUT,
+    DEFAULT_HEALTH_CHECK_POLICY,
 )
 
 
@@ -72,9 +72,10 @@ def mock_hc() -> HealthCheck:
     return mock
 
 
-def _create_mock_db(request) -> Database:
+def _create_mock_db(request, mock_hc) -> Database:
     """Helper to create a mock Database with proper client setup."""
     db = Mock(spec=Database)
+    db.health_checks = [mock_hc]
     db.weight = request.param.get("weight", 1.0)
     db.client = Mock(spec=Redis)
     db.client.connection_pool = MagicMock(spec=ConnectionPool)
@@ -89,18 +90,18 @@ def _create_mock_db(request) -> Database:
 
 
 @pytest.fixture()
-def mock_db(request) -> Database:
-    return _create_mock_db(request)
+def mock_db(request, mock_hc) -> Database:
+    return _create_mock_db(request, mock_hc)
 
 
 @pytest.fixture()
-def mock_db1(request) -> Database:
-    return _create_mock_db(request)
+def mock_db1(request, mock_hc) -> Database:
+    return _create_mock_db(request, mock_hc)
 
 
 @pytest.fixture()
-def mock_db2(request) -> Database:
-    return _create_mock_db(request)
+def mock_db2(request, mock_hc) -> Database:
+    return _create_mock_db(request, mock_hc)
 
 
 @pytest.fixture()

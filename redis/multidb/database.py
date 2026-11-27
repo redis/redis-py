@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Union
 
 import redis
 from redis import RedisCluster
+from redis.asyncio.multidb.healthcheck import HealthCheck
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker
 from redis.typing import Number
@@ -23,14 +24,13 @@ class AbstractDatabase(ABC):
 
     @property
     @abstractmethod
-    def health_check_url(self) -> Optional[str]:
-        """Health check URL associated with the current database."""
+    def health_checks(self) -> list[HealthCheck]:
+        """Health checks that determine the health of this database."""
         pass
 
-    @health_check_url.setter
     @abstractmethod
-    def health_check_url(self, health_check_url: Optional[str]):
-        """Set the health check URL associated with the current database."""
+    def add_health_check(self, health_check: HealthCheck) -> None:
+        """Add a health check to this database."""
         pass
 
 
@@ -38,10 +38,10 @@ class BaseDatabase(AbstractDatabase):
     def __init__(
         self,
         weight: float,
-        health_check_url: Optional[str] = None,
+        health_checks: list[HealthCheck] | None = None,
     ):
         self._weight = weight
-        self._health_check_url = health_check_url
+        self._health_checks = [] if health_checks is None else list(health_checks)
 
     @property
     def weight(self) -> float:
@@ -52,12 +52,11 @@ class BaseDatabase(AbstractDatabase):
         self._weight = weight
 
     @property
-    def health_check_url(self) -> Optional[str]:
-        return self._health_check_url
+    def health_checks(self) -> list[HealthCheck]:
+        return self._health_checks
 
-    @health_check_url.setter
-    def health_check_url(self, health_check_url: Optional[str]):
-        self._health_check_url = health_check_url
+    def add_health_check(self, health_check: HealthCheck) -> None:
+        self._health_checks.append(health_check)
 
 
 class SyncDatabase(AbstractDatabase):
@@ -97,7 +96,7 @@ class Database(BaseDatabase, SyncDatabase):
         client: Union[redis.Redis, RedisCluster],
         circuit: CircuitBreaker,
         weight: float,
-        health_check_url: Optional[str] = None,
+        health_checks: list[HealthCheck] | None = None,
     ):
         """
         Initialize a new Database instance.
@@ -106,12 +105,13 @@ class Database(BaseDatabase, SyncDatabase):
             client: Underlying Redis client instance for database operations
             circuit: Circuit breaker for handling database failures
             weight: Weight value used for database failover prioritization
-            health_check_url: Health check URL associated with the current database
+            health_checks: Health checks that determine the health of this database.
+                They are owned by the database and closed with the client.
         """
         self._client = client
         self._cb = circuit
         self._cb.database = self
-        super().__init__(weight, health_check_url)
+        super().__init__(weight, health_checks)
 
     @property
     def client(self) -> Union[redis.Redis, RedisCluster]:

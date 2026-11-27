@@ -19,7 +19,12 @@ from redis.multidb.config import (
 )
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
-from redis.asyncio.multidb.healthcheck import PingHealthCheck, HealthCheck
+from redis.asyncio.multidb.healthcheck import (
+    DEFAULT_HEALTH_CHECK_DELAY,
+    DEFAULT_HEALTH_CHECK_TIMEOUT,
+    HealthCheck,
+    PingHealthCheck,
+)
 from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 
@@ -55,8 +60,11 @@ class TestMultiDbConfig:
 
         assert len(config.default_failure_detectors()) == 1
         assert isinstance(config.default_failure_detectors()[0], CommandFailureDetector)
-        assert len(config.default_health_checks()) == 1
-        assert isinstance(config.default_health_checks()[0], PingHealthCheck)
+        for db, _ in databases:
+            assert len(db.health_checks) == 1
+            assert isinstance(db.health_checks[0], PingHealthCheck)
+        # Every database owns its own health check instance
+        assert len({id(db.health_checks[0]) for db, _ in databases}) == 3
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
         assert isinstance(
             config.default_failover_strategy(), WeightBasedFailoverStrategy
@@ -107,6 +115,8 @@ class TestMultiDbConfig:
             Mock(spec=FailureDetector),
         ]
         mock_health_checks = [Mock(spec=HealthCheck), Mock(spec=HealthCheck)]
+        factory_health_check = Mock(spec=HealthCheck)
+        mock_health_checks_factory = Mock(return_value=[factory_health_check])
         health_check_interval = 10
         mock_failover_strategy = Mock(spec=FailoverStrategy)
         auto_fallback_interval = 10
@@ -115,6 +125,7 @@ class TestMultiDbConfig:
                 client_kwargs={"connection_pool": mock_connection_pools[0]},
                 weight=1.0,
                 circuit=mock_cb1,
+                health_checks=mock_health_checks,
             ),
             DatabaseConfig(
                 client_kwargs={"connection_pool": mock_connection_pools[1]},
@@ -131,7 +142,7 @@ class TestMultiDbConfig:
         config = MultiDbConfig(
             databases_config=db_configs,
             failure_detectors=mock_failure_detectors,
-            health_checks=mock_health_checks,
+            health_checks_factory=mock_health_checks_factory,
             health_check_interval=health_check_interval,
             failover_strategy=mock_failover_strategy,
             auto_fallback_interval=auto_fallback_interval,
@@ -152,12 +163,145 @@ class TestMultiDbConfig:
         assert len(config.failure_detectors) == 2
         assert config.failure_detectors[0] == mock_failure_detectors[0]
         assert config.failure_detectors[1] == mock_failure_detectors[1]
-        assert len(config.health_checks) == 2
-        assert config.health_checks[0] == mock_health_checks[0]
-        assert config.health_checks[1] == mock_health_checks[1]
+        # Health checks of a database's own config replace the factory ones,
+        # which are built for every other database from its config
+        dbs = [db for db, _ in databases]
+        assert dbs[0].health_checks == mock_health_checks
+        assert dbs[1].health_checks == [factory_health_check]
+        assert dbs[2].health_checks == [factory_health_check]
+        assert [call.args for call in mock_health_checks_factory.call_args_list] == [
+            (db_configs[1],),
+            (db_configs[2],),
+        ]
         assert config.health_check_interval == health_check_interval
         assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval
+
+    def test_global_values_tune_default_ping_of_every_database(self):
+        config = MultiDbConfig(
+            databases_config=[
+                DatabaseConfig(client_kwargs={"host": "host1", "port": "port1"}),
+                DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+            ],
+            health_check_probes=7,
+            health_check_delay=0.2,
+            health_check_timeout=9,
+        )
+
+        health_checks = [db.health_checks for db, _ in config.databases()]
+
+        assert len(health_checks) == 2
+        for (health_check,) in health_checks:
+            assert isinstance(health_check, PingHealthCheck)
+            assert health_check.health_check_probes == 7
+            assert health_check.health_check_delay == 0.2
+            assert health_check.health_check_timeout == 9
+        assert health_checks[0][0] is not health_checks[1][0]
+
+    def test_factory_builds_health_checks_of_every_database(self):
+        db_configs = [
+            DatabaseConfig(client_kwargs={"host": "host1", "port": "port1"}),
+            DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+        ]
+        built = {}
+
+        def factory(database_config):
+            built[id(database_config)] = [PingHealthCheck(health_check_probes=2)]
+            return built[id(database_config)]
+
+        config = MultiDbConfig(
+            databases_config=db_configs,
+            health_checks_factory=factory,
+            # Global values belong to the default ping the factory replaces
+            health_check_probes=7,
+            health_check_delay=0.2,
+            health_check_timeout=9,
+        )
+
+        health_checks = [db.health_checks for db, _ in config.databases()]
+
+        assert health_checks == [built[id(db_config)] for db_config in db_configs]
+        assert health_checks[0][0] is not health_checks[1][0]
+        for (health_check,) in health_checks:
+            assert health_check.health_check_probes == 2
+            assert health_check.health_check_delay == DEFAULT_HEALTH_CHECK_DELAY
+            assert health_check.health_check_timeout == DEFAULT_HEALTH_CHECK_TIMEOUT
+
+        # A database added later is built by the factory as well
+        new_db_config = DatabaseConfig(client_kwargs={"host": "host3"})
+        assert config.database_health_checks(new_db_config) == built[id(new_db_config)]
+
+    def test_database_health_checks_are_not_combined_with_factory(self):
+        own_health_checks = [Mock(spec=HealthCheck)]
+        factory_health_check = Mock(spec=HealthCheck)
+        factory = Mock(return_value=[factory_health_check])
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={"host": "host1", "port": "port1"},
+                health_checks=own_health_checks,
+            ),
+            DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+        ]
+        config = MultiDbConfig(
+            databases_config=db_configs, health_checks_factory=factory
+        )
+
+        health_checks = [db.health_checks for db, _ in config.databases()]
+
+        assert health_checks == [own_health_checks, [factory_health_check]]
+        factory.assert_called_once_with(db_configs[1])
+
+    def test_database_health_checks_replace_default_ping(self):
+        own_health_checks = [Mock(spec=HealthCheck)]
+        config = MultiDbConfig(
+            databases_config=[
+                DatabaseConfig(
+                    client_kwargs={"host": "host1", "port": "port1"},
+                    health_checks=own_health_checks,
+                ),
+                DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+            ],
+            health_check_probes=7,
+        )
+
+        own, (default,) = [db.health_checks for db, _ in config.databases()]
+
+        # Only its own health checks, no ping added to them
+        assert own == own_health_checks
+        # The other database stays on the default ping with the global values
+        assert isinstance(default, PingHealthCheck)
+        assert default.health_check_probes == 7
+
+    def test_empty_database_health_checks_disable_health_checks(self):
+        factory = Mock(return_value=[Mock(spec=HealthCheck)])
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={"host": "host1", "port": "port1"}, health_checks=[]
+            ),
+            DatabaseConfig(client_kwargs={"host": "host2", "port": "port2"}),
+        ]
+
+        for config in (
+            MultiDbConfig(databases_config=db_configs),
+            MultiDbConfig(databases_config=db_configs, health_checks_factory=factory),
+        ):
+            disabled, other = [db.health_checks for db, _ in config.databases()]
+
+            # Neither the factory nor the default ping fills an empty list
+            assert disabled == []
+            assert len(other) == 1
+        factory.assert_called_once_with(db_configs[1])
+
+    def test_database_add_health_check(self):
+        health_checks = [Mock(spec=HealthCheck)]
+        db = Database(Mock(), Mock(spec=CircuitBreaker), 1.0, health_checks)
+        added = Mock(spec=HealthCheck)
+
+        db.add_health_check(added)
+
+        assert db.health_checks == [health_checks[0], added]
+        # The list given to the database is not shared with it
+        assert health_checks == [health_checks[0]]
 
     def test_underlying_clients_have_disabled_retry_and_maint_notifications(self):
         """
