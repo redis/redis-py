@@ -1416,7 +1416,11 @@ class PubSub:
 
         self._event_dispatcher.dispatch(
             AfterPubSubConnectionInstantiationEvent(
-                self.connection, self.connection_pool, ClientType.ASYNC, self._lock
+                self.connection,
+                self.connection_pool,
+                ClientType.ASYNC,
+                self._lock,
+                pubsub=self,
             )
         )
 

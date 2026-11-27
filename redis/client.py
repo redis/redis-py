@@ -1276,29 +1276,37 @@ class PubSub:
             pass
 
     def reset(self) -> None:
-        if self.connection:
-            self.connection.disconnect()
-            self.connection.deregister_connect_callback(self.on_connect)
-            if self.push_handler_func is not None:
-                # The handler is set on the parser of a pooled connection: put
-                # the parser's own back, or the next PubSub that gets this
-                # connection has its messages handed to ours
-                parser = self.connection._get_parser()
-                if (
-                    getattr(parser, "pubsub_push_handler_func", None)
-                    is self.push_handler_func
-                ):
-                    parser.set_pubsub_push_handler(parser.handle_pubsub_push_response)
-            self.connection_pool.release(self.connection)
-            self.connection = None
-        self.health_check_response_counter = 0
-        self.channels = {}
-        self.pending_unsubscribe_channels = set()
-        self.shard_channels = {}
-        self.pending_unsubscribe_shard_channels = set()
-        self.patterns = {}
-        self.pending_unsubscribe_patterns = set()
-        self.subscribed_event.clear()
+        # Hold the lock across the teardown, as the async _aclose() does, so a
+        # re-authentication already running on this connection finishes before
+        # it is released, and one that has not started yet sees no connection.
+        with self._lock:
+            if self.connection:
+                self.connection.disconnect()
+                self.connection.deregister_connect_callback(self.on_connect)
+                if self.push_handler_func is not None:
+                    # The handler is set on the parser of a pooled connection:
+                    # put the parser's own back, or the next PubSub that gets
+                    # this connection has its messages handed to ours
+                    parser = self.connection._get_parser()
+                    if (
+                        getattr(parser, "pubsub_push_handler_func", None)
+                        is self.push_handler_func
+                    ):
+                        parser.set_pubsub_push_handler(
+                            parser.handle_pubsub_push_response
+                        )
+                # Detach before releasing, as the async stack does, so the
+                # pubsub never holds a connection that is back in the pool.
+                connection, self.connection = self.connection, None
+                self.connection_pool.release(connection)
+            self.health_check_response_counter = 0
+            self.channels = {}
+            self.pending_unsubscribe_channels = set()
+            self.shard_channels = {}
+            self.pending_unsubscribe_shard_channels = set()
+            self.patterns = {}
+            self.pending_unsubscribe_patterns = set()
+            self.subscribed_event.clear()
 
     def close(self) -> None:
         self.reset()
@@ -1346,7 +1354,11 @@ class PubSub:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
-                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
+                    self.connection,
+                    self.connection_pool,
+                    ClientType.SYNC,
+                    self._lock,
+                    pubsub=self,
                 )
             )
         connection = self.connection
