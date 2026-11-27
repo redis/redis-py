@@ -601,13 +601,14 @@ def get_cluster_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
     enable_maintenance_notifications: bool = True,
-    endpoint_type: Optional[EndpointType] = None,
+    endpoint_type: EndpointType | None = None,
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
     auth_ssl_client_certs: bool = False,
-    socket_timeout: Optional[float] = None,
-    socket_connect_timeout: Optional[float] = None,
+    socket_timeout: float | None = None,
+    socket_connect_timeout: float | None = None,
+    dynamic_startup_nodes: bool = True,
 ):
     """Create Redis cluster client with maintenance notifications enabled."""
     # Get credentials from the configuration
@@ -666,9 +667,13 @@ def get_cluster_client_maint_notifications(
         protocol=protocol,  # RESP3 required for push notifications
         maint_notifications_config=maintenance_config,
         retry=retry,
+        dynamic_startup_nodes=dynamic_startup_nodes,
         **tls_kwargs,
     )
-    logging.info("Redis cluster client created with maintenance notifications enabled")
+    logging.info(
+        "Redis cluster client created with maintenance notifications "
+        f"{'enabled' if enable_maintenance_notifications else 'disabled'}"
+    )
     logging.info(
         f"Cluster working with the following nodes: {[(node.name, node.server_type) for node in client.get_nodes()]}"
     )
