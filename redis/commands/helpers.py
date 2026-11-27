@@ -56,7 +56,12 @@ def pubsub_subscription_args(
 
 
 def nativestr(x):
-    """Return the decoded binary string, or a string, depending on type."""
+    """Return the decoded binary string, or a string, depending on type.
+
+    The string ``"null"`` decodes to ``None``: a decoded JSON value.
+    Key and label names must use :func:`redis.utils.str_if_bytes`
+    instead, so a literal ``"null"`` stays ``"null"``.
+    """
     r = x.decode("utf-8", "replace") if isinstance(x, bytes) else x
     if r == "null":
         return
@@ -70,8 +75,14 @@ def delist(x):
     return [nativestr(obj) for obj in x]
 
 
-def parse_to_list(response):
-    """Optimistically parse the response to a list."""
+def parse_to_list(response, *, decoder=nativestr):
+    """Optimistically parse the response to a list.
+
+    ``decoder`` converts each item to a string; pass
+    :func:`redis.utils.str_if_bytes` when the items are key names rather
+    than JSON values, so a literal ``"null"`` is kept instead of becoming
+    ``None``.
+    """
     res = []
 
     special_values = {"infinity", "nan", "-infinity"}
@@ -87,7 +98,7 @@ def parse_to_list(response):
             res.append(item)
             continue
         try:
-            item_str = nativestr(item)
+            item_str = decoder(item)
         except TypeError:
             res.append(None)
             continue

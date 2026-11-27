@@ -2,6 +2,7 @@ import json
 
 import pytest
 import redis
+import redis.asyncio
 from redis import Redis, exceptions
 from redis.commands.json.commands import FPHAType
 from redis.commands.json.decoders import decode_list, unstring
@@ -452,6 +453,16 @@ def test_objkeys(client):
     assert keys == list(obj.keys())
 
     assert client.json().objkeys("fakekey") is None
+
+
+@pytest.mark.redismod
+def test_objkeys_keeps_null_key_name_on_server(client):
+    # Live: a document key literally named "null" stays "null" when read
+    # back with JSON.OBJKEYS (the JSON null mapping applies to values,
+    # not names).
+    client.json().set("obj", Path.root_path(), {"null": "value", "a": 1})
+    keys = client.json().objkeys("obj", Path.root_path())
+    assert sorted(keys) == ["a", "null"]
 
 
 @pytest.mark.redismod
@@ -1623,6 +1634,26 @@ def test_decoders_and_unstring():
     assert decode_list(b"45.55") == 45.55
     assert decode_list("45.55") == 45.55
     assert decode_list(["hello", b"world"]) == ["hello", "world"]
+
+
+@pytest.mark.fixed_client
+@pytest.mark.parametrize(
+    "client_cls",
+    [
+        pytest.param(redis.Redis, id="sync"),
+        pytest.param(redis.asyncio.Redis, id="async"),
+    ],
+)
+def test_objkeys_keeps_null_key_name(client_cls):
+    # Server-free: a key literally named "null" stays "null" instead of
+    # becoming None (the JSON null mapping applies to values, not names).
+    # The JSON null value mapping itself is unchanged.
+    assert decode_list([b"null", b"a"]) == [None, "a"]
+
+    r = client_cls(protocol=2)
+    r.json()  # registers the JSON callbacks
+    assert r.response_callbacks["JSON.OBJKEYS"]([b"null", b"a"]) == ["null", "a"]
+    assert r.response_callbacks["JSON.OBJKEYS"](None) is None
 
 
 @pytest.mark.fixed_client

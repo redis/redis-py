@@ -4,6 +4,7 @@ from json import JSONDecodeError, JSONDecoder, JSONEncoder, loads
 from typing import Literal
 
 import redis
+from redis.utils import str_if_bytes
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
@@ -64,7 +65,7 @@ class _JSONBase(JSONCommands):
             "JSON.GET": self._decode,
             "JSON.NUMINCRBY": lambda r, **kwargs: self._decode(r),
             "JSON.NUMMULTBY": lambda r, **kwargs: self._decode(r),
-            "JSON.OBJKEYS": self._decode,
+            "JSON.OBJKEYS": self._decode_objkeys,
             "JSON.STRAPPEND": self._decode,
             "JSON.OBJLEN": self._decode,
             "JSON.STRLEN": self._decode,
@@ -89,7 +90,7 @@ class _JSONBase(JSONCommands):
             "JSON.TYPE": lambda r: None if r == [None] else r,
         }
         # RESP3 wire normalised back to today's RESP2 Python shapes:
-        # keep ``nativestr`` for OBJKEYS, unwrap JSON.TYPE one level so
+        # keep ``str_if_bytes`` for OBJKEYS, unwrap JSON.TYPE one level so
         # legacy paths return scalars and missing keys return ``None``,
         # and re-encode native floats inside JSON.RESP back to string
         # form. NUMINCRBY/NUMMULTBY use the command path captured at the
@@ -97,7 +98,7 @@ class _JSONBase(JSONCommands):
         _RESP3_TO_RESP2_LEGACY_MODULE_CALLBACKS = {
             "JSON.NUMINCRBY": self._decode_resp3_legacy_numop,
             "JSON.NUMMULTBY": self._decode_resp3_legacy_numop,
-            "JSON.OBJKEYS": self._decode,
+            "JSON.OBJKEYS": self._decode_objkeys,
             "JSON.RESP": self._resp_floats_to_str_command,
             "JSON.TYPE": lambda r: r[0] if isinstance(r, list) and len(r) == 1 else r,
         }
@@ -140,6 +141,17 @@ class _JSONBase(JSONCommands):
                 return decode_list(obj)
         except (AttributeError, JSONDecodeError):
             return decode_list(obj)
+
+    def _decode_objkeys(self, obj):
+        """Decode a JSON.OBJKEYS reply as plain key names.
+
+        Key names are decoded without the JSON ``null`` mapping that
+        :meth:`_decode` applies to values, so a key literally named
+        ``"null"`` stays ``"null"``.
+        """
+        if obj is None:
+            return obj
+        return [str_if_bytes(key) for key in obj]
 
     def _decode_json_numop(self, obj, **kwargs):
         """Decode a JSON.NUMINCRBY / JSON.NUMMULTBY result and normalise

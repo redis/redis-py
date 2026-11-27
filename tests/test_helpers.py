@@ -9,6 +9,7 @@ from redis.commands.helpers import (
     parse_to_list,
     random_string,
 )
+from redis.utils import str_if_bytes
 
 
 @pytest.mark.fixed_client
@@ -33,6 +34,13 @@ def test_nativestr():
     assert nativestr("teststr") == "teststr"
     assert nativestr(b"teststr") == "teststr"
     assert nativestr("null") is None
+
+
+@pytest.mark.fixed_client
+def test_parse_to_list_with_str_if_bytes_decoder():
+    # A key literally named "null" stays "null"; numeric coercion is kept.
+    assert parse_to_list([b"null", b"cpu"], decoder=str_if_bytes) == ["null", "cpu"]
+    assert parse_to_list([b"2"], decoder=str_if_bytes) == [2]
 
 
 @pytest.mark.fixed_client

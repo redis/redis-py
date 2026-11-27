@@ -467,6 +467,16 @@ async def test_objkeys(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+async def test_objkeys_keeps_null_key_name_on_server(decoded_r: redis.Redis):
+    # Live: a document key literally named "null" stays "null" when read
+    # back with JSON.OBJKEYS (the JSON null mapping applies to values,
+    # not names).
+    await decoded_r.json().set("obj", Path.root_path(), {"null": "value", "a": 1})
+    keys = await decoded_r.json().objkeys("obj", Path.root_path())
+    assert sorted(keys) == ["a", "null"]
+
+
+@pytest.mark.redismod
 async def test_objlen(decoded_r: redis.Redis):
     obj = {"foo": "bar", "baz": "qaz"}
     await decoded_r.json().set("obj", Path.root_path(), obj)

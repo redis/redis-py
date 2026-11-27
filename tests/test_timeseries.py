@@ -5,7 +5,15 @@ import pytest
 import redis
 from redis.commands.timeseries.commands import TimeSeriesCommands
 from redis.commands.timeseries.info import TSInfo, parse_info_unified
-from redis.commands.timeseries.utils import parse_m_range_unified
+from redis.commands.timeseries.utils import (
+    list_to_dict,
+    parse_m_get,
+    parse_m_get_resp3_to_resp2_legacy,
+    parse_m_range,
+    parse_m_range_resp3_to_resp2_legacy,
+    parse_m_range_unified,
+    parse_queryindex,
+)
 from redis.utils import SENTINEL
 
 from .conftest import (
@@ -1359,6 +1367,44 @@ def test_info_resp3_keeps_null_labels():
 
 
 @pytest.mark.fixed_client
+def test_info_resp2_keeps_null_labels():
+    # Server-free: the RESP2 path must match — a label literally named
+    # "null" (or with the value "null") stays "null" instead of None.
+    info = TSInfo(
+        [b"labels", [[b"region", b"null"], [b"env", b"prod"]], b"totalSamples", 0]
+    )
+    assert info.labels == {"region": "null", "env": "prod"}
+    assert list_to_dict([[b"region", b"null"]]) == {"region": "null"}
+
+
+@pytest.mark.fixed_client
+def test_queryindex_keeps_null_key_name():
+    # Server-free: a time series key literally named "null" stays "null".
+    assert parse_queryindex([b"null", b"cpu"]) == ["null", "cpu"]
+    assert parse_queryindex(None) == []
+    # Numeric key names keep the existing int coercion.
+    assert parse_queryindex([b"2"]) == [2]
+
+
+@pytest.mark.fixed_client
+def test_mget_mrange_keep_null_key_name():
+    # Server-free: a series key literally named "null" stays "null" in
+    # the MGET/MRANGE result dicts, on both wire formats.
+    assert parse_m_get([[b"null", [[b"region", b"null"]], []]]) == [
+        {"null": [{"region": "null"}, None, None]}
+    ]
+    assert parse_m_range([[b"null", [[b"region", b"null"]], []]]) == [
+        {"null": [{"region": "null"}, []]}
+    ]
+    assert parse_m_get_resp3_to_resp2_legacy({b"null": [{b"region": b"null"}, []]}) == [
+        {"null": [{"region": "null"}, None, None]}
+    ]
+    assert parse_m_range_resp3_to_resp2_legacy(
+        {b"null": [{b"region": b"null"}, [], [[1000, 1.5]]]}
+    ) == [{"null": [{"region": "null"}, [(1000, 1.5)]]}]
+
+
+@pytest.mark.fixed_client
 def test_mrange_unified_metadata_bytes_keys():
     # Server-free: without decode_responses the RESP3 metadata map has bytes
     # keys and values and must parse like the metadata built for RESP2.
@@ -1504,6 +1550,26 @@ def test_query_index(client):
     assert 2 == len(client.ts().queryindex(["Test=This"]))
     assert 1 == len(client.ts().queryindex(["Taste=That"]))
     assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], ["2"])
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+def test_null_key_and_label_on_server(client):
+    # Live: a series key and a label value literally named "null" stay
+    # "null" when read back with TS.INFO, TS.MGET and TS.QUERYINDEX
+    # (the JSON null mapping applies to values, not names).
+    client.ts().create("null", labels={"region": "null", "env": "prod"})
+    client.ts().add("null", 1, 1.0)
+    info = client.ts().info("null")
+    assert info["labels"] == {"region": "null", "env": "prod"}
+    assert client.ts().queryindex(["region=null"]) == ["null"]
+    res = client.ts().mget(["region=null"], with_labels=True)
+    assert_resp_response(
+        client,
+        res,
+        [{"null": [{"region": "null", "env": "prod"}, 1, 1.0]}],
+        {"null": [{"region": "null", "env": "prod"}, [1, 1.0]]},
+    )
 
 
 @pytest.mark.redismod

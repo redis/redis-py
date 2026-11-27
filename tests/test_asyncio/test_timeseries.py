@@ -1199,6 +1199,26 @@ async def test_query_index(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+async def test_null_key_and_label_on_server(decoded_r: redis.Redis):
+    # Live: a series key and a label value literally named "null" stay
+    # "null" when read back with TS.INFO, TS.MGET and TS.QUERYINDEX
+    # (the JSON null mapping applies to values, not names).
+    await decoded_r.ts().create("null", labels={"region": "null", "env": "prod"})
+    await decoded_r.ts().add("null", 1, 1.0)
+    info = await decoded_r.ts().info("null")
+    assert info["labels"] == {"region": "null", "env": "prod"}
+    assert await decoded_r.ts().queryindex(["region=null"]) == ["null"]
+    res = await decoded_r.ts().mget(["region=null"], with_labels=True)
+    assert_resp_response(
+        decoded_r,
+        res,
+        [{"null": [{"region": "null", "env": "prod"}, 1, 1.0]}],
+        {"null": [{"region": "null", "env": "prod"}, [1, 1.0]]},
+    )
+
+
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
 @skip_if_server_version_lt("8.9.0")
@@ -2053,3 +2073,25 @@ async def test_pipeline(decoded_r: redis.Redis):
         decoded_r, 99, info.get("last_timestamp"), info.get("lastTimestamp")
     )
     assert (await decoded_r.ts().get("with_pipeline"))[1] == 99 * 1.1
+
+
+@pytest.mark.fixed_client
+def test_ts_callbacks_keep_null_key_and_labels():
+    """Server-free: the async client's registered TimeSeries callbacks
+    keep a literal "null" key/label instead of mapping it to None.
+
+    The TS parsers are shared with the sync stack (``_TimeSeriesBase``);
+    this exercises the async registration path
+    (``redis.asyncio.Redis(...).ts()``) rather than calling the parsers
+    directly.
+    """
+    r = redis.Redis(protocol=2)
+    callbacks = r.ts()._MODULE_CALLBACKS
+    assert callbacks["TS.QUERYINDEX"]([b"null", b"cpu"]) == ["null", "cpu"]
+    info = callbacks["TS.INFO"](
+        [b"labels", [[b"region", b"null"], [b"env", b"prod"]], b"totalSamples", 0]
+    )
+    assert info.labels == {"region": "null", "env": "prod"}
+    assert callbacks["TS.MGET"]([[b"null", [[b"region", b"null"]], []]]) == [
+        {"null": [{"region": "null"}, None, None]}
+    ]
