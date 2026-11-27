@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from redis.multidb.database import SyncDatabase
 
 # Database semantic convention attributes
+DB_SYSTEM_NAME = "db.system.name"
+# Replaced by DB_SYSTEM_NAME and no longer emitted; kept for existing imports.
 DB_SYSTEM = "db.system"
 DB_NAMESPACE = "db.namespace"
 DB_OPERATION_NAME = "db.operation.name"
@@ -59,6 +61,9 @@ REDIS_CLIENT_PUBSUB_SHARDED = "redis.client.pubsub.sharded"
 REDIS_CLIENT_ERROR_INTERNAL = "redis.client.errors.internal"
 REDIS_CLIENT_ERROR_CATEGORY = "redis.client.errors.category"
 REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
+REDIS_CLIENT_STREAM_CONSUMER_GROUP = "redis.client.stream.consumer_group"
+# Replaced by REDIS_CLIENT_STREAM_CONSUMER_GROUP and no longer emitted; kept for
+# existing imports.
 REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
 REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
 REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
@@ -70,8 +75,8 @@ class ConnectionState(Enum):
 
 
 class PubSubDirection(Enum):
-    PUBLISH = "publish"
-    RECEIVE = "receive"
+    PUBLISH = "out"
+    RECEIVE = "in"
 
 
 class CSCResult(Enum):
@@ -112,7 +117,7 @@ class AttributeBuilder:
             Dictionary of base attributes
         """
         attrs: Dict[str, Any] = {
-            DB_SYSTEM: "redis",
+            DB_SYSTEM_NAME: "redis",
             REDIS_CLIENT_LIBRARY: f"redis-py:v{redis.__version__}",
         }
 
@@ -158,7 +163,9 @@ class AttributeBuilder:
             # Ensure command_name is a string (it can be bytes from args[0])
             if isinstance(command_name, bytes):
                 command_name = command_name.decode("utf-8", errors="replace")
-            attrs[DB_OPERATION_NAME] = command_name.upper()
+            # Kept as provided: the semantic conventions recommend no case
+            # normalization.
+            attrs[DB_OPERATION_NAME] = command_name
 
         if network_peer_address is not None:
             attrs[NETWORK_PEER_ADDRESS] = network_peer_address
@@ -237,8 +244,6 @@ class AttributeBuilder:
                 and error_type.status_code is not None
             ):
                 attrs[DB_RESPONSE_STATUS_CODE] = error_type.status_code
-            else:
-                attrs[DB_RESPONSE_STATUS_CODE] = "error"
 
             if hasattr(error_type, "error_type") and error_type.error_type is not None:
                 attrs[REDIS_CLIENT_ERROR_CATEGORY] = error_type.error_type.value
@@ -260,7 +265,7 @@ class AttributeBuilder:
         Build attributes for a PubSub message.
 
         Args:
-            direction: Message direction ('publish' or 'receive')
+            direction: Message direction (PUBLISH or RECEIVE)
             channel: Pub/Sub channel name
             sharded: True if sharded Pub/Sub channel
 
@@ -301,7 +306,7 @@ class AttributeBuilder:
             attrs[REDIS_CLIENT_STREAM_NAME] = stream_name
 
         if consumer_group is not None:
-            attrs[REDIS_CLIENT_CONSUMER_GROUP] = consumer_group
+            attrs[REDIS_CLIENT_STREAM_CONSUMER_GROUP] = consumer_group
 
         return attrs
 

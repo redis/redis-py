@@ -168,6 +168,27 @@ The following metrics are collected based on enabled metric groups:
 - ``redis.client.csc.network_saved`` - Bytes saved by caching (counter)
 - ``redis.client.csc.items`` - Current cache size (observable gauge)
 
+Attribute Changes in 9.0
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+redis-py 9.0 aligns the metric attributes with the OpenTelemetry semantic
+conventions and with the metrics spec shared by the Redis client libraries.
+Dashboards and alerts that filter on these labels need updating:
+
+- ``db.system`` is replaced by ``db.system.name``. The value is still ``redis``.
+- ``db.response.status_code`` is set only when Redis replied with an error
+  code, such as ``ERR`` or ``WRONGTYPE``. Client-side errors such as
+  ``ConnectionError`` no longer set it to ``error``; ``error.type`` still
+  identifies them.
+- ``db.operation.name`` is the command name as sent, without upper-casing.
+  The command methods send upper-case names, so the label only changes when
+  the caller passes a lowercase name: ``r.execute_command("get", "key")`` is
+  now reported as ``get``.
+- ``redis.client.pubsub.message.direction`` is ``out`` for published messages
+  and ``in`` for received ones, instead of ``publish`` and ``receive``.
+- ``redis.client.consumer_group`` is replaced by
+  ``redis.client.stream.consumer_group``.
+
 Custom Histogram Buckets
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -613,7 +613,7 @@ class RedisMetricsCollector:
         Record a PubSub message (published or received).
 
         Args:
-            direction: Message direction ('publish' or 'receive')
+            direction: Message direction (PUBLISH or RECEIVE)
             channel: Pub/Sub channel name
             sharded: True if sharded Pub/Sub channel
         """
