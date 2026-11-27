@@ -1277,20 +1277,23 @@ class PubSub:
 
     def reset(self) -> None:
         if self.connection:
-            self.connection.disconnect()
-            self.connection.deregister_connect_callback(self.on_connect)
+            # Detach before disconnecting: a reader blocked on this connection
+            # in another thread wakes up as soon as the socket is closed, and
+            # its retry must already see that the pubsub no longer owns it.
+            connection, self.connection = self.connection, None
+            connection.disconnect()
+            connection.deregister_connect_callback(self.on_connect)
             if self.push_handler_func is not None:
                 # The handler is set on the parser of a pooled connection: put
                 # the parser's own back, or the next PubSub that gets this
                 # connection has its messages handed to ours
-                parser = self.connection._get_parser()
+                parser = connection._get_parser()
                 if (
                     getattr(parser, "pubsub_push_handler_func", None)
                     is self.push_handler_func
                 ):
                     parser.set_pubsub_push_handler(parser.handle_pubsub_push_response)
-            self.connection_pool.release(self.connection)
-            self.connection = None
+            self.connection_pool.release(connection)
         self.health_check_response_counter = 0
         self.channels = {}
         self.pending_unsubscribe_channels = set()
@@ -1377,10 +1380,10 @@ class PubSub:
     def _reconnect(
         self,
         conn,
-        error: Optional[Exception] = None,
-        failure_count: Optional[int] = None,
-        start_time: Optional[float] = None,
-        command_name: Optional[str] = None,
+        error: BaseException | None = None,
+        failure_count: int | None = None,
+        start_time: float | None = None,
+        command_name: str | None = None,
     ) -> None:
         """
         The supported exceptions are already checked in the
@@ -1388,6 +1391,12 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
+        if conn is not self.connection:
+            # reset() detached conn and released it to the pool while this
+            # reader was blocked on it. Reconnecting it would consume replies
+            # that now belong to another caller, so fail the attempt with the
+            # error that woke the reader.
+            raise error or ConnectionError("PubSub connection was released")
         if error and failure_count <= conn.retry.get_retries():
             if command_name:
                 record_operation_duration(
@@ -1424,6 +1433,13 @@ class PubSub:
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
 
+        def attempt():
+            # reset() can detach and release conn between two attempts, even
+            # from inside the reconnect itself, so check it on every one
+            if conn is not self.connection:
+                raise ConnectionError("PubSub connection was released")
+            return command(*args, **kwargs)
+
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
                 add_debug_log_for_operation_failure(conn, error, args)
@@ -1432,7 +1448,7 @@ class PubSub:
 
         try:
             response = conn.retry.call_with_retry(
-                lambda: command(*args, **kwargs),
+                attempt,
                 failure_callback,
                 with_failure_count=True,
             )

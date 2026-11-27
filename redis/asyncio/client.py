@@ -1423,10 +1423,10 @@ class PubSub:
     async def _reconnect(
         self,
         conn,
-        error: Optional[BaseException] = None,
-        failure_count: Optional[int] = None,
-        start_time: Optional[float] = None,
-        command_name: Optional[str] = None,
+        error: BaseException | None = None,
+        failure_count: int | None = None,
+        start_time: float | None = None,
+        command_name: str | None = None,
     ):
         """
         The supported exceptions are already checked in the
@@ -1434,6 +1434,12 @@ class PubSub:
 
         In this error handler we are trying to reconnect to the server.
         """
+        if conn is not self.connection:
+            # aclose() detached conn and released it to the pool while this
+            # reader was blocked on it. Reconnecting it would consume replies
+            # that now belong to another caller, so fail the attempt with the
+            # error that woke the reader.
+            raise error or ConnectionError("PubSub connection was released")
         if (
             error
             and failure_count is not None
@@ -1470,6 +1476,13 @@ class PubSub:
         # Track actual retry attempts for error reporting
         actual_retry_attempts = 0
 
+        async def attempt():
+            # aclose() can detach and release conn between two attempts, even
+            # from inside the reconnect itself, so check it on every one
+            if conn is not self.connection:
+                raise ConnectionError("PubSub connection was released")
+            return await command(*args, **kwargs)
+
         def failure_callback(error, failure_count):
             if is_debug_log_enabled():
                 add_debug_log_for_operation_failure(conn, error, args)
@@ -1479,7 +1492,7 @@ class PubSub:
 
         try:
             response = await conn.retry.call_with_retry(
-                lambda: command(*args, **kwargs),
+                attempt,
                 failure_callback,
                 with_failure_count=True,
             )
