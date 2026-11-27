@@ -341,6 +341,14 @@ Probabilistic
      - Item names are preserved instead of coerced through numeric parsing.
      - ``"42"`` could become ``42``
      - ``"42"`` stays ``"42"``
+   * - ``BF.ADD``, ``BF.EXISTS``, ``CF.ADD``, ``CF.ADDNX``, ``CF.EXISTS``, ``CF.DEL``
+     - The integer reply becomes a boolean, as on RESP3.
+     - ``1``
+     - ``True``
+   * - ``BF.MADD``, ``BF.INSERT``, ``BF.MEXISTS``, ``CF.INSERT``, ``CF.MEXISTS``, ``TOPK.QUERY``
+     - Integer list elements become booleans, as on RESP3; ``CF.INSERT`` maps its ``-1`` "filter full" elements to ``False``.
+     - ``[1, 0]``
+     - ``[True, False]``
    * - ``TDIGEST.BYRANK``, ``TDIGEST.BYREVRANK``, ``TDIGEST.CDF``, ``TDIGEST.QUANTILE``
      - Values are always floats, as on RESP3, including ``nan``.
      - ``[3, "nan"]``

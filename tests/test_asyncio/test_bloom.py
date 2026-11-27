@@ -684,3 +684,83 @@ async def test_topk_info_unified_responses(create_redis, stack_url, protocol):
     # The decay is a double, which RESP2 sends as a bulk string.
     assert info["decay"] == 0.9
     assert type(info["decay"]) is float
+
+
+@pytest.mark.fixed_client
+@pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client_kwargs, expected_type",
+    [
+        ({}, int),
+        ({"protocol": 2}, int),
+        ({"protocol": 3}, bool),
+        ({"protocol": 2, "legacy_responses": False}, bool),
+        ({"protocol": 3, "legacy_responses": False}, bool),
+    ],
+    ids=["default", "resp2", "resp3", "resp2-unified", "resp3-unified"],
+)
+async def test_bloom_bool_reply_types(
+    create_redis, stack_url, client_kwargs, expected_type
+):
+    client = await create_redis(url=stack_url, **client_kwargs)
+    await client.flushdb()
+    bf = client.bf()
+    assert await bf.create("bloom", 0.01, 100)
+    scalars = [
+        await bf.add("bloom", "item"),
+        await bf.add("bloom", "item"),
+        await bf.exists("bloom", "item"),
+        await bf.exists("bloom", "missing"),
+    ]
+    assert scalars == [1, 0, 1, 0]
+    assert [type(value) for value in scalars] == [expected_type] * 4
+    arrays = [
+        await bf.madd("bloom", "new", "item"),
+        await bf.mexists("bloom", "new", "missing"),
+        await bf.insert("bloom", ["third", "item"]),
+    ]
+    assert arrays == [[1, 0], [1, 0], [1, 0]]
+    for result in arrays:
+        assert [type(value) for value in result] == [expected_type] * 2
+
+    cf = client.cf()
+    assert await cf.create("cuckoo", 100)
+    scalars = [
+        await cf.add("cuckoo", "item"),
+        await cf.addnx("cuckoo", "item"),
+        await cf.addnx("cuckoo", "new"),
+        await cf.exists("cuckoo", "item"),
+        await cf.delete("cuckoo", "item"),
+        await cf.delete("cuckoo", "item"),
+    ]
+    assert scalars == [1, 0, 1, 1, 1, 0]
+    assert [type(value) for value in scalars] == [expected_type] * 6
+    arrays = [
+        await cf.mexists("cuckoo", "new", "missing"),
+        await cf.insert("cuckoo", ["added", "new"]),
+    ]
+    # CF.INSERT allows duplicates, so inserting "new" a second time
+    # still succeeds.
+    assert arrays == [[1, 0], [1, 1]]
+    for result in arrays:
+        assert [type(value) for value in result] == [expected_type] * 2
+
+    # A full cuckoo filter answers -1 on RESP2 and false on RESP3,
+    # never 0. Reserve a tiny filter that cannot grow, then insert
+    # distinct items until one does not fit.
+    assert await cf.create("full", 100, expansion=0, bucket_size=1, max_iterations=1)
+    full = None
+    for i in range(150):
+        result = await cf.insert("full", [f"item{i}"], nocreate=True)
+        if result == [-1] or result == [False]:
+            full = result
+            break
+    assert full == ([-1] if expected_type is int else [False])
+    assert [type(value) for value in full] == [expected_type]
+
+    topk = client.topk()
+    assert await topk.reserve("topk", 3, 50, 4, 0.9)
+    await topk.add("topk", "A", "A", "A", "A", "A")
+    result = await topk.query("topk", "A", "missing")
+    assert result == [1, 0]
+    assert [type(value) for value in result] == [expected_type] * 2
