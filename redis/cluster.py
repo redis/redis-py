@@ -787,6 +787,28 @@ def _topology_refresh_delay(
     return delay
 
 
+# The request policies that route a command by the slot of its keys. Its retry
+# is sent again to the node the attempt failed on, as long as the slot map
+# stays, unless the command is read from the primary and its replicas in turn:
+# such reads rotate through the nodes of the shard.
+_SLOT_ROUTED_POLICIES = frozenset(
+    {RequestPolicy.DEFAULT_KEYED, RequestPolicy.MULTI_SHARD}
+)
+# The request policies that send a command to every node of a kind. Its retry
+# is sent again to the nodes the attempt failed on, as long as the slot map
+# stays. The retry of any other command goes to another node: a keyless command
+# goes to a random primary, and one for the default node to the node that
+# replaces it after the failure. A SPECIAL command (FT.CURSOR) goes to the nodes
+# of its FT.AGGREGATE, which no refresh changes, so waiting for one is no use.
+_EVERY_NODE_POLICIES = frozenset(
+    {
+        RequestPolicy.ALL_SHARDS,
+        RequestPolicy.ALL_NODES,
+        RequestPolicy.ALL_REPLICAS,
+    }
+)
+
+
 def _should_request_refresh(reinitialize_steps: int, reinitialize_counter: int) -> bool:
     """
     Whether the error just counted reached the ``reinitialize_steps`` threshold,
@@ -1136,6 +1158,33 @@ class AbstractRedisCluster:
             backoff.reset()
         return backoff.compute(failures)
 
+    def _retry_goes_to_same_node(
+        self,
+        request_policy: RequestPolicy | None,
+        nodes_flag: str | None,
+        reads_from_replicas: bool,
+    ) -> bool:
+        """
+        Whether the retry of a command is sent again to the node its attempt
+        failed on, as long as the slot map stays. :request_policy: is the
+        command's own policy, :nodes_flag: the nodes flag passed in its place,
+        if any, and :reads_from_replicas: whether the command is read from
+        replicas, which the client's ``load_balancing_strategy`` picks.
+        """
+        if nodes_flag is not None:
+            request_policy = self._command_flags_mapping.get(nodes_flag, request_policy)
+        if request_policy in _SLOT_ROUTED_POLICIES:
+            # A read that may go to the primary as well rotates through the
+            # nodes of the shard, unless the shard has no replica. One sent
+            # only to replicas goes to the same replica again on a shard with
+            # one replica, the usual layout, so it counts as sent to the same
+            # node.
+            return (
+                not reads_from_replicas
+                or self.load_balancing_strategy in _REPLICAS_ONLY_STRATEGIES
+            )
+        return request_policy in _EVERY_NODE_POLICIES
+
     def replace_default_node(self, target_node: "ClusterNode | None" = None) -> None:
         """Replace the default cluster node.
         A random cluster node will be chosen if target_node isn't passed, and primaries
@@ -1390,6 +1439,8 @@ class RedisCluster(
             between are collapsed into one refresh, run by the next command
             attempt once the interval has passed. After refreshes that failed in
             a row, the ``retry`` backoff can make the wait longer, never shorter.
+            It is also the longest a command or pipeline retried after a
+            connection error waits for a refresh another thread is running.
             0 lets every requested refresh run at once. Must be finite and not negative.
             Server-pushed refreshes (SMIGRATED), the first initialization and the
             refresh a ``CLUSTERDOWN`` or an uncovered slot runs are not limited.
@@ -2303,6 +2354,9 @@ class RedisCluster(
             if not isinstance(e, self.NOT_NODE_FAILURE_ERRORS):
                 # this is used to report the metrics based on host and port info
                 e.connection = default_node
+                # The retry looks the keys up on another node, so it does not
+                # wait for the refresh asked for below
+                e.retry_goes_elsewhere = True
 
                 # The keys of some commands, such as XREAD, are found by asking the
                 # default node (COMMAND GETKEYS), which is also asked for the
@@ -2523,16 +2577,26 @@ class RedisCluster(
         # those: a command sent to one node is retried whole.
         replies: Optional[Dict[Any, Any]] = None
 
+        # Whether the retry waits for the topology refresh the connection error
+        # of the previous attempt asked for, as it goes to the same node
+        waits_for_refresh = False
+
         for _ in range(execute_attempts):
             # Whether the attempt targets the default node alone: only an
             # attempt that failed on it replaces it, not one that failed before
             # its nodes were determined
             is_default_node = False
+            # Whether the attempt got as far as its target nodes
+            routed = False
             # Run a topology refresh an earlier error asked for, once due. The
             # flag is read inline: this runs before every attempt.
             if self.nodes_manager._refresh_requested:
                 self.nodes_manager._run_requested_refresh(self.retry)
             if last_error is not None:
+                if waits_for_refresh:
+                    # The refresh the error asked for may be running on
+                    # another thread; the slot map it brings routes this retry
+                    self.nodes_manager._wait_for_running_refresh()
                 outage_error = self.nodes_manager._error_instead_of_retry(
                     last_error, last_refresh_at
                 )
@@ -2577,6 +2641,7 @@ class RedisCluster(
                         len(target_nodes) == 1
                         and target_nodes[0] == self.get_default_node()
                     )
+                routed = True
                 one_succeeded = (
                     command_policies.response_policy == ResponsePolicy.ONE_SUCCEEDED
                 )
@@ -2658,6 +2723,26 @@ class RedisCluster(
                     # Space the attempts out as the retry backoff says; the
                     # refresh the error asked for runs after this delay
                     delay = self._retry_backoff_delay(self.retry, failure_count)
+                    # A node that refused or dropped the connection gets the
+                    # retry again until a refresh moves its slots, so the retry
+                    # waits for a refresh another thread is running, unless
+                    # the error came before the attempt was routed or from a
+                    # key lookup, or the command is routed so that the retry
+                    # goes to another node
+                    waits_for_refresh = (
+                        routed
+                        and type(e) is ConnectionError
+                        and not getattr(e, "retry_goes_elsewhere", False)
+                        and self._retry_goes_to_same_node(
+                            command_policies.request_policy,
+                            passed_targets if nodes_flag else None,
+                            (
+                                self.read_from_replicas
+                                or self.load_balancing_strategy is not None
+                            )
+                            and self._is_replica_safe(command),
+                        )
+                    )
                     if delay > 0:
                         time.sleep(delay)
                     continue
@@ -3407,6 +3492,12 @@ class NodesManager:
         self._requested_additional_startup_nodes: List[Tuple[str, int]] = []
         self._requested_last_failed_node_name: Optional[str] = None
         self._requested_disconnect_startup_nodes_pools = True
+        # The number of topology refreshes running, each counted from the
+        # moment _run_requested_refresh takes it or initialize starts, and the
+        # event set when the last of them ends: a command retried after a
+        # connection error waits for it. Both written under _lock.
+        self._running_refreshes = 0
+        self._refreshes_done: Optional[threading.Event] = None
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -3874,6 +3965,70 @@ class NodesManager:
                     self._refresh_due_at = due_at
         return time.monotonic() >= due_at
 
+    def _refresh_wait_limit(self) -> float:
+        """
+        The longest a command retried after a connection error waits for a
+        topology refresh another thread is running: the minimum interval
+        between error-triggered refreshes. An interval of 0 turns the wait off,
+        as it turns off the pacing.
+        """
+        min_interval = self._topology_refresh_min_interval
+        if min_interval is None:
+            return _TOPOLOGY_REFRESH_MIN_INTERVAL_SECONDS
+        return min_interval
+
+    def _wait_for_running_refresh(self) -> None:
+        """
+        Wait for the topology refreshes other threads are running to end, at
+        most _refresh_wait_limit, so a command retried after a connection error
+        routes by the slot map they bring. Returns at once when none runs.
+
+        Every refresh counts, the ones SMIGRATED runs included. A requested
+        refresh counts as running from the moment _run_requested_refresh takes
+        it. Threads whose commands failed together race to take it, and the
+        ones that lose must still wait for it, before initialize starts.
+        """
+        refreshes_done = self._refreshes_done
+        if refreshes_done is None:
+            return
+        limit = self._refresh_wait_limit()
+        if limit > 0:
+            refreshes_done.wait(limit)
+
+    def _refresh_started(self) -> None:
+        """
+        Count a topology refresh as running until _refresh_ended. Called under
+        _lock.
+        """
+        if not self._running_refreshes:
+            self._refreshes_done = threading.Event()
+        self._running_refreshes += 1
+
+    def _refresh_ended(self) -> None:
+        """
+        Count a topology refresh started by _refresh_started as ended, and wake
+        the commands waiting for the running refreshes once none is left.
+        """
+        with self._lock:
+            self._running_refreshes -= 1
+            if self._running_refreshes:
+                return
+            refreshes_done = self._refreshes_done
+            self._refreshes_done = None
+        refreshes_done.set()
+
+    @contextmanager
+    def _counting_running_refresh(self):
+        """
+        Count the topology refresh of the block as running while it runs.
+        """
+        with self._lock:
+            self._refresh_started()
+        try:
+            yield
+        finally:
+            self._refresh_ended()
+
     def _error_instead_of_retry(
         self, error: Exception, last_refresh_at: Optional[float]
     ) -> Optional[Exception]:
@@ -3951,6 +4106,7 @@ class NodesManager:
             disconnect_startup_nodes_pools = (
                 self._requested_disconnect_startup_nodes_pools
             )
+            self._refresh_started()
         try:
             self.initialize(
                 additional_startup_nodes_info=additional_startup_nodes_info,
@@ -3980,6 +4136,8 @@ class NodesManager:
                 disconnect_startup_nodes_pools=disconnect_startup_nodes_pools,
             )
             raise
+        finally:
+            self._refresh_ended()
 
     def _current_topology_nodes(
         self,
@@ -4101,7 +4259,10 @@ class NodesManager:
         if additional_startup_nodes_info is None:
             additional_startup_nodes_info = []
 
+        # Counted as running before the lock is taken: a refresh waiting for
+        # another to end is running as well
         with (
+            self._counting_running_refresh(),
             self._initialization_lock,
             self._initializing_on_this_thread(),
             self._counting_failed_refresh(),
@@ -6544,11 +6705,18 @@ class PipelineStrategy(AbstractStrategy):
         # retries (see NodesManager._error_instead_of_retry)
         last_error: Optional[Exception] = None
         last_refresh_at: Optional[float] = None
+        # Whether the retry waits for the topology refresh the connection error
+        # of the previous attempt asked for: the commands go to the same nodes
+        waits_for_refresh = False
         while True:
             # Run a topology refresh an earlier error asked for, once due
             if self._nodes_manager._refresh_requested:
                 self._nodes_manager._run_requested_refresh(self._pipe.retry)
             if last_error is not None:
+                if waits_for_refresh:
+                    # The refresh may be running on another thread; the slot
+                    # map it brings routes this retry
+                    self._nodes_manager._wait_for_running_refresh()
                 outage_error = self._nodes_manager._error_instead_of_retry(
                     last_error, last_refresh_at
                 )
@@ -6585,6 +6753,17 @@ class PipelineStrategy(AbstractStrategy):
                     # Space the attempts out as the retry backoff says
                     delay = self._pipe._retry_backoff_delay(
                         self._pipe.retry, failure_count
+                    )
+                    # A node that refused or dropped the connection gets the
+                    # commands of its slots again until a refresh moves them,
+                    # so the retry waits for a refresh another thread is
+                    # running, unless the error came from a key lookup, which
+                    # the retry sends to another node. Reads that rotate
+                    # through the nodes of a shard still wait: the pipeline
+                    # resends them one after another, so some go to the failed
+                    # node again
+                    waits_for_refresh = type(e) is ConnectionError and not getattr(
+                        e, "retry_goes_elsewhere", False
                     )
                     if delay > 0:
                         time.sleep(delay)
