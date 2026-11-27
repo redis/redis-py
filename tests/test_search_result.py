@@ -287,6 +287,21 @@ class TestParseAggregateResp3:
         assert out.cursor.cid == 42
         assert out.rows == [[b"a", b"1"], [b"a", b"2"]]
 
+    def test_null_extra_attributes_row_is_none(self):
+        """A document expiring before the field load gets a null field map,
+        which stays ``None`` as on RESP2. A missing key is an empty row."""
+        res = {
+            b"total_results": 3,
+            b"results": [
+                {b"extra_attributes": {b"title": b"still here"}},
+                {b"extra_attributes": None},
+                {},
+            ],
+        }
+        out = _make_search()._parse_aggregate_resp3(res, query=self._request())
+        assert out.total == 3
+        assert out.rows == [[b"title", b"still here"], None, []]
+
     def test_empty_or_none_response(self):
         """``None`` and an empty dict both yield an empty AggregateResult."""
         s = _make_search()
