@@ -371,7 +371,9 @@ _CACHE_OWNED_COMMAND_BB_SCRIPT = textwrap.dedent(
     # set compares ``bytes`` with ``str`` and raises ``BytesWarning`` under
     # ``-bb``. The ``GET``/``RPOP`` names reach the reject paths, ``RESET`` and
     # ``CLIENT`` reach the reset/client sets, and the padded and
-    # leading-whitespace names reach the whitespace set.
+    # leading-whitespace names reach the whitespace set. The ``bytearray`` and
+    # ``memoryview`` spellings take the third branch, which converts to
+    # ``bytes`` first and then uses the ``bytes`` sets.
     cases = [
         (("GET",), None),
         ((b"GET",), None),
@@ -385,6 +387,12 @@ _CACHE_OWNED_COMMAND_BB_SCRIPT = textwrap.dedent(
         ((b"CLIENT",), None),
         ((" CLIENT CACHING",), "CLIENT CACHING"),
         ((b" CLIENT CACHING",), "CLIENT CACHING"),
+        ((bytearray(b"GET"),), None),
+        ((memoryview(b"GET"),), None),
+        ((bytearray(b"RESET"),), "RESET"),
+        ((memoryview(b"RESET"),), "RESET"),
+        ((bytearray(b" CLIENT CACHING"),), "CLIENT CACHING"),
+        ((memoryview(b" CLIENT CACHING"),), "CLIENT CACHING"),
     ]
     for args, expected in cases:
         assert _cache_owned_command(args) == expected, args

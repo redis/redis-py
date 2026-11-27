@@ -2102,6 +2102,16 @@ _RESET_FIRST_CHARS_BYTES = frozenset((b"r", b"R"))
 _WHITESPACE_CHARS = frozenset(" \t\n\r\x0b\x0c")
 _WHITESPACE_CHARS_BYTES = frozenset(bytes((c,)) for c in b" \t\n\r\x0b\x0c")
 
+# Module-level first-character set tuples, one per spelling type, so
+# ``_cache_owned_command`` (which runs for every command on a cache-managed
+# connection) does not build a new tuple on every call.
+_STR_FIRST_CHAR_SETS = (_RESET_FIRST_CHARS, _CLIENT_FIRST_CHARS, _WHITESPACE_CHARS)
+_BYTES_FIRST_CHAR_SETS = (
+    _RESET_FIRST_CHARS_BYTES,
+    _CLIENT_FIRST_CHARS_BYTES,
+    _WHITESPACE_CHARS_BYTES,
+)
+
 # The ``CLIENT`` subcommands the cache owns. ``TRACKINGINFO`` and ``GETREDIR`` only read the
 # tracking state, so they are not here.
 _CACHE_OWNED_CLIENT_SUBCOMMANDS = frozenset(("CACHING", "TRACKING"))
@@ -2117,20 +2127,12 @@ def _cache_owned_command(args) -> str | None:
     """
     command = args[0]
     if isinstance(command, str):
-        first_char_sets = (_RESET_FIRST_CHARS, _CLIENT_FIRST_CHARS, _WHITESPACE_CHARS)
+        first_char_sets = _STR_FIRST_CHAR_SETS
     elif isinstance(command, bytes):
-        first_char_sets = (
-            _RESET_FIRST_CHARS_BYTES,
-            _CLIENT_FIRST_CHARS_BYTES,
-            _WHITESPACE_CHARS_BYTES,
-        )
+        first_char_sets = _BYTES_FIRST_CHAR_SETS
     elif isinstance(command, (bytearray, memoryview)):
         command = bytes(command)
-        first_char_sets = (
-            _RESET_FIRST_CHARS_BYTES,
-            _CLIENT_FIRST_CHARS_BYTES,
-            _WHITESPACE_CHARS_BYTES,
-        )
+        first_char_sets = _BYTES_FIRST_CHAR_SETS
     else:
         return None
     reset_first_chars, client_first_chars, whitespace_chars = first_char_sets
