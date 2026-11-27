@@ -37,7 +37,7 @@ jobs:
           profile: administrator
           profile-region: us-east-1
           async: true
-      # Secrets can't be used in `if:` conditions, so a first step checks
+      # Secrets can't be used in `if:` conditions, so an earlier step checks
       # the token and later steps are gated on its output. Without the
       # secret the job prints a warning and skips everything.
       - name: Check for the metrics token

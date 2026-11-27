@@ -8,7 +8,7 @@ The Python interface to the Redis key-value store.
 [![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/)
 [![pre-release](https://img.shields.io/github/v/release/redis/redis-py?include_prereleases&label=latest-prerelease)](https://github.com/redis/redis-py/releases)
 [![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
-[![Protected by Tracebit Community Edition](.github/assets/tracebit-badge-compact.svg)](https://community.tracebit.com/supplychainattacks)
+[![Protected by Tracebit Community Edition](https://raw.githubusercontent.com/redis/redis-py/refs/heads/master/.github/assets/tracebit-badge-compact.svg)](https://community.tracebit.com/supplychainattacks)
 
 [Installation](#installation) |  [Usage](#usage) | [Advanced Topics](#advanced-topics) | [Contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md)
 
