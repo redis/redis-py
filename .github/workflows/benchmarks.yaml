@@ -49,7 +49,7 @@ permissions:
 
 env:
   # Keep in step with CURRENT_REDIS_VERSION in integration.yaml.
-  REDIS_VERSION: '8.10.2'
+  REDIS_VERSION: '8.12.0'
   BASE_REF: ${{ inputs.base_ref || github.base_ref }}
   TEST_REF: ${{ inputs.test_ref || github.sha }}
   # Accepted slowdown or growth in percent, on top of the uncertainty rule.

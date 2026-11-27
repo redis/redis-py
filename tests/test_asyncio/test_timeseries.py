@@ -2036,3 +2036,20 @@ async def test_nrevrange_count_keeps_highest_timestamps(decoded_r: redis.Redis):
     _assert_nrange_rows(res, [[0, [0.0]], [1, [1.0]]])
     res = await decoded_r.ts().nrevrange(["{s}:a"], from_time="-", to_time="+", count=2)
     _assert_nrange_rows(res, [[4, [4.0]], [3, [3.0]]])
+
+
+@pytest.mark.redismod
+async def test_pipeline(decoded_r: redis.Redis):
+    pipeline = decoded_r.ts().pipeline()
+    pipeline.create("with_pipeline")
+    for i in range(100):
+        pipeline.add("with_pipeline", i, 1.1 * i)
+    pipeline.set("k", "v")
+    res = await pipeline.execute()
+    assert res == [True] + list(range(100)) + ["OK"]
+
+    info = await decoded_r.ts().info("with_pipeline")
+    assert_resp_response(
+        decoded_r, 99, info.get("last_timestamp"), info.get("lastTimestamp")
+    )
+    assert (await decoded_r.ts().get("with_pipeline"))[1] == 99 * 1.1
