@@ -4,6 +4,31 @@ from redis._parsers.helpers import pairs_to_dict
 from redis.commands.vectorset.commands import CallbacksOptions
 
 
+def _loads_attributes(value, **options):
+    """
+    Parse stored attribute JSON. When the client does not decode responses,
+    the attributes arrive as bytes: parse them as UTF-8 first, which is what
+    json.loads assumed and what other clients' connections store, and fall
+    back to the connection encoding the command passed along for values this
+    client wrote itself.
+    """
+    encoding = options.get(CallbacksOptions.ENCODING.value, "utf-8")
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8")
+        except UnicodeDecodeError:
+            value = value.decode(encoding)
+    return json.loads(value)
+
+
+def parse_vgetattr_result(response, **options):
+    """
+    Handle VGETATTR result since the stored attributes are JSON: parse them
+    into a dict, or None when the element has none.
+    """
+    return response and _loads_attributes(response, **options) or None
+
+
 def parse_vemb_result(response, **options):
     """
     Handle VEMB result since the command can returning different result
@@ -119,7 +144,7 @@ def parse_vsim_result(response, **options):
             if withscores:
                 value = float(value)
             else:
-                value = json.loads(value) if value else None
+                value = _loads_attributes(value, **options) if value else None
 
             result_dict[key] = value
         return result_dict
@@ -129,14 +154,14 @@ def parse_vsim_result(response, **options):
         if options.get(CallbacksOptions.RESP3.value):
             for elem, data in response.items():
                 if data[1] is not None:
-                    attribs_dict = json.loads(data[1])
+                    attribs_dict = _loads_attributes(data[1], **options)
                 else:
                     attribs_dict = None
                 result_dict[elem] = {"score": data[0], "attributes": attribs_dict}
         else:
             for elem, score, attribs in zip(it, it, it):
                 if attribs is not None:
-                    attribs_dict = json.loads(attribs)
+                    attribs_dict = _loads_attributes(attribs, **options)
                 else:
                     attribs_dict = None
 

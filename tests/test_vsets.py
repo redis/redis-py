@@ -524,6 +524,60 @@ def test_vsim_with_filter(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+@pytest.mark.parametrize("command", ["vadd", "vsetattr"])
+def test_vsim_filter_unicode_attributes(d_client, command):
+    vset = d_client.vset()
+    vector = [1.0, 0.0]
+    attributes = {"name": "Zürich"}
+    json_attributes = '{"name": "Zürich"}'
+
+    if command == "vadd":
+        assert vset.vadd("cities", vector, "dict", attributes=attributes) == 1
+        assert vset.vadd("cities", vector, "json", attributes=json_attributes) == 1
+    else:
+        assert vset.vadd("cities", vector, "dict") == 1
+        assert vset.vadd("cities", vector, "json") == 1
+        assert vset.vsetattr("cities", "dict", attributes) == 1
+        assert vset.vsetattr("cities", "json", json_attributes) == 1
+
+    assert vset.vgetattr("cities", "dict") == attributes
+    assert set(vset.vsim("cities", vector, filter='.name == "Zürich"')) == {
+        "dict",
+        "json",
+    }
+
+
+@skip_if_server_version_lt("7.9.0")
+def test_unicode_attributes_round_trip_with_custom_encoding(request):
+    attributes = {"name": "Zürich"}
+    r = _get_client(redis.Redis, request, encoding="latin-1", decode_responses=False)
+    r.delete("cities")
+    vset = r.vset()
+
+    assert vset.vadd("cities", [1.0, 0.0], "elem", attributes=attributes) == 1
+    assert vset.vgetattr("cities", "elem") == attributes
+    assert vset.vsetattr("cities", "elem", attributes) == 1
+    assert vset.vsim("cities", [1.0, 0.0], with_attribs=True) == {b"elem": attributes}
+    assert set(vset.vsim("cities", [1.0, 0.0], filter='.name == "Zürich"')) == {b"elem"}
+
+    # Attributes a default UTF-8 connection wrote still parse as UTF-8.
+    utf8 = _get_client(redis.Redis, request, decode_responses=False)
+    utf8.delete("utf8_cities")
+    assert (
+        utf8.vset().vadd("utf8_cities", [1.0, 0.0], "elem", attributes=attributes) == 1
+    )
+    assert vset.vgetattr("utf8_cities", "elem") == attributes
+
+    # A character the connection encoding cannot carry keeps the lossless
+    # ASCII escapes.
+    unencodable = {"name": "東京"}
+    assert vset.vadd("latin1_cities", [1.0, 0.0], "elem", attributes=unencodable) == 1
+    assert vset.vgetattr("latin1_cities", "elem") == unencodable
+    assert vset.vsetattr("latin1_cities", "elem", unencodable) == 1
+    assert vset.vgetattr("latin1_cities", "elem") == unencodable
+
+
+@skip_if_server_version_lt("7.9.0")
 def test_vsim_truth_no_thread_enabled(d_client):
     elements_count = 100
     vector_dim = 50

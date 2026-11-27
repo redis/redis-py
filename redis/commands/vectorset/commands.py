@@ -66,6 +66,7 @@ class CallbacksOptions(Enum):
     WITHATTRIBS = "WITHATTRIBS"
     ALLOW_DECODING = "ALLOW_DECODING"
     RESP3 = "RESP3"
+    ENCODING = "ENCODING"
 
 
 class VectorSetCommands(CommandsProtocol):
@@ -132,8 +133,9 @@ class VectorSetCommands(CommandsProtocol):
         ``ef`` sets the exploration factor to use.
                 If not provided, the default exploration factor is used.
 
-        ``attributes`` is a dictionary or json string that contains the attributes to set for the vector.
+        ``attributes`` is a dictionary or JSON string that contains the attributes to set for the vector.
                 If not provided, no attributes are set.
+                Dictionary attributes are serialized with literal non-ASCII characters for filtering.
                 An empty dictionary replaces existing attributes with an empty object;
                 an empty string removes them. None leaves existing attributes unchanged.
 
@@ -170,8 +172,7 @@ class VectorSetCommands(CommandsProtocol):
 
         if attributes is not None:
             if isinstance(attributes, dict):
-                # transform attributes to json string
-                attributes_json = json.dumps(attributes)
+                attributes_json = self._attributes_json(attributes)
             else:
                 attributes_json = attributes
             pieces.extend(["SETATTR", attributes_json])
@@ -180,6 +181,24 @@ class VectorSetCommands(CommandsProtocol):
             pieces.extend(["M", numlinks])
 
         return self.execute_command(VADD_CMD, key, *pieces)
+
+    def _attributes_encoding(self) -> str:
+        # Dictionary attributes are serialized and stored with the connection
+        # encoding, so the callbacks that parse them back need the same one.
+        get_connection_kwargs = getattr(self.client, "get_connection_kwargs", None)
+        if get_connection_kwargs is None:
+            return "utf-8"
+        return get_connection_kwargs().get("encoding", "utf-8")
+
+    def _attributes_json(self, attributes: dict) -> str:
+        # Literal non-ASCII characters let the server match filters, but a
+        # connection that cannot carry them keeps the lossless ASCII escapes.
+        attributes_json = json.dumps(attributes, ensure_ascii=False)
+        try:
+            attributes_json.encode(self._attributes_encoding())
+        except UnicodeEncodeError:
+            attributes_json = json.dumps(attributes)
+        return attributes_json
 
     @overload
     def vsim(
@@ -281,6 +300,7 @@ class VectorSetCommands(CommandsProtocol):
             if with_attribs:
                 pieces.append("WITHATTRIBS")
                 options[CallbacksOptions.WITHATTRIBS.value] = True
+                options[CallbacksOptions.ENCODING.value] = self._attributes_encoding()
 
         if count:
             pieces.extend(["COUNT", count])
@@ -493,13 +513,14 @@ class VectorSetCommands(CommandsProtocol):
         Associate or remove JSON attributes ``attributes`` of element ``element``
         for vector set ``key``.
 
+        Dictionary attributes are serialized with literal non-ASCII characters for filtering.
+
         For more information, see https://redis.io/commands/vsetattr
         """
         if attributes is None:
             attributes_json = "{}"
         elif isinstance(attributes, dict):
-            # transform attributes to json string
-            attributes_json = json.dumps(attributes)
+            attributes_json = self._attributes_json(attributes)
         else:
             attributes_json = attributes
 
@@ -526,7 +547,12 @@ class VectorSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/vgetattr.
         """
-        return self.execute_command(VGETATTR_CMD, key, element)
+        return self.execute_command(
+            VGETATTR_CMD,
+            key,
+            element,
+            **{CallbacksOptions.ENCODING.value: self._attributes_encoding()},
+        )
 
     @overload
     def vrandmember(

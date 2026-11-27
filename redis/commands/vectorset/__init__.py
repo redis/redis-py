@@ -1,10 +1,10 @@
-import json
 from typing import Literal
 
 from redis._parsers.helpers import pairs_to_dict
 from redis.commands.vectorset.utils import (
     parse_vemb_result,
     parse_vemb_result_unified,
+    parse_vgetattr_result,
     parse_vlinks_result,
     parse_vsim_result,
 )
@@ -36,7 +36,7 @@ class _VectorSetBase(VectorSetCommands):
         _MODULE_CALLBACKS = {  # noqa: N806
             VEMB_CMD: parse_vemb_result,
             VSIM_CMD: parse_vsim_result,
-            VGETATTR_CMD: lambda r: r and json.loads(r) or None,
+            VGETATTR_CMD: parse_vgetattr_result,
         }
 
         self._RESP2_MODULE_CALLBACKS = {
