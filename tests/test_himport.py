@@ -874,6 +874,9 @@ class TestHImportAskRedirectAsyncCluster:
             node = mock.Mock()
             node._himport_reconcile_discards = mock.AsyncMock()
             node.parse_response = mock.AsyncMock(side_effect=["OK", 1])
+            node.send_asking_with_command = (
+                async_cluster_mod.ClusterNode.send_asking_with_command.__get__(node)
+            )
             resp = await async_cluster_mod.ClusterNode._himport_execute_set(
                 node, conn, "k", "fs", ["v"], asking=True
             )
@@ -904,6 +907,9 @@ class TestHImportAskRedirectAsyncCluster:
             )
             node._himport_prepare_and_set = (
                 async_cluster_mod.ClusterNode._himport_prepare_and_set.__get__(node)
+            )
+            node.send_asking_with_command = (
+                async_cluster_mod.ClusterNode.send_asking_with_command.__get__(node)
             )
             resp = await async_cluster_mod.ClusterNode._himport_execute_set(
                 node, conn, "k", "fs", ["v"], asking=True
@@ -959,6 +965,9 @@ class TestHImportAskRedirectAsyncCluster:
             node._himport_reconcile_discards = mock.AsyncMock()
             node.parse_response = mock.AsyncMock(
                 side_effect=[ResponseError("bad ASKING"), 1]  # ASKING errs, SET drained
+            )
+            node.send_asking_with_command = (
+                async_cluster_mod.ClusterNode.send_asking_with_command.__get__(node)
             )
             with pytest.raises(ResponseError, match="bad ASKING"):
                 await async_cluster_mod.ClusterNode._himport_execute_set(

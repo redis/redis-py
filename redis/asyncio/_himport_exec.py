@@ -138,23 +138,12 @@ async def execute_set(node, conn, key, fieldset_name, values, asking=False):
     # Believed already prepared (or an unregistered fieldset): bare SET, with
     # ASKING packed immediately before it when this is an ASK redirect.
     if asking:
-        await conn.send_packed_command(
-            conn.pack_commands(
-                [("ASKING",), himport_set_command(key, fieldset_name, values)]
-            )
+        # ASKING and the SET go out in one write on this connection, and the SET
+        # reply is drained if ASKING fails; ``node`` is the owning ClusterNode,
+        # since only the cluster client sets ``asking``.
+        await node.send_asking_with_command(
+            conn, himport_set_command(key, fieldset_name, values), HIMPORT_SET
         )
-        try:
-            await node.parse_response(conn, "ASKING")
-        except ResponseError as ask_error:
-            # ASKING and SET were one packed write, so the SET reply is still
-            # queued. Drain it before surfacing the ASKING error, otherwise the
-            # connection returns to the pool with an unread reply and desyncs the
-            # next borrower.
-            try:
-                await node.parse_response(conn, HIMPORT_SET)
-            except ResponseError:
-                pass
-            raise ask_error
     else:
         await conn.send_command(*himport_set_command(key, fieldset_name, values))
     try:
