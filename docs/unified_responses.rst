@@ -346,7 +346,7 @@ Probabilistic
      - ``1``
      - ``True``
    * - ``BF.MADD``, ``BF.INSERT``, ``BF.MEXISTS``, ``CF.INSERT``, ``CF.MEXISTS``, ``TOPK.QUERY``
-     - Integer list elements become booleans, as on RESP3; ``CF.INSERT`` keeps its ``-1`` elements.
+     - Integer list elements become booleans, as on RESP3; ``CF.INSERT`` maps its ``-1`` "filter full" elements to ``False``.
      - ``[1, 0]``
      - ``[True, False]``
    * - ``TDIGEST.BYRANK``, ``TDIGEST.BYREVRANK``, ``TDIGEST.CDF``, ``TDIGEST.QUANTILE``

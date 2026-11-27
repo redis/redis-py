@@ -789,9 +789,24 @@ def test_bloom_bool_reply_types(request, stack_url, client_kwargs, expected_type
             cf.mexists("cuckoo", "new", "missing"),
             cf.insert("cuckoo", ["added", "new"]),
         ]
-        assert arrays == [[1, 0], [1, 0]]
+        # CF.INSERT allows duplicates, so inserting "new" a second time
+        # still succeeds.
+        assert arrays == [[1, 0], [1, 1]]
         for result in arrays:
             assert [type(value) for value in result] == [expected_type] * 2
+
+        # A full cuckoo filter answers -1 on RESP2 and false on RESP3,
+        # never 0. Reserve a tiny filter that cannot grow, then insert
+        # distinct items until one does not fit.
+        assert cf.create("full", 100, expansion=0, bucket_size=1, max_iterations=1)
+        full = None
+        for i in range(150):
+            result = cf.insert("full", [f"item{i}"], nocreate=True)
+            if result == [-1] or result == [False]:
+                full = result
+                break
+        assert full == ([-1] if expected_type is int else [False])
+        assert [type(value) for value in full] == [expected_type]
 
         topk = client.topk()
         assert topk.reserve("topk", 3, 50, 4, 0.9)
@@ -802,12 +817,23 @@ def test_bloom_bool_reply_types(request, stack_url, client_kwargs, expected_type
 
 
 def test_bloom_bool_list_parsers():
-    # CF.INSERT answers -1 for an item that did not fit, and BF.INSERT and
-    # BF.MADD can carry string or error elements; RESP3 sends all of those
-    # as-is, so the list parsers only convert 0/1 integers and booleans.
+    # BF.INSERT and BF.MADD can carry string or error elements; RESP3 sends
+    # all of those as-is, so the generic list parsers only convert 0/1
+    # integers and booleans.
     parse_bool = redis.commands.bf._parse_to_bool_list
     parse_int = redis.commands.bf._parse_to_int_list
-    assert parse_bool([1, 0, -1, "full"]) == [True, False, -1, "full"]
-    assert parse_int([True, False, -1, "full"]) == [1, 0, -1, "full"]
+    assert parse_bool([1, 0, "full"]) == [True, False, "full"]
+    assert parse_int([True, False, "full"]) == [1, 0, "full"]
     assert [type(value) for value in parse_bool([1, 0])] == [bool, bool]
     assert [type(value) for value in parse_int([True, False])] == [int, int]
+    # CF.INSERT answers -1 on RESP2 and false on RESP3 for an item that did
+    # not fit, never 0: unified responses map -1 to False, and the default
+    # client maps false back to -1.
+    parse_cf_bool = redis.commands.bf._parse_cf_insert_to_bool_list
+    parse_cf_int = redis.commands.bf._parse_cf_insert_to_int_list
+    assert parse_cf_bool([1, 0, -1]) == [True, False, False]
+    assert parse_cf_bool([True, False]) == [True, False]
+    assert parse_cf_int([True, False]) == [1, -1]
+    assert parse_cf_int([1, -1]) == [1, -1]
+    assert [type(value) for value in parse_cf_bool([1, -1])] == [bool, bool]
+    assert [type(value) for value in parse_cf_int([True, False])] == [int, int]

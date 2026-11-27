@@ -739,9 +739,24 @@ async def test_bloom_bool_reply_types(
         await cf.mexists("cuckoo", "new", "missing"),
         await cf.insert("cuckoo", ["added", "new"]),
     ]
-    assert arrays == [[1, 0], [1, 0]]
+    # CF.INSERT allows duplicates, so inserting "new" a second time
+    # still succeeds.
+    assert arrays == [[1, 0], [1, 1]]
     for result in arrays:
         assert [type(value) for value in result] == [expected_type] * 2
+
+    # A full cuckoo filter answers -1 on RESP2 and false on RESP3,
+    # never 0. Reserve a tiny filter that cannot grow, then insert
+    # distinct items until one does not fit.
+    assert await cf.create("full", 100, expansion=0, bucket_size=1, max_iterations=1)
+    full = None
+    for i in range(150):
+        result = await cf.insert("full", [f"item{i}"], nocreate=True)
+        if result == [-1] or result == [False]:
+            full = result
+            break
+    assert full == ([-1] if expected_type is int else [False])
+    assert [type(value) for value in full] == [expected_type]
 
     topk = client.topk()
     assert await topk.reserve("topk", 3, 50, 4, 0.9)

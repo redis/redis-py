@@ -27,9 +27,9 @@ def _parse_topk_info_resp2_unified(response):
 def _parse_to_bool_list(response):
     """Parse a list of 1/0 replies, which RESP3 sends as booleans.
 
-    Elements that are not 0/1 integers are left untouched: CF.INSERT
-    answers -1 for an item that did not fit, and BF.INSERT and BF.MADD
-    can carry string or error elements, all of which RESP3 sends as-is.
+    Elements that are not 0/1 integers are left untouched: BF.INSERT
+    and BF.MADD can carry string or error elements, all of which RESP3
+    sends as-is.
     """
     return [
         bool(item) if type(item) is int and item in (0, 1) else item
@@ -40,6 +40,31 @@ def _parse_to_bool_list(response):
 def _parse_to_int_list(response):
     """Parse a list of boolean replies back to the RESP2 1/0 integers."""
     return [int(item) if type(item) is bool else item for item in response]
+
+
+def _parse_cf_insert_to_bool_list(response):
+    """Parse a CF.INSERT list of 1/0 replies to booleans.
+
+    A full filter answers -1 on RESP2 and false on RESP3, never 0, so
+    -1 maps to False just like 0 does.
+    """
+    return [
+        True
+        if item is True or (type(item) is int and item == 1)
+        else False
+        if item is False or (type(item) is int and item in (0, -1))
+        else item
+        for item in response
+    ]
+
+
+def _parse_cf_insert_to_int_list(response):
+    """Parse a CF.INSERT list of boolean replies back to RESP2 integers.
+
+    RESP3 answers false for an item that did not fit, which is -1 on
+    RESP2, not 0.
+    """
+    return [1 if item is True else -1 if item is False else item for item in response]
 
 
 class AbstractBloom:
@@ -253,13 +278,16 @@ class _CFBloomBase(CFCommands, AbstractBloom):
         # lists of the same. Unified responses are booleans on both
         # protocols, and the default client keeps the RESP2 integers.
         # (CF.INSERTNX answers with integers on both protocols.)
+        # On a full filter CF.INSERT answers -1 on RESP2 and false on
+        # RESP3, never 0: the default client returns -1 and unified
+        # responses map it to False.
         _RESP2_UNIFIED_MODULE_CALLBACKS = {
             **_RESP2_MODULE_CALLBACKS,
             CF_ADD: bool,
             CF_ADDNX: bool,
             CF_EXISTS: bool,
             CF_DEL: bool,
-            CF_INSERT: _parse_to_bool_list,
+            CF_INSERT: _parse_cf_insert_to_bool_list,
             CF_MEXISTS: _parse_to_bool_list,
         }
         _RESP3_UNIFIED_MODULE_CALLBACKS = {
@@ -271,7 +299,7 @@ class _CFBloomBase(CFCommands, AbstractBloom):
             CF_ADDNX: int,
             CF_EXISTS: int,
             CF_DEL: int,
-            CF_INSERT: _parse_to_int_list,
+            CF_INSERT: _parse_cf_insert_to_int_list,
             CF_MEXISTS: _parse_to_int_list,
         }
 
