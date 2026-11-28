@@ -1248,6 +1248,18 @@ class TestConnectionPoolURLParsing:
         assert unix_pool.connection_class == redis.UnixDomainSocketConnection
         assert_kwargs_subset(unix_pool.connection_kwargs, {"path": "/tmp/redis.sock"})
 
+    def test_ismaster_querystring(self):
+        pool = redis.ConnectionPool.from_url("redis://localhost/1?is_master=0")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(
+            pool.connection_kwargs,{"host": "localhost", "db": 1, "is_master": False}
+        )
+        pool = redis.ConnectionPool.from_url("redis://localhost/1?is_master=false")
+        assert pool.connection_class == redis.Connection
+        assert_kwargs_subset(
+            pool.connection_kwargs,{"host": "localhost", "db": 1, "is_master": False}
+        )
+
 
 @pytest.mark.fixed_client
 class TestBlockingConnectionPoolURLParsing:
