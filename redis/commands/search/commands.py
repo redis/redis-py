@@ -2,7 +2,7 @@ import itertools
 import time
 from typing import Any, Awaitable, Dict, List, Optional, Set, Union
 
-from redis._parsers.helpers import pairs_to_dict
+from redis._parsers.helpers import _score_to_resp2_reply, pairs_to_dict
 from redis.asyncio.client import Pipeline as AsyncioPipeline
 from redis.client import NEVER_DECODE, Pipeline
 from redis.commands.search.hybrid_query import (
@@ -774,18 +774,13 @@ class SearchCommands:
             term_corrections = []
             for suggestion_dict in suggestions:
                 for suggestion, score in suggestion_dict.items():
-                    # Normalize score to match RESP2's string form: RESP3
-                    # returns a float (e.g. ``0.0``) but RESP2 returns the
-                    # string ``"0"``.
-                    score_str = str(score)
-                    if score_str.endswith(".0"):
-                        score_str = score_str[:-2]
-                    # Preserve ``suggestion`` as-is so it keeps the
-                    # ``decode_responses`` shape RESP2 would produce
-                    # (``str`` when decoded, ``bytes`` otherwise), and give
-                    # the score the same type.
-                    if isinstance(suggestion, bytes):
-                        score_str = score_str.encode()
+                    # RESP3 sends the score as a double. Render it as the
+                    # RESP2 reply text (``0.00005``, not ``5e-05``) and give
+                    # it the suggestion's type, as RESP2 would: ``str`` when
+                    # decoded, ``bytes`` otherwise.
+                    score_str = _score_to_resp2_reply(
+                        score, decode=not isinstance(suggestion, bytes)
+                    )
                     term_corrections.append(
                         {"score": score_str, "suggestion": suggestion}
                     )

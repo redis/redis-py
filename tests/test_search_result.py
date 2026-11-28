@@ -344,6 +344,17 @@ class TestParseSpellcheckResp3:
         # ``decode_responses=False``) so the legacy path matches RESP2.
         assert suggestions[0]["suggestion"] == b"important"
 
+    @pytest.mark.parametrize(
+        "term, suggestion, expected",
+        [("vlis", "vlas", "0.00005"), (b"vlis", b"vlas", b"0.00005")],
+    )
+    def test_small_score_uses_redis_double_text(self, term, suggestion, expected):
+        """RESP2 sends ``0.00005`` for a score below 1e-4, where ``str()``
+        would give ``5e-05``."""
+        s = _make_search()
+        out = s._parse_spellcheck_resp3({"results": {term: [{suggestion: 5e-05}]}})
+        assert out[term] == [{"score": expected, "suggestion": suggestion}]
+
     def test_no_corrections_returns_empty(self):
         """Term with no candidate suggestions still yields ``{}``."""
         s = _make_search()
