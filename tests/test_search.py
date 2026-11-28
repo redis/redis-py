@@ -6923,10 +6923,11 @@ _SEARCH_BYTES_PROTOCOLS = [
 ]
 
 
-def _make_bytes_search_client(request, stack_url, protocol):
+def _make_bytes_search_client(request, stack_url, protocol, **extra):
     kwargs = {
         "decode_responses": False,
         "from_url": stack_url,
+        **extra,
     }
     if protocol is not SENTINEL:
         kwargs["protocol"] = protocol
@@ -7004,10 +7005,13 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
     @pytest.mark.redismod
     @pytest.mark.fixed_client
     @pytest.mark.parametrize("protocol", _SEARCH_BYTES_PROTOCOLS)
+    @pytest.mark.parametrize("legacy", [True, False], ids=["legacy", "unified"])
     # Redis Enterprise's search module returns a different RESP3 result shape here.
     @skip_if_redis_enterprise()
-    def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol):
-        client = _make_bytes_search_client(request, stack_url, protocol)
+    def test_spellcheck_resp3_bytes_keys(self, request, stack_url, protocol, legacy):
+        client = _make_bytes_search_client(
+            request, stack_url, protocol, legacy_responses=legacy
+        )
         client.ft().create_index((TextField("f1"),))
         client.hset("doc1", mapping={"f1": "some valid content"})
         client.hset("doc2", mapping={"f1": "very important"})
@@ -7024,6 +7028,7 @@ class TestSearchResp3BytesKeys(SearchTestsBase):
         suggestions = res[b"impornant"]
         assert suggestions
         assert suggestions[0]["suggestion"] == b"important"
+        assert suggestions[0]["score"] == b"0.5"
 
 
 def _queue_parsed_commands(ft):
