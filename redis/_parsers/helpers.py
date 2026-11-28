@@ -891,6 +891,8 @@ def parse_xclaim(response, **options):
 
 def parse_xautoclaim(response, **options):
     if options.get("parse_justid", False):
+        if options.get("full_response", False):
+            return response
         return response[1]
     response[1] = parse_stream_list(response[1])
     return response
