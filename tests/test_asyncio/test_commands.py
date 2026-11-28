@@ -6169,6 +6169,49 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False)
         assert await r.xlen(stream) == 2
 
+    @skip_if_server_version_lt("7.0.0")
+    async def test_xautoclaim_justid_full_response(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        for i in range(1, 12):
+            await r.xadd(stream, {"value": i}, id=f"{i}-0")
+        await r.xgroup_create(stream, group, 0)
+        await r.xreadgroup(group, "original", streams={stream: ">"})
+        await r.xclaim(
+            stream, group, "original", 0, [b"11-0"], idle=120_000, justid=True
+        )
+
+        args = (stream, group, "recovery", 60_000)
+        assert await r.xautoclaim(*args, count=1, justid=True) == []
+
+        # Exercise the callback through Redis.execute_command as well as xautoclaim.
+        first_page = await r.execute_command(
+            "XAUTOCLAIM",
+            *args,
+            "0-0",
+            "COUNT",
+            1,
+            "JUSTID",
+            parse_justid=True,
+            full_response=True,
+        )
+        assert first_page == [b"11-0", [], []]
+
+        assert (
+            await r.xautoclaim(*args, count=1, justid=True, full_response=True)
+            == first_page
+        )
+        assert await r.xautoclaim(
+            *args, start_id=first_page[0], count=1, justid=True, full_response=True
+        ) == [b"0-0", [b"11-0"], []]
+        pending = await r.xpending_range(stream, group, b"11-0", b"11-0", 1)
+        assert pending[0]["times_delivered"] == 1
+
+        await r.xdel(stream, b"11-0")
+        assert await r.xautoclaim(
+            *args, start_id=b"11-0", count=1, justid=True, full_response=True
+        ) == [b"0-0", [], [b"11-0"]]
+
     @skip_if_server_version_lt("6.2.0")
     async def test_xautoclaim_negative(self, r: redis.Redis):
         stream = "stream"

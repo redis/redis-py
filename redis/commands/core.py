@@ -8040,6 +8040,8 @@ class StreamCommands(CommandsProtocol):
         start_id: StreamIdT = "0-0",
         count: int | None = None,
         justid: bool = False,
+        *,
+        full_response: bool = False,
     ) -> list[Any]: ...
 
     @overload
@@ -8052,6 +8054,8 @@ class StreamCommands(CommandsProtocol):
         start_id: StreamIdT = "0-0",
         count: int | None = None,
         justid: bool = False,
+        *,
+        full_response: bool = False,
     ) -> Awaitable[list[Any]]: ...
 
     def xautoclaim(
@@ -8063,22 +8067,30 @@ class StreamCommands(CommandsProtocol):
         start_id: StreamIdT = "0-0",
         count: int | None = None,
         justid: bool = False,
+        *,
+        full_response: bool = False,
     ) -> list[Any] | Awaitable[list[Any]]:
         """
         Transfers ownership of pending stream entries that match the specified
         criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
         but provides a more straightforward way to deal with message delivery
         failures via SCAN-like semantics.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        consumername: name of a consumer that claims the message.
-        min_idle_time: filter messages that were idle less than this amount of
-        milliseconds.
-        start_id: filter messages with equal or greater ID.
-        count: optional integer, upper limit of the number of entries that the
-        command attempts to claim. Set to 100 by default.
-        justid: optional boolean, false by default. Return just an array of IDs
-        of messages successfully claimed, without returning the actual message
+
+        Args:
+            name: Name of the stream.
+            groupname: Name of the consumer group.
+            consumername: Name of the consumer claiming the entries.
+            min_idle_time: Minimum idle time in milliseconds for an entry
+                to be eligible for claiming.
+            start_id: First stream ID to consider for claiming, inclusive.
+            count: Maximum number of entries to claim. Redis defaults to 100.
+            justid: Claim entries without returning their payloads or
+                incrementing their delivery counters. By default, return only
+                the claimed IDs.
+            full_response: With ``justid=True``, return the next scan cursor
+                and claimed IDs, followed by deleted pending IDs on Redis 7.0
+                and later. With ``justid=False``, return the regular reply
+                with message payloads.
 
         For more information, see https://redis.io/commands/xautoclaim
         """
@@ -8102,6 +8114,8 @@ class StreamCommands(CommandsProtocol):
         if justid:
             pieces.append(b"JUSTID")
             kwargs["parse_justid"] = True
+            if full_response:
+                kwargs["full_response"] = True
 
         return self.execute_command("XAUTOCLAIM", *pieces, **kwargs)
 
