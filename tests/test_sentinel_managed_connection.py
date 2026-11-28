@@ -8,6 +8,7 @@ import redis
 from redis.retry import Retry
 from redis.sentinel import SentinelConnectionPool, SentinelManagedConnection
 from redis.backoff import NoBackoff
+from redis.observability.metrics import CloseReason
 from redis.utils import SENTINEL
 from unittest import mock
 
@@ -339,15 +340,21 @@ class TestSentinelManagedConnectionDemotedMaster:
         conn = self._connect(master_host)
         try:
             conn.send_command("PING")
-            with mock.patch.object(
-                conn._parser,
-                "read_response",
-                return_value=redis.ResponseError(DEMOTION_ERROR),
+            unblocked = redis.ResponseError(DEMOTION_ERROR)
+            with (
+                mock.patch.object(
+                    conn._parser, "read_response", return_value=unblocked
+                ),
+                mock.patch("redis.connection.record_connection_closed") as closed,
             ):
                 with pytest.raises(redis.ConnectionError) as e:
                     conn.read_response()
             assert str(e.value) == "The previous master is now a slave"
             assert conn._sock is None
+            # The close is recorded as one the error caused
+            closed.assert_called_once_with(
+                close_reason=CloseReason.ERROR, error_type=unblocked
+            )
         finally:
             conn.disconnect()
 

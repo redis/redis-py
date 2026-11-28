@@ -3,6 +3,7 @@ from typing import Literal
 import redis
 from redis._parsers.helpers import bool_ok
 
+from ...asyncio.client import Pipeline as AsyncioPipeline
 from ..helpers import (
     apply_module_callbacks,
     get_legacy_responses,
@@ -174,9 +175,25 @@ class Pipeline(TimeSeriesCommands, redis.client.Pipeline):
     """Pipeline for the module."""
 
 
+class AsyncPipeline(TimeSeriesCommands, AsyncioPipeline):
+    """Asyncio pipeline for the module."""
+
+
 class TimeSeries(_TimeSeriesBase):
     _is_async_client: Literal[False] = False
 
 
 class AsyncTimeSeries(_TimeSeriesBase):
     _is_async_client: Literal[True] = True
+
+    def pipeline(self, transaction=True, shard_hint=None):
+        """Creates an asyncio pipeline for the TimeSeries module, that can be
+        used for executing TimeSeries commands and core commands.
+        """
+        p = AsyncPipeline(
+            connection_pool=self.client.connection_pool,
+            response_callbacks=self._MODULE_CALLBACKS,
+            transaction=transaction,
+            shard_hint=shard_hint,
+        )
+        return p

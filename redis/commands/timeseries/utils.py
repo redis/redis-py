@@ -1,5 +1,11 @@
 from ..helpers import nativestr
 
+# With GROUPBY and WITHLABELS, RESP2 reports the reducer and the sources as
+# these labels. RESP3 reports them outside the labels.
+_REDUCE_PSEUDO_LABELS = frozenset(
+    ("__reducer__", "__source__", b"__reducer__", b"__source__")
+)
+
 
 def list_to_dict(aList):
     return {nativestr(aList[i][0]): nativestr(aList[i][1]) for i in range(len(aList))}
@@ -198,10 +204,16 @@ def parse_m_range_unified(response, **kwargs):
             res[key] = [item[0], metadata, parse_range_unified(item[-1])]
         return res
     res = {}
-    metadata = _m_range_metadata(kwargs.get("aggregation_type"), kwargs.get("reduce"))
+    reduce = kwargs.get("reduce")
+    metadata = _m_range_metadata(kwargs.get("aggregation_type"), reduce)
     for item in response:
+        if reduce is not None:
+            # Drop the RESP2 reducer and source labels to match RESP3.
+            labels = {k: v for k, v in item[1] if k not in _REDUCE_PSEUDO_LABELS}
+        else:
+            labels = _pairs_to_dict(item[1])
         res[item[0]] = [
-            _pairs_to_dict(item[1]),
+            labels,
             metadata,
             parse_range_unified(item[2]),
         ]

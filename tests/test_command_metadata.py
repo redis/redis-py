@@ -2216,12 +2216,11 @@ class TestStaticMetadataAgainstServer:
 
         A command the table carries must keep the table's verdict, so a server that starts
         reporting something the table contradicts cannot silently change what is cached. The
-        broadening is pinned by size rather than command by command, because it is dominated by
-        module surfaces whose metadata moves with the module version rather than with this
-        client - a count still moves when the image does, but it moves visibly, which is the
-        point. Regenerate it by printing ``sorted(eligible - allow_list)`` here.
+        commands the fallback adds are not pinned: they come from the server's own metadata,
+        which changes with every server and module build, released or not.
         """
-        chain = StaticMetadataResolver().with_fallback(
+        static_resolver = StaticMetadataResolver()
+        chain = static_resolver.with_fallback(
             DynamicMetadataResolver(
                 _load_commands_metadata_cache(CommandsParser(stack_r))
             )
@@ -2229,11 +2228,8 @@ class TestStaticMetadataAgainstServer:
         table_names = {resolver_name for _, _, resolver_name in static_table_names()}
         allow_list = {name.lower() for name in CacheConfig.DEFAULT_ALLOW_LIST}
 
-        eligible = {
-            name.lower()
-            for name in stack_r.command()
-            if chain.is_cacheable(name.lower())
-        }
+        command_names = {name.lower() for name in stack_r.command()}
+        eligible = {name for name in command_names if chain.is_cacheable(name)}
 
         # Nothing the allow-list carried is dropped beyond the three the server itself reports
         # as not cacheable.
@@ -2245,12 +2241,13 @@ class TestStaticMetadataAgainstServer:
         assert (eligible - allow_list) & table_names == {
             name.lower() for name in NEWLY_ELIGIBLE_VS_LEGACY_ALLOW_LIST
         }
-        # And it is exactly this large, so a server or module version that starts reporting a
-        # command as cacheable when it should not be surfaces here rather than silently
-        # broadening what an opt-in user caches. Measured against a Redis 8.11.240 stack
-        # build: 56 commands - core reads, the probabilistic, t-digest and timeseries read
-        # surfaces, and the vectorset reads.
-        assert len(eligible - allow_list) == 56
+        # Every command the table carries keeps the table's verdict, whatever the server
+        # reports for it.
+        for name in command_names & table_names:
+            assert chain.is_cacheable(name) is static_resolver.is_cacheable(name), name
+        # The fallback does broaden the surface: a core read and a module read the table does
+        # not carry are cacheable through it.
+        assert {"pfcount", "bf.exists"} <= eligible
         # And the commands the specification names stay out, whichever layer answers.
         for name in (
             "keys",
