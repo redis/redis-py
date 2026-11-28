@@ -181,9 +181,8 @@ class Query:
     def scorer(self, scorer: str) -> "Query":
         """
         Use a different scoring function to evaluate document relevance.
-        Default is `TFIDF`.
-
-        Since Redis 8.0 default was changed to BM25STD.
+        If omitted, the server default is used (`BM25STD` on Redis 8 and
+        later, `TFIDF` on earlier versions).
 
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)

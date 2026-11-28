@@ -112,7 +112,7 @@ class AggregateRequest:
         self._cursor: List[str] = []
         self._dialect: int = DEFAULT_DIALECT
         self._add_scores: bool = False
-        self._scorer: str = "TFIDF"
+        self._scorer: Optional[str] = None
 
     def load(self, *fields: str) -> "AggregateRequest":
         """
@@ -312,7 +312,8 @@ class AggregateRequest:
     def scorer(self, scorer: str) -> "AggregateRequest":
         """
         Use a different scoring function to evaluate document relevance.
-        Default is `TFIDF`.
+        If omitted, the server default is used (`BM25STD` on Redis 8 and
+        later, `TFIDF` on earlier versions).
 
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)
